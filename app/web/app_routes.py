@@ -35,12 +35,25 @@ async def _fetch_counts(db: aiosqlite.Connection, filters: dict) -> dict:
     return counts
 
 
+_SORTABLE_COLS = {
+    "mailbox": "mailbox_name",
+    "subject": "subject",
+    "sender": "sender",
+    "category": "category",
+    "status": "status",
+    "priority": "priority",
+    "date": "processed_at",
+}
+
+
 async def _fetch_mails(
     db: aiosqlite.Connection,
     box: str | None,
     category: str | None,
     status: str | None,
     priority: str | None,
+    sort_col: str = "date",
+    sort_order: str = "desc",
     limit: int = 50,
 ) -> list[dict]:
     where = ["1=1"]
@@ -58,11 +71,14 @@ async def _fetch_mails(
         where.append("priority = ?")
         params.append(priority)
 
+    col = _SORTABLE_COLS.get(sort_col, "processed_at")
+    order = "DESC" if sort_order.lower() == "desc" else "ASC"
+
     sql = (
         "SELECT id, mailbox_name, subject, sender, received_at, category, "
         "status, priority, processed_at, body_preview "
         "FROM mail_processed WHERE " + " AND ".join(where) + " "
-        "ORDER BY processed_at DESC LIMIT ?"
+        f"ORDER BY {col} {order} LIMIT ?"
     )
     params.append(limit)
 
@@ -124,8 +140,10 @@ async def app_index(
     category = request.query_params.get("category") or None
     status = request.query_params.get("status") or None
     priority = request.query_params.get("priority") or None
+    sort_col = request.query_params.get("sort") or "date"
+    sort_order = request.query_params.get("order") or "desc"
 
-    mails = await _fetch_mails(db, box, category, status, priority)
+    mails = await _fetch_mails(db, box, category, status, priority, sort_col, sort_order)
     mailboxes = await _fetch_mailboxes(db)
     counts = await _fetch_counts(
         db,
@@ -141,7 +159,10 @@ async def app_index(
         "app/inbox.html",
         {
             "mails": mails,
-            "filters": {"box": box, "category": category, "status": status, "priority": priority},
+            "filters": {
+                "box": box, "category": category, "status": status,
+                "priority": priority, "sort": sort_col, "order": sort_order,
+            },
             "categories": _CATEGORIES,
             "mailboxes": mailboxes,
             "statuses": _STATUSES,

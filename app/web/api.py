@@ -6,6 +6,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
+from app.config import get_settings
+from app.pipeline.generator import generate_draft
+from app.pipeline.language import detect_language
 from app.web.deps import get_db, require_operator
 from app.web.utils import audit_log
 
@@ -14,12 +17,25 @@ router = APIRouter(prefix="/api", tags=["api"])
 templates = Jinja2Templates(directory="app/web/templates")
 
 
+_SORTABLE_COLS = {
+    "mailbox": "mailbox_name",
+    "subject": "subject",
+    "sender": "sender",
+    "category": "category",
+    "status": "status",
+    "priority": "priority",
+    "date": "processed_at",
+}
+
+
 async def _fetch_mails_partial(
     db: aiosqlite.Connection,
     box: str | None,
     category: str | None,
     status: str | None,
     priority: str | None,
+    sort_col: str = "date",
+    sort_order: str = "desc",
     limit: int = 50,
 ) -> list[dict]:
     where = ["1=1"]
@@ -37,11 +53,14 @@ async def _fetch_mails_partial(
         where.append("priority = ?")
         params.append(priority)
 
+    col = _SORTABLE_COLS.get(sort_col, "processed_at")
+    order = "DESC" if sort_order.lower() == "desc" else "ASC"
+
     sql = (
         "SELECT id, mailbox_name, subject, sender, received_at, category, "
         "status, priority, processed_at, body_preview "
         "FROM mail_processed WHERE " + " AND ".join(where) + " "
-        "ORDER BY processed_at DESC LIMIT ?"
+        f"ORDER BY {col} {order} LIMIT ?"
     )
     params.append(limit)
 
@@ -70,12 +89,20 @@ async def inbox_partial(
     category = request.query_params.get("category") or None
     status = request.query_params.get("status") or None
     priority = request.query_params.get("priority") or None
+    sort_col = request.query_params.get("sort") or "date"
+    sort_order = request.query_params.get("order") or "desc"
 
-    mails = await _fetch_mails_partial(db, box, category, status, priority)
+    mails = await _fetch_mails_partial(db, box, category, status, priority, sort_col, sort_order)
     return templates.TemplateResponse(
         request,
         "app/inbox_rows.html",
-        {"mails": mails},
+        {
+            "mails": mails,
+            "filters": {
+                "box": box, "category": category, "status": status,
+                "priority": priority, "sort": sort_col, "order": sort_order,
+            },
+        },
     )
 
 
@@ -120,6 +147,86 @@ async def draft_save(
         f'<div class="p-3 bg-green-900/40 border border-green-800 rounded text-green-300 text-sm">'
         f'Brouillon sauvegardé (v{version}).'
         f'</div>'
+    )
+
+
+@router.post("/drafts/{mail_id}/generate")
+async def draft_generate(
+    request: Request,
+    mail_id: int,
+    db: aiosqlite.Connection = Depends(get_db),  # noqa: B008
+    user: dict = Depends(require_operator),  # noqa: B008
+) -> HTMLResponse:
+    async with db.execute(
+        "SELECT id, mailbox_name, subject, sender, category, body_preview, ai_draft "
+        "FROM mail_processed WHERE id = ?",
+        (mail_id,),
+    ) as cursor:
+        row = await cursor.fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Mail not found")
+
+    _, mailbox_name, subject, sender, category, body_preview, existing_draft = row
+
+    if existing_draft:
+        return HTMLResponse(
+            '<div class="p-3 bg-yellow-900/40 border border-yellow-800 rounded '
+            'text-yellow-300 text-sm">Un brouillon existe déjà.</div>',
+            headers={"HX-Redirect": f"/app/conversation/{mail_id}"},
+        )
+
+    if not body_preview:
+        return HTMLResponse(
+            '<div class="p-3 bg-red-900/40 border border-red-800 rounded '
+            'text-red-300 text-sm">Pas de contenu disponible pour générer un brouillon.</div>'
+        )
+
+    # Find mailbox config
+    settings = get_settings()
+    mailbox = None
+    for mb in settings.mailboxes():
+        if mb.name == mailbox_name:
+            mailbox = mb
+            break
+    if mailbox is None:
+        return HTMLResponse(
+            '<div class="p-3 bg-red-900/40 border border-red-800 rounded '
+            'text-red-300 text-sm">Configuration boîte mail introuvable.</div>'
+        )
+
+    try:
+        language = detect_language(body_preview, default=mailbox.default_lang)
+        result = await generate_draft(
+            incoming_subject=subject or "",
+            incoming_body=body_preview,
+            sender=sender or "",
+            mailbox=mailbox,
+            language=language,
+            category=category or "",
+        )
+    except Exception as e:
+        log.warning("draft_generate.failed", mail_id=mail_id, error=str(e))
+        return HTMLResponse(
+            '<div class="p-3 bg-red-900/40 border border-red-800 rounded '
+            'text-red-300 text-sm">Échec de la génération du brouillon.</div>'
+        )
+
+    await db.execute(
+        "UPDATE mail_processed SET ai_draft = ? WHERE id = ?",
+        (result.draft, mail_id),
+    )
+    await db.commit()
+
+    ip = request.client.host if request.client else None
+    await audit_log(
+        db, user["id"], "draft_generate", "mail_processed", str(mail_id),
+        f"model={result.model_used} lang={language}", ip, request.headers.get("user-agent"),
+    )
+
+    return HTMLResponse(
+        '<div class="p-3 bg-green-900/40 border border-green-800 rounded '
+        'text-green-300 text-sm">Brouillon généré par Charlie.</div>',
+        headers={"HX-Redirect": f"/app/conversation/{mail_id}"},
     )
 
 
