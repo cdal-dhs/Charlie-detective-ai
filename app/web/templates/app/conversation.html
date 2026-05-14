@@ -3,107 +3,143 @@
 {% block title %}{{ mail.subject or 'Conversation' }} — Detective.be{% endblock %}
 
 {% block content %}
-<div class="max-w-5xl mx-auto space-y-6">
-  <!-- Back link -->
-  <a href="/app" class="text-sm text-blue-400 hover:underline">← Retour à l'inbox</a>
+<div class="max-w-6xl mx-auto space-y-4" x-data="{ showLeft: false }">
+  <!-- Top bar -->
+  <div class="flex items-center justify-between">
+    <a href="/app" class="text-sm text-blue-400 hover:underline">← Retour à l'inbox</a>
+    <button
+      @click="showLeft = !showLeft"
+      class="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded text-sm"
+      x-text="showLeft ? 'Masquer les détails' : 'Afficher les détails'"
+    >Afficher les détails</button>
+  </div>
 
   <!-- Action result area -->
   <div id="action-result" class="min-h-[3rem]"></div>
 
-  <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-    <!-- Left panel: metadata -->
-    <div class="md:col-span-1 space-y-4">
-      <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
-        <h2 class="font-semibold text-lg border-b border-gray-800 pb-2">Détails</h2>
-        <div class="text-sm">
-          <div class="text-gray-500">Expéditeur</div>
-          <div class="break-all">{{ mail.sender or '-' }}</div>
-        </div>
-        <div class="text-sm">
-          <div class="text-gray-500">Sujet</div>
-          <div>{{ mail.subject or '(sans sujet)' }}</div>
-        </div>
-        <div class="text-sm">
-          <div class="text-gray-500">Date</div>
-          <div>{{ mail.received_at or mail.processed_at or '-' }}</div>
-        </div>
-        <div class="text-sm">
-          <div class="text-gray-500">Boîte</div>
-          <div>{{ mail.mailbox_name or '-' }}</div>
-        </div>
-        <div class="text-sm">
-          <div class="text-gray-500">Catégorie</div>
-          <span class="px-2 py-1 rounded text-xs font-medium inline-block mt-1
-            {% if mail.category == 'demande_client' %}bg-blue-600 text-white
-            {% elif mail.category == 'urgent' %}bg-red-600 text-white
-            {% elif mail.category == 'newsletter' %}bg-green-600 text-white
-            {% elif mail.category == 'facture' %}bg-yellow-600 text-white
-            {% elif mail.category == 'spam' %}bg-gray-600 text-white
-            {% else %}bg-gray-700 text-gray-300{% endif %}">
-            {{ mail.category or '-' }}
-          </span>
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+    <!-- Left panel: metadata + content + analysis -->
+    <div
+      class="md:col-span-1 space-y-4 transition-all duration-300"
+      :class="showLeft ? '' : 'hidden md:hidden'"
+      x-show="showLeft"
+      x-cloak
+    >
+      <!-- Details -->
+      <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+        <h2 class="font-semibold text-lg border-b border-gray-800 pb-2 mb-3">Détails</h2>
+        <div class="space-y-2 text-sm">
+          <div>
+            <div class="text-gray-500">Expéditeur</div>
+            <div class="break-all">{{ mail.sender or '-' }}</div>
+          </div>
+          <div>
+            <div class="text-gray-500">Sujet</div>
+            <div>{{ mail.subject or '(sans sujet)' }}</div>
+          </div>
+          <div>
+            <div class="text-gray-500">Date</div>
+            <div>{{ mail.received_at or mail.processed_at or '-' }}</div>
+          </div>
+          <div>
+            <div class="text-gray-500">Boîte</div>
+            <div>{{ mail.mailbox_name or '-' }}</div>
+          </div>
+          <div>
+            <div class="text-gray-500">Catégorie</div>
+            <span class="px-2 py-1 rounded text-xs font-medium inline-block mt-1
+              {% if mail.category == 'demande_client' %}bg-blue-600 text-white
+              {% elif mail.category == 'urgent' %}bg-red-600 text-white
+              {% elif mail.category == 'newsletter' %}bg-green-600 text-white
+              {% elif mail.category == 'facture' %}bg-yellow-600 text-white
+              {% elif mail.category == 'spam' %}bg-gray-600 text-white
+              {% else %}bg-gray-700 text-gray-300{% endif %}">
+              {{ mail.category or '-' }}
+            </span>
+          </div>
         </div>
       </div>
 
-      <!-- Mail content -->
-      <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
-        <h2 class="font-semibold text-lg border-b border-gray-800 pb-2">Contenu du mail</h2>
-        <div class="bg-gray-950 border border-gray-800 rounded p-3 text-sm text-gray-300 whitespace-pre-wrap">{{ mail.body_preview or '(pas de contenu)' }}</div>
+      <!-- Mail content (scrollable) -->
+      <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+        <h2 class="font-semibold text-lg border-b border-gray-800 pb-2 mb-3">Contenu du mail</h2>
+        <div class="bg-gray-950 border border-gray-800 rounded p-3 text-sm text-gray-300 whitespace-pre-wrap max-h-64 overflow-y-auto">
+          {{ mail.body_preview or '(pas de contenu)' }}
+        </div>
       </div>
 
       <!-- Charlie analysis -->
-      <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
-        <h2 class="font-semibold text-lg border-b border-gray-800 pb-2">Analyse Charlie</h2>
-        <div class="text-sm">
-          <div class="text-gray-500">Catégorie</div>
-          <div>{{ mail.category or '-' }}</div>
-        </div>
-        <div class="text-sm">
-          <div class="text-gray-500">Priorité</div>
-          <div class="flex items-center gap-1">
-            <span class="{% if mail.priority == 'high' %}text-red-500{% elif mail.priority == 'normal' %}text-yellow-500{% elif mail.priority == 'low' %}text-gray-500{% else %}text-gray-500{% endif %}">●</span>
-            <span>{{ mail.priority or '-' }}</span>
+      <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+        <h2 class="font-semibold text-lg border-b border-gray-800 pb-2 mb-3">Analyse Charlie</h2>
+        <div class="space-y-2 text-sm">
+          <div>
+            <div class="text-gray-500">Catégorie</div>
+            <div>{{ mail.category or '-' }}</div>
           </div>
+          <div>
+            <div class="text-gray-500">Priorité</div>
+            <div class="flex items-center gap-1">
+              <span class="{% if mail.priority == 'high' %}text-red-500{% elif mail.priority == 'normal' %}text-yellow-500{% elif mail.priority == 'low' %}text-gray-500{% else %}text-gray-500{% endif %}">●</span>
+              <span>{{ mail.priority or '-' }}</span>
+            </div>
+          </div>
+          <div>
+            <div class="text-gray-500">Statut</div>
+            <div>{{ mail.status or 'pending' }}</div>
+          </div>
+          {% if mail.reviewed_by %}
+          <div>
+            <div class="text-gray-500">Revue par</div>
+            <div>#{{ mail.reviewed_by }} — {{ mail.reviewed_at or '-' }}</div>
+          </div>
+          {% endif %}
         </div>
-        <div class="text-sm">
-          <div class="text-gray-500">Statut</div>
-          <div>{{ mail.status or 'pending' }}</div>
-        </div>
-        {% if mail.reviewed_by %}
-        <div class="text-sm">
-          <div class="text-gray-500">Revue par</div>
-          <div>#{{ mail.reviewed_by }} — {{ mail.reviewed_at or '-' }}</div>
-        </div>
-        {% endif %}
       </div>
     </div>
 
     <!-- Right panel: drafts + actions -->
-    <div class="md:col-span-2 space-y-4">
+    <div
+      class="space-y-4 transition-all duration-300"
+      :class="showLeft ? 'md:col-span-2' : 'md:col-span-3'"
+    >
       <!-- AI draft -->
       {% if mail.ai_draft %}
-      <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
-        <div class="flex items-center justify-between">
-          <h3 class="font-semibold">Brouillon IA (Charlie)</h3>
-          <button
-            type="button"
-            class="px-3 py-1 bg-gray-800 hover:bg-gray-700 rounded text-xs"
-            @click="navigator.clipboard.writeText(document.getElementById('ai-draft-text').innerText); $el.innerText = 'Copié !'; setTimeout(() => $el.innerText = 'Copier', 1500)"
-          >Copier</button>
+      <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-green-400"></span>
+            <h3 class="font-semibold">Réponse proposée par Charlie</h3>
+          </div>
+          <div class="flex gap-2">
+            <button
+              type="button"
+              class="px-3 py-1 bg-gray-800 hover:bg-gray-700 rounded text-xs"
+              @click="navigator.clipboard.writeText(document.getElementById('ai-draft-text').innerText); $el.innerText = 'Copié !'; setTimeout(() => $el.innerText = 'Copier', 1500)"
+            >Copier</button>
+            <button
+              type="button"
+              class="px-3 py-1 bg-blue-800 hover:bg-blue-700 rounded text-xs"
+              @click="draftBody = document.getElementById('ai-draft-text').innerText; $el.innerText = 'Copié dans éditeur !'; setTimeout(() => $el.innerText = 'Utiliser', 1500)"
+              x-data="{}"
+            >Utiliser</button>
+          </div>
         </div>
-        <div id="ai-draft-text" class="bg-gray-950 border border-gray-800 rounded p-3 text-sm text-gray-300 whitespace-pre-wrap">{{ mail.ai_draft }}</div>
+        <div id="ai-draft-text" class="bg-gray-950 border border-gray-800 rounded p-3 text-sm text-gray-300 whitespace-pre-wrap max-h-80 overflow-y-auto">{{ mail.ai_draft }}</div>
       </div>
       {% else %}
-      <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
-        <div class="flex items-center justify-between">
-          <h3 class="font-semibold">Brouillon IA (Charlie)</h3>
+      <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-gray-500"></span>
+            <h3 class="font-semibold">Réponse proposée par Charlie</h3>
+          </div>
           <span class="text-xs text-gray-500">Non généré</span>
         </div>
         <div class="bg-gray-950 border border-gray-800 rounded p-3 text-sm text-gray-400 italic">
-          Aucun brouillon n'a été généré par l'agent pour ce message.
+          Aucune proposition de réponse n'a été générée par Charlie pour ce message.
         </div>
         <button
-          class="px-4 py-2 bg-purple-600 hover:bg-purple-500 rounded text-sm font-medium"
+          class="mt-3 px-4 py-2 bg-purple-600 hover:bg-purple-500 rounded text-sm font-medium"
           hx-post="/api/drafts/{{ mail.id }}/generate"
           hx-target="#action-result"
           hx-swap="innerHTML"
@@ -114,18 +150,25 @@
       {% endif %}
 
       <!-- Human editor -->
-      <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3" x-data='{ draftBody: {{ (mail.human_draft or mail.ai_draft or "") | tojson }} }'>
-        <h3 class="font-semibold">Brouillon opérateur</h3>
+      <div class="bg-gray-900 border border-gray-800 rounded-lg p-4" x-data='{ draftBody: {{ (mail.human_draft or "") | tojson }} }'>
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-blue-400"></span>
+            <h3 class="font-semibold">Brouillon opérateur</h3>
+          </div>
+          <span class="text-xs text-gray-500">Éditable</span>
+        </div>
 
         <textarea
           id="human-draft"
           name="body"
           x-model="draftBody"
-          rows="12"
-          class="w-full bg-gray-950 border border-gray-800 rounded p-3 text-sm text-gray-100 focus:outline-none focus:border-blue-500"
+          rows="10"
+          placeholder="Écris ici ta réponse personnalisée..."
+          class="w-full bg-gray-950 border border-gray-800 rounded p-3 text-sm text-gray-100 focus:outline-none focus:border-blue-500 placeholder-gray-600"
         ></textarea>
 
-        <div class="flex flex-wrap gap-2">
+        <div class="flex flex-wrap gap-2 mt-3">
           <button
             class="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded text-sm font-medium"
             hx-post="/api/drafts/{{ mail.id }}/save"
@@ -159,11 +202,11 @@
         </div>
       </div>
 
-      <!-- Draft history -->
-      <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
-        <h3 class="font-semibold">Historique des versions</h3>
+      <!-- Draft history (scrollable) -->
+      <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+        <h3 class="font-semibold mb-3">Historique des versions</h3>
         {% if versions %}
-          <div class="space-y-2 max-h-64 overflow-y-auto">
+          <div class="space-y-2 max-h-48 overflow-y-auto">
             {% for v in versions %}
               <div class="border border-gray-800 rounded p-3 text-sm">
                 <div class="flex items-center justify-between text-xs text-gray-500 mb-1">
