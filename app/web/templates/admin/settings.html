@@ -8,6 +8,12 @@
     <p class="text-gray-400 text-sm">IA, Email, Slack et Resend</p>
 </div>
 
+<div class="mb-4 p-3 bg-yellow-900/30 border border-yellow-800 rounded text-sm text-yellow-200">
+    ⚠️ Ces valeurs sont issues du fichier <code class="bg-gray-800 px-1 rounded">.env</code>.
+    Pour les modifier, édite le fichier <code class="bg-gray-800 px-1 rounded">.env</code> et redémarre le serveur.
+    L'édition en ligne sera disponible en V2.
+</div>
+
 <div x-data="{ tab: 'ai' }" class="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
     <div class="flex border-b border-gray-800">
         <button @click="tab = 'ai'" :class="tab === 'ai' ? 'border-b-2 border-blue-500 text-white' : 'text-gray-400 hover:text-white'" class="px-4 py-3 text-sm font-medium">

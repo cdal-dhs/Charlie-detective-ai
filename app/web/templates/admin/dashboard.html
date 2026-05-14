@@ -3,9 +3,16 @@
 {% block title %}Dashboard — Admin{% endblock %}
 
 {% block content %}
-<div class="mb-6">
-    <h1 class="text-2xl font-bold">Vue d'ensemble</h1>
-    <p class="text-gray-400 text-sm">État global de Charlie et des boîtes email</p>
+<div class="mb-6 flex items-start justify-between">
+    <div>
+        <h1 class="text-2xl font-bold">Vue d'ensemble</h1>
+        <p class="text-gray-400 text-sm">État global de Charlie et des boîtes email</p>
+    </div>
+    <div class="flex gap-2">
+        <a href="/admin/settings" class="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded text-sm">⚙️ Paramètres</a>
+        <a href="/admin/users" class="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded text-sm">👥 Utilisateurs</a>
+        <a href="/admin/audit" class="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded text-sm">📋 Audit</a>
+    </div>
 </div>
 
 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
