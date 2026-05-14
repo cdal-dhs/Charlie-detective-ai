@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}Audit Logs — Admin{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <h1 class="text-2xl font-bold">Audit Logs</h1>
+    <p class="text-gray-400 text-sm">Historique des actions</p>
+</div>
+
+<div class="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
+    <table class="w-full text-sm">
+        <thead class="bg-gray-800">
+            <tr>
+                <th class="text-left px-4 py-2">Action</th>
+                <th class="text-left px-4 py-2">Type</th>
+                <th class="text-left px-4 py-2">Détails</th>
+                <th class="text-left px-4 py-2">IP</th>
+                <th class="text-left px-4 py-2">Date</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for entry in logs %}
+            <tr class="border-b border-gray-800">
+                <td class="px-4 py-2 font-medium">{{ entry.action }}</td>
+                <td class="px-4 py-2 text-gray-400">{{ entry.resource_type or '-' }}</td>
+                <td class="px-4 py-2 text-gray-400">{{ entry.details or '-' }}</td>
+                <td class="px-4 py-2 text-gray-500">{{ entry.ip_address or '-' }}</td>
+                <td class="px-4 py-2 text-gray-500">{{ entry.created_at }}</td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="5" class="px-4 py-4 text-gray-500">Aucun log</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    {% if total_pages > 1 %}
+    <div class="px-4 py-3 border-t border-gray-800 flex items-center justify-between">
+        <span class="text-gray-400 text-sm">Page {{ page }} / {{ total_pages }} ({{ total }} total)</span>
+        <div class="flex gap-2">
+            {% if page > 1 %}
+            <a href="/admin/audit?page={{ page - 1 }}" class="px-3 py-1 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded text-sm">Précédent</a>
+            {% endif %}
+            {% if page < total_pages %}
+            <a href="/admin/audit?page={{ page + 1 }}" class="px-3 py-1 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded text-sm">Suivant</a>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

@@ -72,6 +72,16 @@ class Settings(BaseSettings):
 
     log_level: str = "INFO"
 
+    # --- Web UI ---
+    web_secret_key: str = ""
+    web_encryption_key: str = ""
+    web_session_ttl_hours: int = 24
+    web_bind_host: str = "127.0.0.1"
+    web_bind_port: int = 8080
+    admin_email: str = "cdal@digitalhs.biz"
+    operator_email: str = "contact@detectivebelgique.be"
+    magic_link_ttl_minutes: int = 15
+
     def mailboxes(self) -> list[MailboxConfig]:
         return [
             MailboxConfig(

@@ -1,0 +1,37 @@
+{% if not mails %}
+<tr><td colspan="8" class="px-4 py-8 text-center text-gray-500">Aucun message</td></tr>
+{% else %}
+{% for m in mails %}
+<tr class="border-b border-gray-800 hover:bg-gray-800/50">
+  <td class="px-4 py-3 whitespace-nowrap">{{ m.mailbox_name or '-' }}</td>
+  <td class="px-4 py-3">
+    <a href="/app/conversation/{{ m.id }}" class="text-blue-400 hover:underline">{{ m.subject or '(sans sujet)' }}</a>
+  </td>
+  <td class="px-4 py-3">{{ m.sender or '-' }}</td>
+  <td class="px-4 py-3">
+    <span class="px-2 py-1 rounded text-xs font-medium
+      {% if m.category == 'demande_client' %}bg-blue-600 text-white
+      {% elif m.category == 'urgent' %}bg-red-600 text-white
+      {% elif m.category == 'newsletter' %}bg-green-600 text-white
+      {% elif m.category == 'facture' %}bg-yellow-600 text-white
+      {% elif m.category == 'spam' %}bg-gray-600 text-white
+      {% else %}bg-gray-700 text-gray-300{% endif %}">
+      {{ m.category or '-' }}
+    </span>
+  </td>
+  <td class="px-4 py-3">{{ m.status or '-' }}</td>
+  <td class="px-4 py-3">
+    <span class="text-sm
+      {% if m.priority == 'high' %}text-red-500
+      {% elif m.priority == 'normal' %}text-yellow-500
+      {% elif m.priority == 'low' %}text-gray-500
+      {% else %}text-gray-500{% endif %}">●</span>
+    {{ m.priority or '-' }}
+  </td>
+  <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-400">{{ m.processed_at or '-' }}</td>
+  <td class="px-4 py-3">
+    <a href="/app/conversation/{{ m.id }}" class="text-blue-400 hover:underline text-sm">Ouvrir</a>
+  </td>
+</tr>
+{% endfor %}
+{% endif %}

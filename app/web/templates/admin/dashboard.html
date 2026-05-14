@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard — Admin{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <h1 class="text-2xl font-bold">Vue d'ensemble</h1>
+    <p class="text-gray-400 text-sm">État global de Charlie et des boîtes email</p>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+    <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+        <div class="text-gray-400 text-xs uppercase">Emails aujourd'hui</div>
+        <div class="text-2xl font-bold mt-1">{{ stats.total_today }}</div>
+    </div>
+    <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+        <div class="text-gray-400 text-xs uppercase">En attente</div>
+        <div class="text-2xl font-bold mt-1 text-yellow-400">{{ stats.pending }}</div>
+    </div>
+    <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+        <div class="text-gray-400 text-xs uppercase">Approuvés</div>
+        <div class="text-2xl font-bold mt-1 text-green-400">{{ stats.approved }}</div>
+    </div>
+    <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+        <div class="text-gray-400 text-xs uppercase">Rejetés</div>
+        <div class="text-2xl font-bold mt-1 text-red-400">{{ stats.rejected }}</div>
+    </div>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+        <h2 class="font-semibold mb-3">Santé système</h2>
+        <ul class="space-y-2 text-sm">
+            <li class="flex justify-between">
+                <span>IMAP connecté</span>
+                <span class="{{ 'text-green-400' if health.imap else 'text-gray-500' }}">
+                    {{ 'Oui' if health.imap else 'N/D' }}
+                </span>
+            </li>
+            <li class="flex justify-between">
+                <span>Taille DB</span>
+                <span class="text-gray-400">{{ (db_size / 1024 / 1024)|round(2) }} MB</span>
+            </li>
+        </ul>
+    </div>
+
+    <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+        <h2 class="font-semibold mb-3">Activité récente</h2>
+        <div class="overflow-y-auto max-h-64 space-y-2 text-sm">
+            {% for entry in audit %}
+            <div class="flex justify-between border-b border-gray-800 pb-1">
+                <span>{{ entry.action }}</span>
+                <span class="text-gray-500">{{ entry.created_at }}</span>
+            </div>
+            {% else %}
+            <div class="text-gray-500">Aucune activité</div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endblock %}

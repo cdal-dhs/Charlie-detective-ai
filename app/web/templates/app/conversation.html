@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+
+{% block title %}{{ mail.subject or 'Conversation' }} — Detective.be{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto space-y-6">
+  <!-- Back link -->
+  <a href="/app" class="text-sm text-blue-400 hover:underline">← Retour à l'inbox</a>
+
+  <!-- Action result area -->
+  <div id="action-result" class="min-h-[3rem]"></div>
+
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+    <!-- Left panel: metadata -->
+    <div class="md:col-span-1 space-y-4">
+      <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
+        <h2 class="font-semibold text-lg border-b border-gray-800 pb-2">Détails</h2>
+        <div class="text-sm">
+          <div class="text-gray-500">Expéditeur</div>
+          <div class="break-all">{{ mail.sender or '-' }}</div>
+        </div>
+        <div class="text-sm">
+          <div class="text-gray-500">Sujet</div>
+          <div>{{ mail.subject or '(sans sujet)' }}</div>
+        </div>
+        <div class="text-sm">
+          <div class="text-gray-500">Date</div>
+          <div>{{ mail.received_at or mail.processed_at or '-' }}</div>
+        </div>
+        <div class="text-sm">
+          <div class="text-gray-500">Boîte</div>
+          <div>{{ mail.mailbox_name or '-' }}</div>
+        </div>
+        <div class="text-sm">
+          <div class="text-gray-500">Catégorie</div>
+          <span class="px-2 py-1 rounded text-xs font-medium inline-block mt-1
+            {% if mail.category == 'demande_client' %}bg-blue-600 text-white
+            {% elif mail.category == 'urgent' %}bg-red-600 text-white
+            {% elif mail.category == 'newsletter' %}bg-green-600 text-white
+            {% elif mail.category == 'facture' %}bg-yellow-600 text-white
+            {% elif mail.category == 'spam' %}bg-gray-600 text-white
+            {% else %}bg-gray-700 text-gray-300{% endif %}">
+            {{ mail.category or '-' }}
+          </span>
+        </div>
+      </div>
+
+      <!-- Charlie analysis -->
+      <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
+        <h2 class="font-semibold text-lg border-b border-gray-800 pb-2">Analyse Charlie</h2>
+        <div class="text-sm">
+          <div class="text-gray-500">Catégorie</div>
+          <div>{{ mail.category or '-' }}</div>
+        </div>
+        <div class="text-sm">
+          <div class="text-gray-500">Priorité</div>
+          <div class="flex items-center gap-1">
+            <span class="{% if mail.priority == 'high' %}text-red-500{% elif mail.priority == 'normal' %}text-yellow-500{% elif mail.priority == 'low' %}text-gray-500{% else %}text-gray-500{% endif %}">●</span>
+            <span>{{ mail.priority or '-' }}</span>
+          </div>
+        </div>
+        <div class="text-sm">
+          <div class="text-gray-500">Statut</div>
+          <div>{{ mail.status or 'pending' }}</div>
+        </div>
+        {% if mail.reviewed_by %}
+        <div class="text-sm">
+          <div class="text-gray-500">Revue par</div>
+          <div>#{{ mail.reviewed_by }} — {{ mail.reviewed_at or '-' }}</div>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Right panel: drafts + actions -->
+    <div class="md:col-span-2 space-y-4">
+      <!-- AI draft -->
+      {% if mail.ai_draft %}
+      <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
+        <div class="flex items-center justify-between">
+          <h3 class="font-semibold">Brouillon IA (Charlie)</h3>
+          <button
+            type="button"
+            class="px-3 py-1 bg-gray-800 hover:bg-gray-700 rounded text-xs"
+            @click="navigator.clipboard.writeText(document.getElementById('ai-draft-text').innerText); $el.innerText = 'Copié !'; setTimeout(() => $el.innerText = 'Copier', 1500)"
+          >Copier</button>
+        </div>
+        <div id="ai-draft-text" class="bg-gray-950 border border-gray-800 rounded p-3 text-sm text-gray-300 whitespace-pre-wrap">{{ mail.ai_draft }}</div>
+      </div>
+      {% endif %}
+
+      <!-- Human editor -->
+      <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3" x-data="{ draftBody: {{ (mail.human_draft or mail.ai_draft or '') | tojson }} }">
+        <h3 class="font-semibold">Brouillon opérateur</h3>
+
+        <textarea
+          id="human-draft"
+          name="body"
+          x-model="draftBody"
+          rows="12"
+          class="w-full bg-gray-950 border border-gray-800 rounded p-3 text-sm text-gray-100 focus:outline-none focus:border-blue-500"
+        ></textarea>
+
+        <div class="flex flex-wrap gap-2">
+          <button
+            class="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded text-sm font-medium"
+            hx-post="/api/drafts/{{ mail.id }}/save"
+            hx-include="#human-draft"
+            hx-target="#action-result"
+            hx-swap="innerHTML"
+          >Sauvegarder</button>
+
+          <button
+            class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm"
+            hx-post="/api/drafts/{{ mail.id }}/regenerate"
+            hx-target="#action-result"
+            hx-swap="innerHTML"
+          >Régénérer</button>
+
+          <button
+            class="px-4 py-2 bg-red-700 hover:bg-red-600 rounded text-sm"
+            hx-post="/api/drafts/{{ mail.id }}/reject"
+            hx-target="#action-result"
+            hx-swap="innerHTML"
+            hx-confirm="Rejeter ce brouillon ?"
+          >Rejeter</button>
+
+          <button
+            class="px-4 py-2 bg-green-700 hover:bg-green-600 rounded text-sm font-medium"
+            hx-post="/api/drafts/{{ mail.id }}/approve"
+            hx-target="#action-result"
+            hx-swap="innerHTML"
+            hx-confirm="Approuver ce brouillon ?"
+          >Approuver</button>
+        </div>
+      </div>
+
+      <!-- Draft history -->
+      <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
+        <h3 class="font-semibold">Historique des versions</h3>
+        {% if versions %}
+          <div class="space-y-2 max-h-64 overflow-y-auto">
+            {% for v in versions %}
+              <div class="border border-gray-800 rounded p-3 text-sm">
+                <div class="flex items-center justify-between text-xs text-gray-500 mb-1">
+                  <span>v{{ v.version }} — {{ v.created_at or '-' }}</span>
+                  <span>{{ 'IA' if v.ai_generated else 'Manuel' }}{% if v.editor_id %} — #{{ v.editor_id }}{% endif %}</span>
+                </div>
+                <div class="text-gray-300 whitespace-pre-wrap">{{ v.body or '(vide)' }}</div>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="text-sm text-gray-500">Aucune version enregistrée.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

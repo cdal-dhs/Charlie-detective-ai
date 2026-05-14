@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block title %}Inbox — Detective.be{% endblock %}
+
+{% block content %}
+<div class="space-y-4" x-data="{ activeTab: '{{ filters.category or 'all' }}' }">
+  <div class="flex items-center justify-between">
+    <h1 class="text-2xl font-semibold">Inbox Daniel</h1>
+    <div class="text-sm text-gray-400">{{ user.email }}</div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="flex space-x-1 border-b border-gray-800 pb-1 overflow-x-auto">
+    {% set tabs = [
+      ('all', 'Toutes'),
+      ('urgent', 'Urgentes'),
+      ('demande_client', 'Demandes client'),
+      ('newsletter', 'Newsletters'),
+      ('facture', 'Factures'),
+      ('spam', 'Spam'),
+      ('autre', 'Autres')
+    ] %}
+    {% for key, label in tabs %}
+      <button
+        class="px-3 py-2 text-sm rounded-t font-medium whitespace-nowrap"
+        :class="activeTab === '{{ key }}' ? 'bg-gray-800 text-blue-400 border-b-2 border-blue-400' : 'text-gray-400 hover:text-gray-200'"
+        @click="activeTab = '{{ key }}'; document.getElementById('filter-category').value = '{{ key if key != 'all' else '' }}'; htmx.trigger('#filter-form', 'submit')"
+      >
+        {{ label }}
+        <span class="ml-1 text-xs text-gray-500">({{ counts.get(key, 0) if key != 'all' else mails|length }})</span>
+      </button>
+    {% endfor %}
+  </div>
+
+  <!-- Filters -->
+  <form id="filter-form" class="flex flex-wrap gap-3"
+        hx-get="/api/inbox" hx-target="#inbox-table-body" hx-swap="innerHTML"
+        hx-trigger="submit, change from:select">
+    <select name="box" class="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm">
+      <option value="">Toutes les boîtes</option>
+      {% for m in mailboxes %}
+        <option value="{{ m }}" {% if filters.box == m %}selected{% endif %}>{{ m }}</option>
+      {% endfor %}
+    </select>
+    <select id="filter-category" name="category" class="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm">
+      <option value="">Toutes catégories</option>
+      {% for c in categories %}
+        <option value="{{ c }}" {% if filters.category == c %}selected{% endif %}>{{ c }}</option>
+      {% endfor %}
+    </select>
+    <select name="status" class="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm">
+      <option value="">Tous statuts</option>
+      {% for s in statuses %}
+        <option value="{{ s }}" {% if filters.status == s %}selected{% endif %}>{{ s }}</option>
+      {% endfor %}
+    </select>
+    <select name="priority" class="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm">
+      <option value="">Toutes priorités</option>
+      {% for p in priorities %}
+        <option value="{{ p }}" {% if filters.priority == p %}selected{% endif %}>{{ p }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="px-3 py-1 bg-gray-800 hover:bg-gray-700 rounded text-sm">Filtrer</button>
+  </form>
+
+  <!-- Table -->
+  <div class="overflow-x-auto border border-gray-800 rounded">
+    <table class="w-full text-sm text-left">
+      <thead class="bg-gray-900 text-gray-400 uppercase text-xs">
+        <tr>
+          <th class="px-4 py-3">Boîte</th>
+          <th class="px-4 py-3">Sujet</th>
+          <th class="px-4 py-3">Expéditeur</th>
+          <th class="px-4 py-3">Catégorie</th>
+          <th class="px-4 py-3">Statut</th>
+          <th class="px-4 py-3">Priorité</th>
+          <th class="px-4 py-3">Date</th>
+          <th class="px-4 py-3">Action</th>
+        </tr>
+      </thead>
+      <tbody id="inbox-table-body" class="divide-y divide-gray-800">
+        {% include "app/inbox_rows.html" %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

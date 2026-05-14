@@ -71,20 +71,26 @@ def _persist(
     received_at: str,
     category: str,
     draft_generated: int,
+    body_preview: str = "",
+    ai_draft: str = "",
 ) -> None:
     conn = sqlite3.connect(db_path)
     try:
         conn.execute(
             """
             INSERT INTO mail_processed
-                (imap_uid, mailbox_name, subject, sender, received_at, category, draft_generated)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                (imap_uid, mailbox_name, subject, sender, received_at, category, draft_generated,
+                 body_preview, ai_draft, status, priority)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'normal')
             ON CONFLICT(imap_uid, mailbox_name) DO UPDATE SET
                 category = excluded.category,
                 draft_generated = excluded.draft_generated,
+                body_preview = COALESCE(NULLIF(excluded.body_preview, ''), mail_processed.body_preview),
+                ai_draft = COALESCE(NULLIF(excluded.ai_draft, ''), mail_processed.ai_draft),
                 processed_at = CURRENT_TIMESTAMP
             """,
-            (imap_uid, mailbox_name, subject, sender, received_at, category, draft_generated),
+            (imap_uid, mailbox_name, subject, sender, received_at, category, draft_generated,
+             body_preview, ai_draft),
         )
         conn.commit()
     finally:
@@ -230,6 +236,9 @@ async def _process_single_mail(
                 recipient=settings.draft_recipient,
             )
 
+    body_preview = body[:2000] if body else ""
+    ai_draft_text = gen.draft if (category == "demande_client" and draft_generated) else ""
+
     await asyncio.to_thread(
         _persist,
         settings.db_agent_state,
@@ -240,6 +249,8 @@ async def _process_single_mail(
         received_at,
         category,
         draft_generated,
+        body_preview,
+        ai_draft_text,
     )
 
     if not settings.dry_run:

@@ -4,7 +4,7 @@ import signal
 import structlog
 
 from app.config import get_settings
-from app.healthcheck import run_healthcheck_server
+from app.web.app import run_web_server
 from app.workers.imap_poller import poll_mailbox
 
 log = structlog.get_logger()
@@ -24,14 +24,14 @@ async def main() -> None:
         asyncio.create_task(poll_mailbox(mb, stop_event), name=f"poller-{mb.name}")
         for mb in settings.mailboxes()
     ]
-    healthcheck_task = asyncio.create_task(run_healthcheck_server(stop_event), name="healthcheck")
+    web_task = asyncio.create_task(run_web_server(stop_event), name="web")
 
     await stop_event.wait()
     log.info("agent.stop_requested")
 
-    for task in [*poller_tasks, healthcheck_task]:
+    for task in [*poller_tasks, web_task]:
         task.cancel()
-    await asyncio.gather(*poller_tasks, healthcheck_task, return_exceptions=True)
+    await asyncio.gather(*poller_tasks, web_task, return_exceptions=True)
     log.info("agent.stopped")
 
 
