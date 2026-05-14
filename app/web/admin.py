@@ -108,10 +108,35 @@ async def settings_page(
     user: dict = Depends(require_admin),  # noqa: B008
 ):
     settings = await _load_settings(db)
+    env = get_settings()
+    env_settings = {
+        "imap_host": env.imap_host,
+        "imap_port": env.imap_port,
+        "ollama_pro_base_url": env.ollama_pro_base_url,
+        "llm_model_default": env.llm_model_default,
+        "llm_model_classifier": env.llm_model_classifier,
+        "llm_model_fallback": env.llm_model_fallback,
+        "resend_from": env.resend_from,
+        "draft_recipient": env.draft_recipient,
+        "slack_webhook_url": env.slack_webhook_url,
+        "poll_interval_seconds": env.poll_interval_seconds,
+        "embedding_model": env.embedding_model,
+        "rag_top_k": env.rag_top_k,
+        "mailboxes": [
+            {
+                "id": i + 1,
+                "name": mb.name,
+                "user": mb.user,
+                "brand": mb.brand,
+                "default_lang": mb.default_lang,
+            }
+            for i, mb in enumerate(env.mailboxes())
+        ],
+    }
     return templates.TemplateResponse(
         request,
         "admin/settings.html",
-        {"settings": settings, "user": user},
+        {"settings": settings, "cfg": env_settings, "user": user},
     )
 
 

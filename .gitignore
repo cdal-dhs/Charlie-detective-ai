@@ -6,9 +6,15 @@
 # Données sensibles
 data/*.sqlite
 data/*.db
+data/*.db-wal
+data/*.db-shm
 data/*.sqlite-journal
 data/*.sqlite-wal
 data/*.sqlite-shm
+
+# Screenshots & test artifacts
+screenshot_*.png
+.playwright-mcp/
 
 # Logs
 logs/*
