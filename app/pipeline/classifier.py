@@ -8,12 +8,23 @@ from app.llm.router import complete
 
 log = structlog.get_logger()
 
-Category = Literal["demande_client", "facture", "newsletter", "spam", "urgent", "autre"]
+Category = Literal[
+    "demande_client",
+    "facture",
+    "newsletter",
+    "spam",
+    "phishing",
+    "rappel",
+    "urgent",
+    "autre",
+]
 VALID_CATEGORIES: tuple[Category, ...] = (
     "demande_client",
     "facture",
     "newsletter",
     "spam",
+    "phishing",
+    "rappel",
     "urgent",
     "autre",
 )
@@ -31,7 +42,7 @@ async def classify(subject: str, body: str, sender: str) -> Category:
     response = await complete(
         model=settings.llm_model_classifier,
         messages=[{"role": "user", "content": prompt}],
-        max_tokens=10,
+        max_tokens=15,
         temperature=0.0,
     )
     raw = response.strip().lower().split()[0] if response.strip() else "autre"

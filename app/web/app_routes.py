@@ -11,7 +11,7 @@ log = structlog.get_logger()
 router = APIRouter(prefix="/app", tags=["app"])
 templates = Jinja2Templates(directory="app/web/templates")
 
-_CATEGORIES = ["demande_client", "urgent", "newsletter", "facture", "spam", "autre"]
+_CATEGORIES = ["demande_client", "urgent", "newsletter", "facture", "spam", "phishing", "rappel", "autre"]
 _STATUSES = ["pending", "approved", "rejected", "sent", "reviewed"]
 _PRIORITIES = ["high", "normal", "low"]
 
