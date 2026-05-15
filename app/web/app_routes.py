@@ -81,6 +81,7 @@ async def _fetch_mails(
     category: str | None,
     status: str | None,
     priority: str | None,
+    q: str | None,
     sort_col: str = "date",
     sort_order: str = "desc",
     limit: int = 50,
@@ -103,6 +104,10 @@ async def _fetch_mails(
     if priority:
         where.append("priority = ?")
         params.append(priority)
+    if q:
+        where.append("(subject LIKE ? OR sender LIKE ? OR body_preview LIKE ?)")
+        like = f"%{q}%"
+        params.extend([like, like, like])
 
     col = _SORTABLE_COLS.get(sort_col, "processed_at")
     order = "DESC" if sort_order.lower() == "desc" else "ASC"
@@ -177,10 +182,11 @@ async def app_index(
     category = request.query_params.get("category") or None
     status = request.query_params.get("status") or None
     priority = request.query_params.get("priority") or None
+    q = request.query_params.get("q") or None
     sort_col = request.query_params.get("sort") or "date"
     sort_order = request.query_params.get("order") or "desc"
 
-    mails = await _fetch_mails(db, boxes, category, status, priority, sort_col, sort_order)
+    mails = await _fetch_mails(db, boxes, category, status, priority, q, sort_col, sort_order)
     mailboxes = await _fetch_mailboxes(db)
     counts = await _fetch_counts(
         db,
@@ -198,7 +204,7 @@ async def app_index(
             "mails": mails,
             "filters": {
                 "box": box_raw, "category": category, "status": status,
-                "priority": priority, "sort": sort_col, "order": sort_order,
+                "priority": priority, "q": q, "sort": sort_col, "order": sort_order,
             },
             "categories": _CATEGORIES,
             "mailboxes": mailboxes,

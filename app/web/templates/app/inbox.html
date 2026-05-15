@@ -96,7 +96,16 @@
       </select>
     </div>
 
+    <!-- Recherche texte -->
     <div class="flex items-center gap-2 ml-auto">
+      <input
+        type="text"
+        name="q"
+        id="filter-q"
+        value="{{ filters.q or '' }}"
+        placeholder="Rechercher..."
+        class="bg-gray-900 border border-gray-700 rounded px-3 py-1 text-sm w-56 focus:outline-none focus:border-blue-500"
+      >
       <button type="submit" class="px-3 py-1 bg-gray-800 hover:bg-gray-700 rounded text-sm">Filtrer</button>
       <button
         type="button"
@@ -107,6 +116,7 @@
           document.getElementById('filter-category').value = '';
           document.getElementById('filter-status').value = '';
           document.getElementById('filter-priority').value = '';
+          document.getElementById('filter-q').value = '';
           htmx.trigger('#filter-form', 'submit');
         "
       >Réinitialiser</button>
