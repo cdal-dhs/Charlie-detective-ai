@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from unicodedata import normalize
 
 import aiosqlite
 import structlog
@@ -47,7 +48,8 @@ RÉPONSE: <ta réponse>
 4. Pour les dates, utilise le format ISO (YYYY-MM-DD) dans les requêtes SQL.
 5. Toujours répondre en français.
 6. Quand tu listes des emails, inclus TOUJOURS les colonnes `id` et `subject` dans ton SELECT (ainsi que les autres colonnes utiles). Cela permet de créer des liens cliquables vers la conversation.  # noqa: E501
-7. Quand l'utilisateur demande le contenu ou le détail d'un mail, utilise la colonne `body` (contenu complet) dans ton SELECT, pas `body_preview`.  # noqa: E501
+7. Quand l'utilisateur demande le contenu, le détail ou un résumé d'un dossier, utilise la colonne `body` (contenu complet) dans ton SELECT, pas `body_preview`. Inclus aussi `ai_draft` si pertinent.  # noqa: E501
+8. Quand l'utilisateur demande un résumé ou une synthèse, ta RÉPONSE doit contenir le résumé en langage naturel — pas juste une liste de champs. Analyse le contenu des mails et rédige une synthèse claire et utile.  # noqa: E501
 """
 
 _DANGEROUS_SQL = (
@@ -112,8 +114,24 @@ async def run_sql(db_path: Path, sql: str) -> list[dict]:
         return [dict(zip(keys, row, strict=True)) for row in rows]
 
 
+_SUMMARY_PROMPT = """Tu es Charlie, l'assistant IA de Detective.be. Tu viens d'exécuter une requête SQL pour l'opérateur et voici les résultats.
+
+Question de l'opérateur : {question}
+
+Résultats SQL ({count} lignes) :
+{rows}
+
+Rédige une réponse en français, concise et utile :
+- Si l'opérateur demande un résumé ou une synthèse, analyse le contenu des mails et rédige une synthèse claire.
+- Si l'opérateur demande un détail, présente l'information de façon lisible.
+- Si les résultats sont une simple liste, présente-les proprement.
+- Toujours mentionner les ID et sujets pour permettre les liens cliquables.
+- Si aucun résultat, dis-le simplement.
+"""
+
+
 async def ask_charlie(question: str, db_path: Path, model: str | None = None) -> CharlieResult:
-    """Pipeline Charlie AI complet : question → LLM → SQL → validation → exécution."""
+    """Pipeline Charlie AI complet : question → LLM → SQL → validation → exécution → synthèse."""
     settings = get_settings()
     model = model or settings.llm_model_default
 
@@ -149,5 +167,50 @@ async def ask_charlie(question: str, db_path: Path, model: str | None = None) ->
     except Exception as e:
         log.warning("charlie.sql_failed", sql=sql, error=str(e))
         result.sql_error = str(e)
+        return result
+
+    if rows and _needs_summary(question):
+        summary = await _summarize_results(question, rows, model, settings)
+        if summary:
+            result.response_text = summary
 
     return result
+
+
+_NEEDS_SUMMARY_KEYWORDS = (
+    "resume", "synthese", "synthetiser",
+    "analyser", "analyse", "detail",
+    "contenu", "explique", "expliquer", "que dit",
+    "donne-moi le contenu", "de quoi parle",
+)
+
+
+def _normalize(text: str) -> str:
+    return normalize("NFKD", text.lower()).encode("ascii", "ignore").decode("ascii")
+
+
+def _needs_summary(question: str) -> bool:
+    q = _normalize(question)
+    return any(kw in q for kw in _NEEDS_SUMMARY_KEYWORDS)
+
+
+async def _summarize_results(
+    question: str, rows: list[dict], model: str, settings,
+) -> str | None:
+    """Appelle le LLM une seconde fois pour synthétiser les résultats SQL."""
+    import json
+
+    rows_text = json.dumps(rows[:20], ensure_ascii=False, default=str)
+    prompt = _SUMMARY_PROMPT.format(question=question, count=len(rows), rows=rows_text)
+
+    try:
+        summary = await complete(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=600,
+            temperature=0.1,
+        )
+        return summary.strip() if summary else None
+    except Exception as e:
+        log.warning("charlie.summary_failed", error=str(e))
+        return None
