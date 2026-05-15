@@ -17,6 +17,7 @@ from app.pipeline.classifier import classify
 from app.pipeline.generator import generate_draft
 from app.pipeline.language import detect_language
 from app.pipeline.prefilter import quick_classify
+from app.pipeline.priority import assign_priority
 
 log = structlog.get_logger()
 
@@ -73,6 +74,7 @@ def _persist(
     draft_generated: int,
     body_preview: str = "",
     ai_draft: str = "",
+    priority: str = "normal",
 ) -> None:
     conn = sqlite3.connect(db_path)
     try:
@@ -81,16 +83,17 @@ def _persist(
             INSERT INTO mail_processed
                 (imap_uid, mailbox_name, subject, sender, received_at, category, draft_generated,
                  body_preview, ai_draft, status, priority)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'normal')
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
             ON CONFLICT(imap_uid, mailbox_name) DO UPDATE SET
                 category = excluded.category,
                 draft_generated = excluded.draft_generated,
                 body_preview = COALESCE(NULLIF(excluded.body_preview, ''), mail_processed.body_preview),
                 ai_draft = COALESCE(NULLIF(excluded.ai_draft, ''), mail_processed.ai_draft),
+                priority = excluded.priority,
                 processed_at = CURRENT_TIMESTAMP
             """,
             (imap_uid, mailbox_name, subject, sender, received_at, category, draft_generated,
-             body_preview, ai_draft),
+             body_preview, ai_draft, priority),
         )
         conn.commit()
     finally:
@@ -210,6 +213,9 @@ async def _process_single_mail(
         category = await classify(subject, body, sender)
         log.info("poller.classified", mailbox=mailbox.name, uid=uid, category=category)
 
+    priority = assign_priority(category, subject, body, sender)
+    log.info("poller.priority", mailbox=mailbox.name, uid=uid, category=category, priority=priority)
+
     draft_generated = 0
     if category == "demande_client":
         language = detect_language(body, default=mailbox.default_lang)
@@ -251,6 +257,7 @@ async def _process_single_mail(
         draft_generated,
         body_preview,
         ai_draft_text,
+        priority,
     )
 
     if not settings.dry_run:
