@@ -16,6 +16,8 @@ slack_handler = None
 
 _MAX_ROWS = 10
 _MAX_FIELDS_PER_ROW = 5
+_MAX_SHORT_VAL = 60
+_MAX_BODY_VAL = 800
 _RATE_LIMIT_WINDOW = 60.0
 _RATE_LIMIT_MAX = 10
 _user_rate_limits: dict[str, list[float]] = {}
@@ -43,8 +45,13 @@ def _format_rows_blocks(rows: list[dict], base_url: str) -> list[dict]:
     blocks = []
     for row in rows[:_MAX_ROWS]:
         parts = []
-        for key, val in list(row.items())[:_MAX_FIELDS_PER_ROW]:
-            display = str(val)[:60] if val is not None else "-"
+        for key, val in list(row.items()):
+            if val is None:
+                display = "-"
+            elif key in ("body", "ai_draft", "human_draft"):
+                display = str(val)[:_MAX_BODY_VAL]
+            else:
+                display = str(val)[:_MAX_SHORT_VAL]
             if key == "id" and val is not None:
                 display = f"<{base_url}/app/conversation/{val}|#{val}>"
             elif key == "subject" and "id" in row and row.get("id") is not None:

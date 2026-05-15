@@ -74,6 +74,7 @@ def _persist(
     category: str,
     draft_generated: int,
     body_preview: str = "",
+    body: str = "",
     ai_draft: str = "",
     priority: str = "normal",
 ) -> None:
@@ -83,18 +84,19 @@ def _persist(
             """
             INSERT INTO mail_processed
                 (imap_uid, mailbox_name, subject, sender, received_at, category, draft_generated,
-                 body_preview, ai_draft, status, priority)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+                 body_preview, body, ai_draft, status, priority)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
             ON CONFLICT(imap_uid, mailbox_name) DO UPDATE SET
                 category = excluded.category,
                 draft_generated = excluded.draft_generated,
                 body_preview = COALESCE(NULLIF(excluded.body_preview, ''), mail_processed.body_preview),
+                body = COALESCE(NULLIF(excluded.body, ''), mail_processed.body),
                 ai_draft = COALESCE(NULLIF(excluded.ai_draft, ''), mail_processed.ai_draft),
                 priority = excluded.priority,
                 processed_at = CURRENT_TIMESTAMP
             """,
             (imap_uid, mailbox_name, subject, sender, received_at, category, draft_generated,
-             body_preview, ai_draft, priority),
+             body_preview, body, ai_draft, priority),
         )
         conn.commit()
     finally:
@@ -271,6 +273,7 @@ async def _process_single_mail(
         category,
         draft_generated,
         body_preview,
+        body,
         ai_draft_text,
         priority,
     )

@@ -143,7 +143,7 @@ async def _fetch_mail(db: aiosqlite.Connection, mail_id: int) -> dict | None:
     async with db.execute(
         "SELECT id, mailbox_name, subject, sender, received_at, category, "
         "status, priority, ai_draft, human_draft, reviewed_by, reviewed_at, "
-        "sent_at, sent_by, body_preview "
+        "sent_at, sent_by, body_preview, body "
         "FROM mail_processed WHERE id = ?",
         (mail_id,),
     ) as cursor:
@@ -153,7 +153,7 @@ async def _fetch_mail(db: aiosqlite.Connection, mail_id: int) -> dict | None:
     cols = [
         "id", "mailbox_name", "subject", "sender", "received_at", "category",
         "status", "priority", "ai_draft", "human_draft", "reviewed_by",
-        "reviewed_at", "sent_at", "sent_by", "body_preview",
+        "reviewed_at", "sent_at", "sent_by", "body_preview", "body",
     ]
     return dict(zip(cols, row, strict=True))
 

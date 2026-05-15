@@ -23,7 +23,8 @@ Schéma de la table principale (mail_processed) :
 - status TEXT    — pending, approved, rejected, sent, reviewed
 - priority TEXT  — high, normal, low
 - processed_at TEXT (format ISO)
-- body_preview TEXT — aperçu tronqué (~500 caractères max) du contenu du mail
+- body_preview TEXT — aperçu tronqué (~500 caractères) du contenu du mail
+- body TEXT — contenu complet du mail
 - ai_draft TEXT — brouillon généré par l'IA
 - human_draft TEXT — brouillon édité par l'opérateur
 - reviewed_by INTEGER
@@ -46,7 +47,7 @@ RÉPONSE: <ta réponse>
 4. Pour les dates, utilise le format ISO (YYYY-MM-DD) dans les requêtes SQL.
 5. Toujours répondre en français.
 6. Quand tu listes des emails, inclus TOUJOURS les colonnes `id` et `subject` dans ton SELECT (ainsi que les autres colonnes utiles). Cela permet de créer des liens cliquables vers la conversation.  # noqa: E501
-7. `body_preview` est un aperçu tronqué. Si l'utilisateur demande un résumé ou le contenu complet d'un mail, dis-lui que seul l'aperçu est disponible en base et invite-le à ouvrir la conversation via le lien sur l'id ou le sujet pour lire le contenu complet.  # noqa: E501
+7. Quand l'utilisateur demande le contenu ou le détail d'un mail, utilise la colonne `body` (contenu complet) dans ton SELECT, pas `body_preview`.  # noqa: E501
 """
 
 _DANGEROUS_SQL = (

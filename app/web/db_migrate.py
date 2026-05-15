@@ -22,6 +22,7 @@ _MAIL_PROCESSED_COLS: list[tuple[str, str]] = [
     ("sent_at", "DATETIME"),
     ("sent_by", "INTEGER"),
     ("body_preview", "TEXT"),
+    ("body", "TEXT"),
 ]
 
 
