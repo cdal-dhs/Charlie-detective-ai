@@ -344,6 +344,10 @@ async def draft_approve(
 
 _STATUSES = ["pending", "approved", "rejected", "sent", "reviewed"]
 _PRIORITIES = ["high", "normal", "low"]
+_CATEGORIES = [
+    "demande_client", "facture", "newsletter", "spam",
+    "urgent", "phishing", "rappel", "autre",
+]
 
 
 @router.post("/mails/{mail_id}/status")
@@ -417,5 +421,54 @@ async def mail_update_priority(
         f'<option value="high" {"selected" if new_priority == "high" else ""}>high</option>'
         f'<option value="normal" {"selected" if new_priority == "normal" else ""}>normal</option>'
         f'<option value="low" {"selected" if new_priority == "low" else ""}>low</option>'
+        f'</select></form>'
+    )
+
+
+@router.post("/mails/{mail_id}/category")
+async def mail_update_category(
+    request: Request,
+    mail_id: int,
+    db: aiosqlite.Connection = Depends(get_db),  # noqa: B008
+    user: dict = Depends(require_operator),  # noqa: B008
+) -> HTMLResponse:
+    form = await request.form()
+    new_category = str(form.get("category", "")).strip()
+    if new_category not in _CATEGORIES:
+        raise HTTPException(status_code=400, detail="Catégorie invalide")
+
+    await db.execute(
+        "UPDATE mail_processed SET category = ? WHERE id = ?",
+        (new_category, mail_id),
+    )
+    await db.commit()
+
+    ip = request.client.host if request.client else None
+    await audit_log(
+        db, user["id"], "category_update", "mail_processed", str(mail_id),
+        new_category, ip, request.headers.get("user-agent"),
+    )
+
+    badge_class = (
+        "bg-blue-600 text-white" if new_category == "demande_client" else
+        "bg-red-600 text-white" if new_category == "urgent" else
+        "bg-green-600 text-white" if new_category == "newsletter" else
+        "bg-yellow-600 text-white" if new_category == "facture" else
+        "bg-gray-600 text-white" if new_category == "spam" else
+        "bg-purple-600 text-white" if new_category == "phishing" else
+        "bg-orange-600 text-white" if new_category == "rappel" else
+        "bg-gray-700 text-gray-300"
+    )
+
+    options = ""
+    for c in _CATEGORIES:
+        sel = "selected" if c == new_category else ""
+        options += f'<option value="{c}" {sel}>{c}</option>'
+
+    return HTMLResponse(
+        f'<form class="inline" hx-post="/api/mails/{mail_id}/category" '
+        f'hx-target="this" hx-swap="outerHTML" hx-trigger="change">'
+        f'<select name="category" class="bg-gray-950 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200">'
+        f'{options}'
         f'</select></form>'
     )

@@ -4,6 +4,17 @@
 
 ---
 
+## [1.1.5] — 2026-05-15
+
+### Ajouté
+- **Édition inline de la catégorie** dans le listing inbox : dropdown HTMX identique à statut/priorité.
+- **Bouton "Réinitialiser"** dans la barre de filtres de l'inbox : efface tous les filtres et recharge la liste complète.
+
+### Modifié
+- **Inbox : suppression de la colonne Action** (redondante car le sujet est déjà un lien vers la conversation).
+
+---
+
 ## [1.1.4] — 2026-05-15
 
 ### Ajouté

@@ -1,5 +1,5 @@
 {% if not mails %}
-<tr><td colspan="8" class="px-4 py-8 text-center text-gray-500">Aucun message</td></tr>
+<tr><td colspan="7" class="px-4 py-8 text-center text-gray-500">Aucun message</td></tr>
 {% else %}
 {% for m in mails %}
 <tr class="border-b border-gray-800 hover:bg-gray-800/50">
@@ -9,17 +9,24 @@
   </td>
   <td class="px-4 py-3">{{ m.sender or '-' }}</td>
   <td class="px-4 py-3">
-    <span class="px-2 py-1 rounded text-xs font-medium
-      {% if m.category == 'demande_client' %}bg-blue-600 text-white
-      {% elif m.category == 'urgent' %}bg-red-600 text-white
-      {% elif m.category == 'newsletter' %}bg-green-600 text-white
-      {% elif m.category == 'facture' %}bg-yellow-600 text-white
-      {% elif m.category == 'spam' %}bg-gray-600 text-white
-      {% elif m.category == 'phishing' %}bg-purple-600 text-white
-      {% elif m.category == 'rappel' %}bg-orange-600 text-white
-      {% else %}bg-gray-700 text-gray-300{% endif %}">
-      {{ m.category or '-' }}
-    </span>
+    <form
+      class="inline"
+      hx-post="/api/mails/{{ m.id }}/category"
+      hx-target="this"
+      hx-swap="outerHTML"
+      hx-trigger="change"
+    >
+      <select name="category" class="bg-gray-950 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200">
+        <option value="demande_client" {% if m.category == 'demande_client' %}selected{% endif %}>demande_client</option>
+        <option value="urgent" {% if m.category == 'urgent' %}selected{% endif %}>urgent</option>
+        <option value="newsletter" {% if m.category == 'newsletter' %}selected{% endif %}>newsletter</option>
+        <option value="facture" {% if m.category == 'facture' %}selected{% endif %}>facture</option>
+        <option value="spam" {% if m.category == 'spam' %}selected{% endif %}>spam</option>
+        <option value="phishing" {% if m.category == 'phishing' %}selected{% endif %}>phishing</option>
+        <option value="rappel" {% if m.category == 'rappel' %}selected{% endif %}>rappel</option>
+        <option value="autre" {% if m.category == 'autre' %}selected{% endif %}>autre</option>
+      </select>
+    </form>
   </td>
   <td class="px-4 py-3">
     <form
@@ -55,9 +62,6 @@
     </form>
   </td>
   <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-400">{{ m.processed_at or '-' }}</td>
-  <td class="px-4 py-3">
-    <a href="/app/conversation/{{ m.id }}" class="text-blue-400 hover:underline text-sm">Ouvrir</a>
-  </td>
 </tr>
 {% endfor %}
 {% endif %}

@@ -65,6 +65,11 @@
     <input type="hidden" name="sort" x-model="sort">
     <input type="hidden" name="order" x-model="order">
     <button type="submit" class="px-3 py-1 bg-gray-800 hover:bg-gray-700 rounded text-sm">Filtrer</button>
+    <button
+      type="button"
+      class="px-3 py-1 bg-gray-800 hover:bg-gray-700 rounded text-sm"
+      @click="activeTab = 'all'; document.getElementById('filter-category').value = ''; document.querySelector('#filter-form select[name=box]').value = ''; document.querySelector('#filter-form select[name=status]').value = ''; document.querySelector('#filter-form select[name=priority]').value = ''; htmx.trigger('#filter-form', 'submit')"
+    >Réinitialiser</button>
   </form>
 
   <!-- Table -->
@@ -104,7 +109,6 @@
             </button>
           </th>
           {% endfor %}
-          <th class="px-4 py-3">Action</th>
         </tr>
       </thead>
       <tbody id="inbox-table-body" class="divide-y divide-gray-800">
