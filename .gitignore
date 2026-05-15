@@ -14,6 +14,7 @@ data/*.sqlite-shm
 
 # Screenshots & test artifacts
 screenshot_*.png
+conversation_*.png
 .playwright-mcp/
 
 # Logs

@@ -48,6 +48,10 @@ def make_app() -> FastAPI:
         ok = all_connected and all_recent
         return {"ok": ok, **snap}
 
+    @app.get("/")
+    def root_redirect() -> RedirectResponse:
+        return RedirectResponse(url="/auth/login", status_code=302)
+
     app.include_router(auth_router)
     app.include_router(app_router)
     app.include_router(admin_router)

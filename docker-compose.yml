@@ -1,0 +1,36 @@
+services:
+  detective:
+    build: .
+    container_name: detective-agent
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data
+      - hf_cache:/root/.cache/huggingface
+    env_file:
+      - .env.production
+    environment:
+      # Overrides obligatoires pour Docker / Traefik
+      WEB_BIND_HOST: "0.0.0.0"
+      HEALTHCHECK_HOST: "0.0.0.0"
+      DATA_DIR: "/app/data"
+      DB_BOITE_1: "/app/data/boite1.sqlite"
+      DB_BOITE_2: "/app/data/boite2.sqlite"
+      DB_BOITE_3: "/app/data/boite3.sqlite"
+      DB_AGENT_STATE: "/app/data/agent_state.db"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.detective.rule=Host(`detective.digitalhs.biz`)"
+      - "traefik.http.routers.detective.tls=true"
+      - "traefik.http.routers.detective.entrypoints=web,websecure"
+      - "traefik.http.routers.detective.tls.certresolver=mytlschallenge"
+      - "traefik.http.services.detective.loadbalancer.server.port=8080"
+    networks:
+      - root_default
+
+networks:
+  root_default:
+    external: true
+    name: root_default
+
+volumes:
+  hf_cache:
