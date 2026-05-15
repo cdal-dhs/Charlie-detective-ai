@@ -4,6 +4,22 @@
 
 ---
 
+## [1.6.1] — 2026-05-15
+
+### Ajouté
+- **Colonne `body`** : stockage du contenu complet des emails dans la DB (en plus de `body_preview` tronqué à 2000 chars). Les nouveaux mails auront le contenu complet accessible par Charlie AI et la web UI.
+- **Affichage complet dans Slack** : les champs `body`, `ai_draft`, `human_draft` s'affichent jusqu'à 800 chars dans les réponses Block Kit (au lieu de 60 chars).
+
+### Modifié
+- **Prompt Charlie** : `body` documenté dans le schéma, règle de déflexion supprimée — Charlie peut désormais afficher le contenu complet d'un mail.
+- **Web UI** : la page conversation affiche `body` en priorité, `body_preview` en fallback.
+- **IMAP poller** : `_persist()` stocke désormais `body` en plus de `body_preview`.
+
+### Corrigé
+- **Slack Bot route** : l'import `from ... import slack_handler` capturait `None` au chargement du module au lieu de lire la valeur à l'exécution. Corrigé en important le module (`slack_bot_module.slack_handler`).
+
+---
+
 ## [1.6.0] — 2026-05-15
 
 ### Ajouté
