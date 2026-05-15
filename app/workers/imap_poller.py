@@ -22,7 +22,7 @@ from app.pipeline.priority import assign_priority
 
 log = structlog.get_logger()
 
-AGENT_FLAG = "$AgentProcessed"
+AGENT_FLAG = "AgentProcessed"
 IMAP_RETRY_ATTEMPTS = 3
 
 
@@ -137,12 +137,12 @@ async def _poll_once(mailbox: MailboxConfig) -> None:
 
 
 def _build_search_criteria(settings) -> str:
-    """Construit le critère SEARCH IMAP : UNKEYWORD $AgentProcessed + SINCE si configuré."""
-    criteria = ["UNKEYWORD", "$AgentProcessed"]
+    """Construit le critère SEARCH IMAP : UNKEYWORD AgentProcessed + SINCE si configuré."""
+    criteria = ["UNKEYWORD", AGENT_FLAG]
     if settings.process_since_date:
         try:
             dt = datetime.strptime(settings.process_since_date, "%Y-%m-%d")
-            since_str = dt.strftime("%d-%b-%Y")  # ex: 01-May-2026
+            since_str = dt.strftime("%d-%b-%Y")
             criteria += ["SINCE", since_str]
         except ValueError:
             log.warning("config.invalid_process_since_date", value=settings.process_since_date)
