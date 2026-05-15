@@ -182,8 +182,8 @@ DETECTIVE_BE/
 
 ## Versions
 
-Version source de vérité : **`pyproject.toml`** (`version = "1.6.1"`).
+Version source de vérité : **`pyproject.toml`** (`version = "1.7.0"`).
 
-Le badge affiché dans le cockpit (`v1.6.1`) est lu dynamiquement depuis `pyproject.toml` via `importlib.metadata`. Ne modifier la version que dans `pyproject.toml`.
+Le badge affiché dans le cockpit (`v1.7.0`) est lu dynamiquement depuis `pyproject.toml` via `importlib.metadata`. Ne modifier la version que dans `pyproject.toml`.
 
 Voir [`CHANGELOG.md`](CHANGELOG.md) pour l'historique détaillé.

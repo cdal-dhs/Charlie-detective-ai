@@ -4,6 +4,14 @@
 
 ---
 
+## [1.7.0] — 2026-05-15
+
+### Ajouté
+- **Charlie AI : synthèse en langage naturel** — quand l'opérateur demande un résumé, un détail ou le contenu d'un dossier/mail, Charlie exécute le SQL puis lance un second appel LLM pour produire une vraie synthèse au lieu d'afficher juste un tableau brut.
+- **Détection automatique** des requêtes de type résumé (résume, synthèse, détail, contenu, que dit...) avec normalisation Unicode pour les accents français.
+
+---
+
 ## [1.6.1] — 2026-05-15
 
 ### Ajouté

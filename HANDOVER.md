@@ -1,7 +1,7 @@
 # HANDOVER — Detective.be Agent (Charlie)
 
 > **Date** : 2026-05-15
-> **Version** : 1.6.1
+> **Version** : 1.7.0
 > **Intégrateur** : CDAL (`cdal@digitalhs.biz`)
 > **Client** : Daniel Hurchon — Detective.be (3 marques : Detective Belgique FR, Detective Belgium EN/multi, DPDH Investigations)
 > **Repo** : https://github.com/cdal-dhs/Charlie-detective-ai
@@ -152,7 +152,7 @@ DETECTIVE_BE/
 ├── README.md                    # Vue d'ensemble publique
 ├── CHANGELOG.md                 # Historique versions (format Keep a Changelog)
 ├── HANDOVER.md                  # Ce fichier (état + contexte pour nouvel agent)
-├── pyproject.toml               # Version source de vérité (1.6.1), deps, ruff, pytest
+├── pyproject.toml               # Version source de vérité (1.7.0), deps, ruff, pytest
 ├── .env.example                 # Template config (sans secrets)
 ├── Dockerfile                   # Python 3.11 slim
 ├── docker-compose.yml           # Service + labels Traefik
@@ -333,4 +333,4 @@ Les fichiers suivants persistent entre sessions Claude Code et guident le compor
 
 ---
 
-*Document maintenu à jour à chaque itération. Dernière mise à jour : 2026-05-15 (v1.6.1).*
+*Document maintenu à jour à chaque itération. Dernière mise à jour : 2026-05-15 (v1.7.0).*
