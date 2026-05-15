@@ -184,12 +184,13 @@
       x-transition:leave-end="opacity-0 scale-95"
       class="fixed inset-0 z-[100] flex items-center justify-center p-4"
       @keydown.escape.window="open = false"
+      x-init="$watch('open', value => { if (value) { $nextTick(() => { htmx.process(document.getElementById('charlie-form')); }); } })"
     >
       <!-- Backdrop -->
       <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" @click="open = false"></div>
 
       <!-- Contenu -->
-      <div class="relative w-full max-w-4xl h-[80vh] flex flex-col bg-gray-900 border border-gray-700 rounded-xl shadow-2xl">
+      <div class="relative w-full max-w-4xl h-[80vh] flex flex-col bg-gray-900 border border-gray-700 rounded-xl shadow-2xl resize overflow-auto min-w-[400px] min-h-[300px]">
         <!-- Header -->
         <div class="flex items-center justify-between px-6 py-4 border-b border-gray-700 bg-gray-800/50 rounded-t-xl">
           <div class="flex items-center gap-3">
@@ -224,6 +225,7 @@
           hx-post="/api/charlie/ask"
           hx-target="#charlie-messages"
           hx-swap="beforeend"
+          hx-trigger="submit"
           @submit="loading = true"
           @htmx:afterRequest="loading = false; document.getElementById('charlie-input').value = ''; document.getElementById('charlie-messages').scrollTop = document.getElementById('charlie-messages').scrollHeight;"
         >
