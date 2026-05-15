@@ -34,17 +34,17 @@ def assign_priority(category: str, subject: str, body: str, sender: str) -> str:
 
     # 2. Demande client — analyse du ton et de la source
     if category == "demande_client":
-        # Source formulaire = toujours HIGH (c'est du chaud, business qui rentre)
-        if any(kw in sender_lower for kw in ("form", "noreply", "contact@", "web@")):
-            return "high"
+        # Source formulaire du site = HIGH (business qui rentre directement)
         if any(kw in text for kw in FORM_KEYWORDS):
+            return "high"
+        if any(kw in sender_lower for kw in ("formsubmit", "formspree", "noreply@form")):
             return "high"
 
         # Ton insistant = HIGH
         if any(kw in text for kw in HIGH_KEYWORDS):
             return "high"
 
-        # Sinon = normal (on surveille, pas d'action immédiate)
+        # Demande client standard = normal
         return "normal"
 
     # 3. Rappel avec deadline proche → HIGH
