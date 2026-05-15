@@ -4,6 +4,13 @@
 
 ---
 
+## [1.1.9] — 2026-05-15
+
+### Ajouté
+- **Chat AI Charlie** dans l'inbox : bouton flottant violet qui ouvre un panneau de chat. L'opérateur pose des questions en langage naturel sur les emails en base (ex: "recherche les factures depuis le 05/05/26"). Charlie génère du SQL SELECT, l'exécute en read-only et retourne la réponse sous forme de tableau + texte.
+
+---
+
 ## [1.1.8] — 2026-05-15
 
 ### Ajouté

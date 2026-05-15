@@ -7,6 +7,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from app.config import get_settings
+from app.llm.router import complete
 from app.pipeline.generator import generate_draft
 from app.pipeline.language import detect_language
 from app.web.deps import get_db, require_operator
@@ -485,4 +486,170 @@ async def mail_update_category(
         f'<select name="category" class="bg-gray-950 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200">'
         f'{options}'
         f'</select></form>'
+    )
+
+
+# ── Charlie AI Chat ──────────────────────────────────────────────────────────
+
+_CHARLIE_SYSTEM_PROMPT = """Tu es Charlie, l'assistant IA de Detective.be. Tu aides l'opérateur à interroger la base de données des emails traités.
+
+Schéma de la table principale (mail_processed) :
+- id INTEGER PRIMARY KEY
+- mailbox_name TEXT  — nom technique de la boîte (ex: detective_belgique, detective_belgium, dpdh_investigations)
+- subject TEXT
+- sender TEXT
+- received_at TEXT (format ISO, ex: 2026-05-15T10:30:00)
+- category TEXT  — valeurs: demande_client, urgent, newsletter, facture, spam, phishing, rappel, autre
+- status TEXT    — valeurs: pending, approved, rejected, sent, reviewed
+- priority TEXT  — valeurs: high, normal, low
+- processed_at TEXT (format ISO)
+- body_preview TEXT — aperçu du contenu du mail
+- ai_draft TEXT — brouillon généré par l'IA
+- human_draft TEXT — brouillon édité par l'opérateur
+- reviewed_by INTEGER — id de l'opérateur qui a validé
+- reviewed_at TEXT
+
+Règles :
+1. Si la question nécessite une requête SQL pour répondre précisément, génère UNIQUEMENT une requête SELECT (jamais INSERT/UPDATE/DELETE/DROP/ALTER).
+2. Formate ta réponse exactement comme ceci :
+
+SQL: <ta requête SELECT sur une seule ligne, sans saut de ligne>
+---
+RÉPONSE: <ta réponse conversationnelle en français, courte et directe>
+
+3. Si la question ne nécessite pas de SQL (salutation, question générale), laisse SQL vide :
+
+SQL:
+---
+RÉPONSE: <ta réponse>
+
+4. Pour les dates, utilise le format ISO (YYYY-MM-DD) dans les requêtes SQL.
+5. Toujours répondre en français.
+"""
+
+_DANGEROUS_SQL = ("drop", "delete", "insert", "update", "alter", "create", "replace", "truncate", "attach", "detach")
+
+
+def _parse_charlie_response(text: str) -> tuple[str, str]:
+    """Extrait le SQL et la réponse textuelle du LLM."""
+    sql_part = ""
+    response_part = ""
+    if "---" in text:
+        parts = text.split("---", 1)
+        first = parts[0].strip()
+        if first.lower().startswith("sql:"):
+            sql_part = first[4:].strip()
+        response_part = parts[1].strip()
+        if response_part.lower().startswith("réponse:"):
+            response_part = response_part[8:].strip()
+    else:
+        response_part = text.strip()
+    return sql_part, response_part
+
+
+def _is_safe_sql(sql: str) -> bool:
+    """Vérifie que le SQL est un SELECT read-only."""
+    if not sql:
+        return True
+    cleaned = sql.lower().strip()
+    if not cleaned.startswith("select"):
+        return False
+    for dangerous in _DANGEROUS_SQL:
+        if dangerous in cleaned:
+            return False
+    return True
+
+
+async def _run_sql(db: aiosqlite.Connection, sql: str) -> list[dict]:
+    """Exécute un SELECT et retourne les résultats sous forme de dicts."""
+    async with db.execute(sql) as cursor:
+        rows = await cursor.fetchall()
+        desc = cursor.description
+        if desc is None:
+            return []
+        keys = [d[0] for d in desc]
+        return [dict(zip(keys, row)) for row in rows]
+
+
+@router.post("/charlie/ask")
+async def charlie_ask(
+    request: Request,
+    db: aiosqlite.Connection = Depends(get_db),  # noqa: B008
+    user: dict = Depends(require_operator),  # noqa: B008
+) -> HTMLResponse:
+    form = await request.form()
+    question = str(form.get("question", "")).strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="Question vide")
+
+    settings = get_settings()
+    model = settings.llm_model_default
+
+    messages = [
+        {"role": "system", "content": _CHARLIE_SYSTEM_PROMPT},
+        {"role": "user", "content": question},
+    ]
+
+    try:
+        raw = await complete(model=model, messages=messages, max_tokens=800, temperature=0.1)
+    except Exception as e:
+        log.warning("charlie.llm_failed", error=str(e))
+        return HTMLResponse(
+            '<div class="p-3 bg-red-900/40 border border-red-800 rounded text-red-300 text-sm">'
+            'Charlie est momentanément indisponible. Réessaie dans un instant.'
+            '</div>'
+        )
+
+    sql, response_text = _parse_charlie_response(raw)
+
+    results_html = ""
+    if sql and _is_safe_sql(sql):
+        try:
+            rows = await _run_sql(db, sql)
+            if rows:
+                # Formater le résultat en mini-tableau HTML
+                headers = list(rows[0].keys())
+                header_html = "".join(f'<th class="px-2 py-1 text-left text-xs text-gray-400 border-b border-gray-700">{h}</th>' for h in headers)
+                rows_html = ""
+                for r in rows[:20]:
+                    rows_html += "<tr>" + "".join(
+                        f'<td class="px-2 py-1 text-xs text-gray-300 border-b border-gray-800 whitespace-nowrap">{str(v)[:60] if v is not None else "-"}</td>'
+                        for v in r.values()
+                    ) + "</tr>"
+                results_html = (
+                    f'<div class="mt-2 overflow-x-auto border border-gray-800 rounded">'
+                    f'<table class="w-full text-sm"><thead><tr>{header_html}</tr></thead>'
+                    f'<tbody>{rows_html}</tbody></table></div>'
+                )
+                if len(rows) > 20:
+                    results_html += f'<p class="text-xs text-gray-500 mt-1">({len(rows)} résultats — 20 affichés)</p>'
+            else:
+                results_html = '<p class="text-xs text-gray-500 mt-1">Aucun résultat.</p>'
+        except Exception as e:
+            log.warning("charlie.sql_failed", sql=sql, error=str(e))
+            results_html = f'<p class="text-xs text-red-400 mt-1">Erreur SQL : {str(e)}</p>'
+    elif sql:
+        results_html = '<p class="text-xs text-red-400 mt-1">Requête SQL refusée (sécurité).</p>'
+
+    ip = request.client.host if request.client else None
+    await audit_log(
+        db, user["id"], "charlie_ask", "mail_processed", "",
+        f"q={question[:40]} sql={bool(sql)}", ip, request.headers.get("user-agent"),
+    )
+
+    safe_response = (
+        response_text
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+
+    return HTMLResponse(
+        f'<div class="flex gap-3">'
+        f'<div class="w-8 h-8 rounded-full bg-purple-600 flex items-center justify-center text-xs font-bold shrink-0">AI</div>'
+        f'<div class="flex-1">'
+        f'<div class="text-sm text-gray-200">{safe_response}</div>'
+        f'{results_html}'
+        f'</div>'
+        f'</div>'
     )

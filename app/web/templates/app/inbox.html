@@ -158,5 +158,79 @@
       </tbody>
     </table>
   </div>
+
+  <!-- Charlie AI Chat ──────────────────────────────────────────────────── -->
+  <div x-data="{ open: false, loading: false }" class="relative">
+    <!-- Bouton flottant -->
+    <button
+      @click="open = !open"
+      class="fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 bg-purple-600 hover:bg-purple-500 rounded-full shadow-lg text-white font-medium transition-all"
+    >
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z" />
+      </svg>
+      <span>Charlie AI</span>
+    </button>
+
+    <!-- Panneau de chat -->
+    <div
+      x-show="open"
+      x-transition
+      class="fixed bottom-20 right-6 z-50 w-96 max-h-[70vh] flex flex-col bg-gray-900 border border-gray-700 rounded-lg shadow-2xl"
+      @click.away="open = false"
+    >
+      <!-- Header -->
+      <div class="flex items-center justify-between px-4 py-3 border-b border-gray-700">
+        <div class="flex items-center gap-2">
+          <div class="w-7 h-7 rounded-full bg-purple-600 flex items-center justify-center text-xs font-bold">AI</div>
+          <span class="font-semibold text-sm">Charlie — Assistant DB</span>
+        </div>
+        <button @click="open = false" class="text-gray-400 hover:text-white">✕</button>
+      </div>
+
+      <!-- Messages -->
+      <div id="charlie-messages" class="flex-1 overflow-y-auto p-4 space-y-3 min-h-[200px] max-h-[50vh]">
+        <div class="flex gap-3">
+          <div class="w-8 h-8 rounded-full bg-purple-600 flex items-center justify-center text-xs font-bold shrink-0">AI</div>
+          <div class="text-sm text-gray-300">
+            Salut ! Pose-moi une question sur les emails : "factures depuis le 05/05/26", "combien de phishing ce mois-ci ?", etc.
+          </div>
+        </div>
+      </div>
+
+      <!-- Input -->
+      <form
+        id="charlie-form"
+        class="p-3 border-t border-gray-700 flex gap-2"
+        hx-post="/api/charlie/ask"
+        hx-target="#charlie-messages"
+        hx-swap="beforeend"
+        @submit="
+          loading = true;
+          const input = document.getElementById('charlie-input');
+          const msg = input.value;
+          const userBubble = document.createElement('div');
+          userBubble.className = 'flex gap-3 justify-end';
+          userBubble.innerHTML = '<div class=\"text-sm text-gray-100 bg-gray-800 rounded-lg px-3 py-2 max-w-[80%]\">' + msg.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</div>';
+          document.getElementById('charlie-messages').appendChild(userBubble);
+        "
+        @htmx:afterRequest="loading = false; document.getElementById('charlie-input').value = ''; document.getElementById('charlie-messages').scrollTop = document.getElementById('charlie-messages').scrollHeight;"
+      >
+        <input
+          id="charlie-input"
+          type="text"
+          name="question"
+          placeholder="Pose ta question à Charlie..."
+          class="flex-1 bg-gray-950 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-purple-500"
+          required
+        >
+        <button
+          type="submit"
+          class="px-3 py-2 bg-purple-600 hover:bg-purple-500 rounded text-sm font-medium text-white"
+          :disabled="loading"
+        >Envoyer</button>
+      </form>
+    </div>
+  </div>
 </div>
 {% endblock %}
