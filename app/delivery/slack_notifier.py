@@ -29,8 +29,18 @@ async def send_slack_message(text: str, blocks: list[dict] | None = None) -> Non
     log.info("slack.sent", text=text[:50])
 
 
-async def notify_new_draft(draft_id: str, sender: str, subject: str, category: str) -> None:
+async def notify_new_draft(
+    draft_id: str | int,
+    sender: str,
+    subject: str,
+    category: str,
+    base_url: str = "",
+) -> None:
     """Notification quand un nouveau brouillon est généré."""
+    id_display = f"#{draft_id}"
+    if base_url:
+        id_display = f"<{base_url}/app/conversation/{draft_id}|#{draft_id}>"
+
     blocks = [
         {
             "type": "header",
@@ -43,6 +53,7 @@ async def notify_new_draft(draft_id: str, sender: str, subject: str, category: s
         {
             "type": "section",
             "fields": [
+                {"type": "mrkdwn", "text": f"*ID:*\n{id_display}"},
                 {"type": "mrkdwn", "text": f"*Expéditeur:*\n{sender}"},
                 {"type": "mrkdwn", "text": f"*Sujet:*\n{subject}"},
                 {"type": "mrkdwn", "text": f"*Catégorie:*\n{category}"},

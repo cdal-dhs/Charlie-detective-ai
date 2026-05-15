@@ -249,7 +249,8 @@ async def _process_single_mail(
             )
             await notify_draft(incoming, mailbox, gen)
             await notify_slack_draft(
-                draft_id=uid, sender=sender, subject=subject, category=category
+                draft_id=uid, sender=sender, subject=subject, category=category,
+                base_url=settings.public_base_url.rstrip("/") if settings.public_base_url else "",
             )
         else:
             log.info(
