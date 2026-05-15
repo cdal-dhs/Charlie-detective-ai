@@ -5,9 +5,8 @@ services:
     restart: unless-stopped
     volumes:
       - ./data:/app/data
+      - ./.env.production:/app/.env:ro
       - hf_cache:/root/.cache/huggingface
-    env_file:
-      - .env.production
     environment:
       # Overrides obligatoires pour Docker / Traefik
       WEB_BIND_HOST: "0.0.0.0"
