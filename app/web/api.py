@@ -607,18 +607,19 @@ async def charlie_ask(
         try:
             rows = await _run_sql(db, sql)
             if rows:
-                # Formater le résultat en mini-tableau HTML
+                # Formater le résultat en tableau HTML
                 headers = list(rows[0].keys())
-                header_html = "".join(f'<th class="px-2 py-1 text-left text-xs text-gray-400 border-b border-gray-700">{h}</th>' for h in headers)
+                header_html = "".join(f'<th class="px-4 py-2 text-left text-sm font-medium text-gray-400 border-b border-gray-600 bg-gray-900/50">{h}</th>' for h in headers)
                 rows_html = ""
-                for r in rows[:20]:
-                    rows_html += "<tr>" + "".join(
-                        f'<td class="px-2 py-1 text-xs text-gray-300 border-b border-gray-800 whitespace-nowrap">{str(v)[:60] if v is not None else "-"}</td>'
+                for idx, r in enumerate(rows[:20]):
+                    bg = "bg-gray-900/30" if idx % 2 == 0 else "bg-transparent"
+                    rows_html += f'<tr class="{bg} hover:bg-gray-700/30 transition-colors">' + "".join(
+                        f'<td class="px-4 py-2 text-sm text-gray-200 border-b border-gray-800 whitespace-nowrap">{str(v)[:80] if v is not None else "-"}</td>'
                         for v in r.values()
                     ) + "</tr>"
                 results_html = (
-                    f'<div class="mt-2 overflow-x-auto border border-gray-800 rounded">'
-                    f'<table class="w-full text-sm"><thead><tr>{header_html}</tr></thead>'
+                    f'<div class="mt-4 overflow-x-auto border border-gray-700 rounded-lg">'
+                    f'<table class="w-full text-base"><thead><tr>{header_html}</tr></thead>'
                     f'<tbody>{rows_html}</tbody></table></div>'
                 )
                 if len(rows) > 20:
@@ -651,16 +652,23 @@ async def charlie_ask(
     )
 
     user_bubble = (
-        f'<div class="flex gap-3 justify-end">'
-        f'<div class="text-sm text-gray-100 bg-gray-800 rounded-lg px-3 py-2 max-w-[80%]">{safe_question}</div>'
+        f'<div class="flex gap-3 justify-end animate-in fade-in slide-in-from-bottom-2">'
+        f'<div class="bg-gray-700 rounded-xl px-5 py-3 max-w-[80%] text-base text-gray-100 leading-relaxed">{safe_question}</div>'
         f'</div>'
     )
+
+    copy_btn = (
+        f'<button type="button" class="ml-auto text-gray-500 hover:text-gray-300 text-xs flex items-center gap-1 mt-2 charlie-copy">'
+        f'<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg> Copier</button>'
+    )
+
     ai_bubble = (
-        f'<div class="flex gap-3">'
-        f'<div class="w-8 h-8 rounded-full bg-purple-600 flex items-center justify-center text-xs font-bold shrink-0">AI</div>'
-        f'<div class="flex-1">'
-        f'<div class="text-sm text-gray-200">{safe_response}</div>'
+        f'<div class="flex gap-3 animate-in fade-in slide-in-from-bottom-2 charlie-bubble">'
+        f'<div class="w-9 h-9 rounded-full bg-purple-600 flex items-center justify-center text-sm font-bold shrink-0 mt-1">AI</div>'
+        f'<div class="flex-1 bg-gray-800 rounded-xl px-5 py-4 text-base text-gray-200 leading-relaxed">'
+        f'<div class="charlie-text whitespace-pre-wrap">{safe_response}</div>'
         f'{results_html}'
+        f'<div class="flex">{copy_btn}</div>'
         f'</div>'
         f'</div>'
     )
