@@ -4,6 +4,16 @@
 
 ---
 
+## [1.1.2] — 2026-05-15
+
+### Ajouté
+- **Filtre date IMAP** (`PROCESS_SINCE_DATE`) : Charlie ne traite que les mails reçus depuis une date configurable (ex: `2026-05-01`). Évite la retraitement massif de l'historique.
+
+## [1.1.1] — 2026-05-15
+
+### Modifié
+- **Poller IMAP** : traite maintenant **tous les emails** (lus et non lus), pas seulement `UNSEEN`. Le flag `$AgentProcessed` évite les doublons.
+
 ## [1.1.0] — 2026-05-15
 
 ### Ajouté
