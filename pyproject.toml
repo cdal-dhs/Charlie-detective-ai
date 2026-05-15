@@ -1,6 +1,6 @@
 [project]
 name = "detective-agent"
-version = "1.5.3"
+version = "1.6.0"
 description = "Agent IA email pour Detective.be — classification + brouillons de réponse style Daniel Hurchon"
 requires-python = ">=3.11"
 dependencies = [
@@ -23,6 +23,7 @@ dependencies = [
     "jinja2>=3.1",
     "itsdangerous>=2.1.0",
     "email-validator>=2.0.0",
+    "slack_bolt>=1.19.0",
 ]
 
 [project.optional-dependencies]

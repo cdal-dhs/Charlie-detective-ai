@@ -1,7 +1,7 @@
 # HANDOVER — Detective.be Agent (Charlie)
 
 > **Date** : 2026-05-15
-> **Version** : 1.5.3
+> **Version** : 1.6.0
 > **Intégrateur** : CDAL (`cdal@digitalhs.biz`)
 > **Client** : Daniel Hurchon — Detective.be (3 marques : Detective Belgique FR, Detective Belgium EN/multi, DPDH Investigations)
 > **Repo** : https://github.com/cdal-dhs/Charlie-detective-ai
@@ -63,6 +63,7 @@ Agent IA Python (asyncio) qui poll 3 boîtes mail Infomaniak toutes les 5 min, c
 | Vector store | **`sqlite-vec`** (extension SQLite, vit dans les DB existantes) |
 | Détection langue | `langdetect` (FR/NL/EN) |
 | Email outbound | **Resend API** → `cdal@digitalhs.biz` (validation humaine) |
+| Slack Bot (interactif) | **Slack Bolt** (async, HTTP mode via FastAPI `/slack/events`) |
 | Web framework | **FastAPI** + **Jinja2** |
 | Frontend | HTMX + Alpine.js + Tailwind CSS (CDN) |
 | Auth | Magic link email (Resend) + sessions `itsdangerous` |
@@ -128,6 +129,19 @@ cp .env.example .env  # puis éditer avec les secrets
 python -m app.main
 ```
 
+### 4.4 Slack App (Charlie Detective)
+
+| Paramètre | Valeur |
+|---|---|
+| App name | Charlie Detective |
+| Event Subscriptions URL | `https://detective.digitalhs.biz/slack/events` |
+| Bot Token | `SLACK_BOT_TOKEN` (xoxb-...) dans `.env` |
+| Signing Secret | `SLACK_SIGNING_SECRET` dans `.env` |
+| Scopes bot | `channels:read`, `chat:write`, `chat:write.public`, `reactions:write`, `app_mentions:read`, `im:history`, `im:read`, `im:write` |
+| Events | `app_mention`, `message.im` |
+
+Le bot répond aux @mentions dans les canaux où il est invité, et en DM.
+
 ---
 
 ## 5. Structure du repo (état au 2026-05-15)
@@ -157,6 +171,7 @@ DETECTIVE_BE/
 │   ├── workers/
 │   │   ├── imap_poller.py       # Boucle polling 3 boîtes
 │   │   └── newsletter_digest.py # Digest quotidien newsletters
+│   ├── charlie.py              # Logique partagée Charlie AI (prompt, SQL, CharlieResult)
 │   ├── pipeline/
 │   │   ├── prefilter.py         # Règles rapides (newsletter, spam, phishing, rappel)
 │   │   ├── classifier.py        # LLM → 8 catégories avec few-shots
@@ -166,7 +181,8 @@ DETECTIVE_BE/
 │   │   └── generator.py         # Assemblage prompt + appel LLM
 │   ├── delivery/
 │   │   ├── resend_notifier.py   # Email brouillon → CDAL
-│   │   └── slack_notifier.py    # Webhook Slack #detective
+│   │   ├── slack_notifier.py    # Webhook Slack #detective (notifications sortantes)
+│   │   └── slack_bot.py         # Slack Bolt App (Charlie AI interactif)
 │   ├── llm/
 │   │   └── router.py            # Wrapper LiteLLM avec fallback OpenRouter
 │   ├── web/                     # Cockpit web FastAPI
@@ -257,6 +273,7 @@ Lis impérativement **`CLAUDE.md`** pour les conventions complètes. Points clé
 | Édition inline | ✅ | Catégorie, statut, priorité via HTMX |
 | Conversation détaillée | ✅ | Body preview + génération brouillon inline |
 | Chat AI Charlie | ✅ | SQL read-only, liens cliquables, resizeable |
+| Slack Bot Charlie AI | ✅ | @mention ou DM sur #detective, même pipeline Charlie AI |
 | Dashboard admin | ✅ | Stats, settings LLM, audit logs |
 | Filtre date IMAP | ✅ | `PROCESS_SINCE_DATE` configurable |
 
@@ -269,6 +286,7 @@ Lis impérativement **`CLAUDE.md`** pour les conventions complètes. Points clé
 | Tests unitaires automatisés | ⏳ | Mocker IMAP/LLM, fixtures classification |
 | Drafts IMAP natifs (V2) | ⬜ | Bascule livraison Resend → Drafts boîte mail |
 | Bot Telegram Boss ↔ Charlie | ⬜ | Canal direct Daniel pour notifications push/validation |
+| Approbation/rejet depuis Slack | ⬜ | V2 — nécessite Slack App interactive |
 | Bot WhatsApp client (V3) | ⬜ | Canal client direct réutilisant RAG |
 | Supervision / monitoring S4 | ⬜ | Grafana ou alerting basique |
 
@@ -309,4 +327,4 @@ Les fichiers suivants persistent entre sessions Claude Code et guident le compor
 
 ---
 
-*Document maintenu à jour à chaque itération. Dernière mise à jour : 2026-05-15 (v1.5.3).*
+*Document maintenu à jour à chaque itération. Dernière mise à jour : 2026-05-15 (v1.6.0).*

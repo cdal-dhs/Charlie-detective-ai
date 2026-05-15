@@ -7,8 +7,8 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from app import __version__
+from app.charlie import BOX_ABBR, ask_charlie
 from app.config import get_settings
-from app.llm.router import complete
 from app.pipeline.generator import generate_draft
 from app.pipeline.language import detect_language
 from app.web.deps import get_db, require_operator
@@ -493,92 +493,42 @@ async def mail_update_category(
 
 # ── Charlie AI Chat ──────────────────────────────────────────────────────────
 
-_CHARLIE_SYSTEM_PROMPT = """Tu es Charlie, l'assistant IA de Detective.be. Tu aides l'opérateur à interroger la base de données des emails traités.
 
-Schéma de la table principale (mail_processed) :
-- id INTEGER PRIMARY KEY
-- mailbox_name TEXT  — detective_belgique (D_FR), detective_belgium (D_NL), dpdh_investigations (D_PD)
-- subject TEXT
-- sender TEXT
-- received_at TEXT (format ISO, ex: 2026-05-15T10:30:00)
-- category TEXT  — demande_client, urgent, newsletter, facture, spam, phishing, rappel, autre
-- status TEXT    — pending, approved, rejected, sent, reviewed
-- priority TEXT  — high, normal, low
-- processed_at TEXT (format ISO)
-- body_preview TEXT — aperçu tronqué (~500 caractères max) du contenu du mail
-- ai_draft TEXT — brouillon généré par l'IA
-- human_draft TEXT — brouillon édité par l'opérateur
-- reviewed_by INTEGER
-- reviewed_at TEXT
+def _format_rows_html(rows: list[dict]) -> str:
+    """Formate les résultats SQL en tableau HTML avec liens cliquables."""
+    if not rows:
+        return '<p class="text-xs text-gray-500 mt-1">Aucun résultat.</p>'
 
-Règles :
-1. Si la question nécessite une requête SQL, génère UNIQUEMENT un SELECT (jamais INSERT/UPDATE/DELETE/DROP/ALTER).
-2. Formate ta réponse exactement comme ceci :
+    headers = list(rows[0].keys())
+    has_id = "id" in headers
+    header_html = "".join(
+        f'<th class="px-4 py-2 text-left text-sm font-medium text-gray-400 border-b border-gray-600 bg-gray-900/50">{h}</th>'
+        for h in headers
+    )
+    rows_html = ""
+    for idx, r in enumerate(rows[:20]):
+        bg = "bg-gray-900/30" if idx % 2 == 0 else "bg-transparent"
+        cells = ""
+        for h in headers:
+            v = r.get(h)
+            val = str(v)[:80] if v is not None else "-"
+            if h == "id" and v is not None:
+                val = f'<a href="/app/conversation/{v}" target="_blank" class="text-blue-400 hover:underline font-medium">#{v}</a>'
+            elif h == "subject" and has_id and r.get("id") is not None:
+                val = f'<a href="/app/conversation/{r["id"]}" target="_blank" class="text-blue-400 hover:underline">{val}</a>'
+            elif h == "mailbox_name" and v in BOX_ABBR:
+                val = BOX_ABBR[v]
+            cells += f'<td class="px-4 py-2 text-sm text-gray-200 border-b border-gray-800 whitespace-nowrap">{val}</td>'
+        rows_html += f'<tr class="{bg} hover:bg-gray-700/30 transition-colors">{cells}</tr>'
 
-SQL: <ta requête SELECT sur une seule ligne, sans saut de ligne>
----
-RÉPONSE: <ta réponse conversationnelle en français, courte et directe>
-
-3. Si la question ne nécessite pas de SQL (salutation, question générale), laisse SQL vide :
-
-SQL:
----
-RÉPONSE: <ta réponse>
-
-4. Pour les dates, utilise le format ISO (YYYY-MM-DD) dans les requêtes SQL.
-5. Toujours répondre en français.
-6. Quand tu listes des emails, incluS TOUJOURS les colonnes `id` et `subject` dans ton SELECT (ainsi que les autres colonnes utiles). Cela permet de créer des liens cliquables vers la conversation.
-7. `body_preview` est un aperçu tronqué. Si l'utilisateur demande un résumé ou le contenu complet d'un mail, dis-lui que seul l'aperçu est disponible en base et invite-le à ouvrir la conversation via le lien sur l'id ou le sujet pour lire le contenu complet.
-"""
-
-_DANGEROUS_SQL = ("drop", "delete", "insert", "update", "alter", "create", "replace", "truncate", "attach", "detach")
-
-_BOX_ABBR = {
-    "detective_belgique": "D_FR",
-    "detective_belgium": "D_NL",
-    "dpdh_investigations": "D_PD",
-}
-
-
-def _parse_charlie_response(text: str) -> tuple[str, str]:
-    """Extrait le SQL et la réponse textuelle du LLM."""
-    sql_part = ""
-    response_part = ""
-    if "---" in text:
-        parts = text.split("---", 1)
-        first = parts[0].strip()
-        if first.lower().startswith("sql:"):
-            sql_part = first[4:].strip()
-        response_part = parts[1].strip()
-        if response_part.lower().startswith("réponse:"):
-            response_part = response_part[8:].strip()
-    else:
-        response_part = text.strip()
-    return sql_part, response_part
-
-
-def _is_safe_sql(sql: str) -> bool:
-    """Vérifie que le SQL est un SELECT read-only."""
-    if not sql:
-        return True
-    cleaned = sql.lower().strip()
-    if not cleaned.startswith("select"):
-        return False
-    for dangerous in _DANGEROUS_SQL:
-        if dangerous in cleaned:
-            return False
-    return True
-
-
-async def _run_sql(db: aiosqlite.Connection, sql: str) -> list[dict]:
-    """Exécute un SELECT et retourne les résultats sous forme de dicts."""
-    async with db.execute(sql) as cursor:
-        rows = await cursor.fetchall()
-        desc = cursor.description
-        if desc is None:
-            return []
-        keys = [d[0] for d in desc]
-        return [dict(zip(keys, row)) for row in rows]
+    html = (
+        f'<div class="mt-4 overflow-x-auto border border-gray-700 rounded-lg">'
+        f'<table class="w-full text-base"><thead><tr>{header_html}</tr></thead>'
+        f'<tbody>{rows_html}</tbody></table></div>'
+    )
+    if len(rows) > 20:
+        html += f'<p class="text-xs text-gray-500 mt-1">({len(rows)} résultats — 20 affichés)</p>'
+    return html
 
 
 @router.post("/charlie/ask")
@@ -593,68 +543,20 @@ async def charlie_ask(
         raise HTTPException(status_code=400, detail="Question vide")
 
     settings = get_settings()
-    model = settings.llm_model_default
-
-    messages = [
-        {"role": "system", "content": _CHARLIE_SYSTEM_PROMPT},
-        {"role": "user", "content": question},
-    ]
-
-    try:
-        raw = await complete(model=model, messages=messages, max_tokens=800, temperature=0.1)
-    except Exception as e:
-        log.warning("charlie.llm_failed", error=str(e))
-        return HTMLResponse(
-            '<div class="p-3 bg-red-900/40 border border-red-800 rounded text-red-300 text-sm">'
-            'Charlie est momentanément indisponible. Réessaie dans un instant.'
-            '</div>'
-        )
-
-    sql, response_text = _parse_charlie_response(raw)
+    result = await ask_charlie(question, db_path=settings.db_agent_state)
 
     results_html = ""
-    if sql and _is_safe_sql(sql):
-        try:
-            rows = await _run_sql(db, sql)
-            if rows:
-                # Formater le résultat en tableau HTML avec liens cliquables
-                headers = list(rows[0].keys())
-                has_id = "id" in headers
-                header_html = "".join(f'<th class="px-4 py-2 text-left text-sm font-medium text-gray-400 border-b border-gray-600 bg-gray-900/50">{h}</th>' for h in headers)
-                rows_html = ""
-                for idx, r in enumerate(rows[:20]):
-                    bg = "bg-gray-900/30" if idx % 2 == 0 else "bg-transparent"
-                    cells = ""
-                    for h in headers:
-                        v = r.get(h)
-                        val = str(v)[:80] if v is not None else "-"
-                        if h == "id" and v is not None:
-                            val = f'<a href="/app/conversation/{v}" target="_blank" class="text-blue-400 hover:underline font-medium">#{v}</a>'
-                        elif h == "subject" and has_id and r.get("id") is not None:
-                            val = f'<a href="/app/conversation/{r["id"]}" target="_blank" class="text-blue-400 hover:underline">{val}</a>'
-                        elif h == "mailbox_name" and v in _BOX_ABBR:
-                            val = _BOX_ABBR[v]
-                        cells += f'<td class="px-4 py-2 text-sm text-gray-200 border-b border-gray-800 whitespace-nowrap">{val}</td>'
-                    rows_html += f'<tr class="{bg} hover:bg-gray-700/30 transition-colors">{cells}</tr>'
-                results_html = (
-                    f'<div class="mt-4 overflow-x-auto border border-gray-700 rounded-lg">'
-                    f'<table class="w-full text-base"><thead><tr>{header_html}</tr></thead>'
-                    f'<tbody>{rows_html}</tbody></table></div>'
-                )
-                if len(rows) > 20:
-                    results_html += f'<p class="text-xs text-gray-500 mt-1">({len(rows)} résultats — 20 affichés)</p>'
-            else:
-                results_html = '<p class="text-xs text-gray-500 mt-1">Aucun résultat.</p>'
-        except Exception as e:
-            log.warning("charlie.sql_failed", sql=sql, error=str(e))
-            results_html = f'<p class="text-xs text-red-400 mt-1">Erreur SQL : {str(e)}</p>'
-    elif sql:
+    if result.sql and not result.sql_safe:
         results_html = '<p class="text-xs text-red-400 mt-1">Requête SQL refusée (sécurité).</p>'
+    elif result.sql and result.sql_error:
+        results_html = f'<p class="text-xs text-red-400 mt-1">Erreur SQL : {result.sql_error}</p>'
+    elif result.rows is not None:
+        results_html = _format_rows_html(result.rows)
 
     ip = request.client.host if request.client else None
     await audit_log(
         db, user["id"], "charlie_ask", "mail_processed", "",
-        f"q={question[:40]} sql={bool(sql)}", ip, request.headers.get("user-agent"),
+        f"q={question[:40]} sql={bool(result.sql)}", ip, request.headers.get("user-agent"),
     )
 
     safe_question = (
@@ -664,7 +566,7 @@ async def charlie_ask(
         .replace(">", "&gt;")
     )
     safe_response = (
-        response_text
+        result.response_text
         .replace("&", "&amp;")
         .replace("<", "&lt;")
         .replace(">", "&gt;")

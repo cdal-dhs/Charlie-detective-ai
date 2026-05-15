@@ -4,6 +4,19 @@
 
 ---
 
+## [1.6.0] — 2026-05-15
+
+### Ajouté
+- **Slack Bot Charlie AI** : interrogation de la DB directement depuis le canal #detective via l'app Slack "Charlie Detective". Le bot répond aux @mentions et aux DM en utilisant le même pipeline Charlie AI que le cockpit web (question → LLM → SQL → exécution → réponse Block Kit).
+- **Module `app/charlie.py`** : logique partagée du pipeline Charlie AI (prompt système, parsing SQL, validation sécurité, exécution, `CharlieResult` dataclass) — refactorisé depuis `app/web/api.py` pour réutilisation par le bot Slack.
+- **Module `app/delivery/slack_bot.py`** : handler Slack Bolt async (HTTP mode intégré à FastAPI sur `/slack/events`), avec rate limit (10 req/min/user) et réaction :eyes: comme accusé de réception.
+- **Variables d'environnement** : `SLACK_BOT_TOKEN` (xoxb-...), `SLACK_SIGNING_SECRET`.
+
+### Modifié
+- **Refactor `app/web/api.py`** : l'endpoint Charlie AI web utilise désormais `app.charlie.ask_charlie()` au lieu de fonctions inline. Le formatage HTML reste spécifique au web.
+
+---
+
 ## [1.5.3] — 2026-05-15
 
 ### Ajouté

@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.config import get_settings
+from app.delivery.slack_bot import slack_handler
 from app.healthcheck import health
 from app.web.admin import router as admin_router
 from app.web.api import router as api_router
@@ -57,6 +58,11 @@ def make_app() -> FastAPI:
     app.include_router(app_router)
     app.include_router(admin_router)
     app.include_router(api_router)
+
+    if slack_handler is not None:
+        @app.post("/slack/events")
+        async def slack_events(request: Request):
+            return await slack_handler.handle(request)
 
     return app
 

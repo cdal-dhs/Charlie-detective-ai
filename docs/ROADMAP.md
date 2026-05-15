@@ -86,8 +86,8 @@ Les 3 DB indexées avec embeddings, le guide de style validé, l'environnement l
 - [x] Module `app/delivery/slack_notifier.py`
 - [x] Notification push quand un nouveau brouillon est généré (métadonnées + référence email)
 - [x] Newsletter digest quotidien sur Slack
-- [ ] Approbation/rejet depuis Slack *(V2 — nécessite Slack App interactive)*
-- [x] Telegram abandonné (instabilité processus) — code gardé en référence
+- [x] **Slack Bot Charlie AI interactif** — @mention ou DM sur #detective, même pipeline que le cockpit web (module `app/delivery/slack_bot.py`, route `/slack/events`)
+- [ ] Approbation/rejet depuis Slack *(V2 — nécessite Slack App interactive avec Block Kit buttons)*
 
 ### Livrable S3
 Cyril reçoit un email Resend formaté + une notification Slack pour chaque demande client. L'agent tourne en local sur 3 boîtes. Qualité à valider avec Daniel sur vrais cas.

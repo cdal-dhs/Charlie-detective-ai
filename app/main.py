@@ -4,6 +4,7 @@ import signal
 import structlog
 
 from app.config import get_settings
+from app.delivery.slack_bot import init_slack_bot
 from app.web.app import run_web_server
 from app.workers.imap_poller import poll_mailbox
 
@@ -13,6 +14,8 @@ log = structlog.get_logger()
 async def main() -> None:
     settings = get_settings()
     log.info("agent.start", mailboxes=[m.name for m in settings.mailboxes()])
+
+    init_slack_bot()
 
     stop_event = asyncio.Event()
 

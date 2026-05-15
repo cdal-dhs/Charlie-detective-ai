@@ -68,6 +68,9 @@ class Settings(BaseSettings):
 
     slack_webhook_url: str = ""
 
+    slack_bot_token: str = ""          # xoxb-... Bot User OAuth Token
+    slack_signing_secret: str = ""      # Signing secret de l'app Slack
+
     dry_run: bool = False
 
     # --- Date limite de traitement ---
