@@ -637,6 +637,12 @@ async def charlie_ask(
         f"q={question[:40]} sql={bool(sql)}", ip, request.headers.get("user-agent"),
     )
 
+    safe_question = (
+        question
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
     safe_response = (
         response_text
         .replace("&", "&amp;")
@@ -644,7 +650,12 @@ async def charlie_ask(
         .replace(">", "&gt;")
     )
 
-    return HTMLResponse(
+    user_bubble = (
+        f'<div class="flex gap-3 justify-end">'
+        f'<div class="text-sm text-gray-100 bg-gray-800 rounded-lg px-3 py-2 max-w-[80%]">{safe_question}</div>'
+        f'</div>'
+    )
+    ai_bubble = (
         f'<div class="flex gap-3">'
         f'<div class="w-8 h-8 rounded-full bg-purple-600 flex items-center justify-center text-xs font-bold shrink-0">AI</div>'
         f'<div class="flex-1">'
@@ -653,3 +664,5 @@ async def charlie_ask(
         f'</div>'
         f'</div>'
     )
+
+    return HTMLResponse(user_bubble + ai_bubble)

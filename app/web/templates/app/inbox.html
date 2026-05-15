@@ -183,7 +183,7 @@
       <div class="flex items-center justify-between px-4 py-3 border-b border-gray-700">
         <div class="flex items-center gap-2">
           <div class="w-7 h-7 rounded-full bg-purple-600 flex items-center justify-center text-xs font-bold">AI</div>
-          <span class="font-semibold text-sm">Charlie — Assistant DB</span>
+          <span class="font-semibold text-sm">Charlie — Assistant IA Detective</span>
         </div>
         <button @click="open = false" class="text-gray-400 hover:text-white">✕</button>
       </div>
@@ -205,15 +205,7 @@
         hx-post="/api/charlie/ask"
         hx-target="#charlie-messages"
         hx-swap="beforeend"
-        @submit="
-          loading = true;
-          const input = document.getElementById('charlie-input');
-          const msg = input.value;
-          const userBubble = document.createElement('div');
-          userBubble.className = 'flex gap-3 justify-end';
-          userBubble.innerHTML = '<div class=\"text-sm text-gray-100 bg-gray-800 rounded-lg px-3 py-2 max-w-[80%]\">' + msg.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</div>';
-          document.getElementById('charlie-messages').appendChild(userBubble);
-        "
+        @submit="loading = true"
         @htmx:afterRequest="loading = false; document.getElementById('charlie-input').value = ''; document.getElementById('charlie-messages').scrollTop = document.getElementById('charlie-messages').scrollHeight;"
       >
         <input
@@ -222,6 +214,7 @@
           name="question"
           placeholder="Pose ta question à Charlie..."
           class="flex-1 bg-gray-950 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-purple-500"
+          autocomplete="off"
           required
         >
         <button
