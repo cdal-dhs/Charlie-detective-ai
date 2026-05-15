@@ -60,7 +60,23 @@ AUTRE_KEYWORDS = (
     "notification", "noreply", "no-reply", "donotreply",
 )
 
-# ── Formulaire de contact (whitelist) ─────────────────────────
+# ── Demande client ────────────────────────────────────────────
+DEMANDE_KEYWORDS = (
+    "demande d'information", "demande de renseignement",
+    "demande de devis", "demande de prix", "demande de suivi",
+    "demande d'enquête", "demande d'enquete",
+    "demande de mission", "demande de consultation",
+    "filature", "détective privé", "detective prive",
+    "surveillance", "investigation", "enquête privée", "enquete privee",
+    "je souhaite", "je voudrais", "je cherche", "je désire",
+    "prenons contact", "premier rendez-vous",
+    "nouveau message de", "formulaire de contact",
+)
+DEMANDE_SUBJECTS = (
+    "demande", "filature", "surveillance", "investigation",
+    "enquête", "enquete", "mission", "devis",
+    "consultation", "renseignement",
+)
 FORM_SUBJECTS = (
     "nouveau message de", "contact form", "formulaire de contact",
     "demande de contact", "prise de contact",
@@ -226,6 +242,22 @@ def is_facture(msg: Message) -> bool:
     return False
 
 
+def is_demande_client(msg: Message) -> bool:
+    subject = (msg.get("Subject", "") or "").lower()
+    body_snippet = _get_body_snippet(msg)
+    sender = (msg.get("From", "") or "").lower()
+
+    if any(fs in subject for fs in FORM_SUBJECTS):
+        return True
+    if any(kw in subject for kw in DEMANDE_SUBJECTS):
+        return True
+    if any(kw in subject for kw in DEMANDE_KEYWORDS):
+        return True
+    if any(kw in body_snippet for kw in DEMANDE_KEYWORDS):
+        return True
+    return False
+
+
 def quick_classify(msg: Message) -> str | None:
     """Retourne une catégorie si une règle évidente s'applique, sinon None
     (→ on délègue au LLM classifier)."""
@@ -233,6 +265,8 @@ def quick_classify(msg: Message) -> str | None:
         return "autre"
     if is_phishing(msg):
         return "phishing"
+    if is_demande_client(msg):
+        return "demande_client"
     if is_newsletter(msg):
         return "newsletter"
     if is_facture(msg):
