@@ -16,6 +16,9 @@
 - **Prompt classifier avec few-shots** : 8 exemples (un par catégorie), règles de décision précises, règle d'or de hiérarchie
 - **Cockpit web** mis à jour avec les nouvelles catégories `phishing` et `rappel` dans les filtres
 
+### Modifié
+- **Poller IMAP** : traite maintenant **tous les emails** (lus et non lus), pas seulement `UNSEEN`. Le flag `$AgentProcessed` évite les doublons.
+
 ### Corrigé
 - Docker Compose `env_file` remplacé par volume mount direct (`.env.production:/app/.env`) pour éviter l'interpolation des `$` dans les mots de passe
 - Magic link URL utilise `PUBLIC_BASE_URL` au lieu de `WEB_BIND_HOST:WEB_BIND_PORT`

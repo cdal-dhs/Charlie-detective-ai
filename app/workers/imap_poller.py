@@ -148,7 +148,7 @@ async def _process_mailbox(mailbox: MailboxConfig) -> None:
         if select_resp.result != "OK":
             raise RuntimeError(f"SELECT INBOX failed: {select_resp}")
 
-        search_resp = await client.search("UNSEEN UNKEYWORD $AgentProcessed")
+        search_resp = await client.search("UNKEYWORD $AgentProcessed")
         if search_resp.result != "OK":
             raise RuntimeError(f"SEARCH failed: {search_resp}")
 
