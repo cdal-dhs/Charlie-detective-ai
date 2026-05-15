@@ -1,14 +1,15 @@
+{% set box_short = {'detective_belgique': 'D_FR', 'detective_belgium': 'D_NL', 'dpdh_investigations': 'D_PD'} %}
 {% if not mails %}
 <tr><td colspan="7" class="px-4 py-8 text-center text-gray-500">Aucun message</td></tr>
 {% else %}
 {% for m in mails %}
 <tr class="border-b border-gray-800 hover:bg-gray-800/50">
-  <td class="px-4 py-3 whitespace-nowrap">{{ m.mailbox_name or '-' }}</td>
-  <td class="px-4 py-3">
-    <a href="/app/conversation/{{ m.id }}" class="text-blue-400 hover:underline">{{ m.subject or '(sans sujet)' }}</a>
+  <td class="px-2 py-3 whitespace-nowrap w-12 text-center text-xs font-medium text-gray-400">{{ box_short.get(m.mailbox_name, m.mailbox_name or '-') }}</td>
+  <td class="px-3 py-3 max-w-md">
+    <a href="/app/conversation/{{ m.id }}" class="text-blue-400 hover:underline truncate block">{{ m.subject or '(sans sujet)' }}</a>
   </td>
-  <td class="px-4 py-3">{{ m.sender or '-' }}</td>
-  <td class="px-4 py-3">
+  <td class="px-2 py-3 max-w-[140px] truncate text-gray-400">{{ m.sender or '-' }}</td>
+  <td class="px-2 py-3 w-32">
     <form
       class="inline"
       hx-post="/api/mails/{{ m.id }}/category"
@@ -16,7 +17,7 @@
       hx-swap="outerHTML"
       hx-trigger="change"
     >
-      <select name="category" class="bg-gray-950 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200">
+      <select name="category" class="bg-gray-950 border border-gray-700 rounded px-1 py-1 text-xs text-gray-200 w-full">
         <option value="demande_client" {% if m.category == 'demande_client' %}selected{% endif %}>demande_client</option>
         <option value="urgent" {% if m.category == 'urgent' %}selected{% endif %}>urgent</option>
         <option value="newsletter" {% if m.category == 'newsletter' %}selected{% endif %}>newsletter</option>
@@ -28,7 +29,7 @@
       </select>
     </form>
   </td>
-  <td class="px-4 py-3">
+  <td class="px-2 py-3 w-28">
     <form
       class="inline"
       hx-post="/api/mails/{{ m.id }}/status"
@@ -36,7 +37,7 @@
       hx-swap="outerHTML"
       hx-trigger="change"
     >
-      <select name="status" class="bg-gray-950 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200">
+      <select name="status" class="bg-gray-950 border border-gray-700 rounded px-1 py-1 text-xs text-gray-200 w-full">
         <option value="pending" {% if m.status == 'pending' %}selected{% endif %}>pending</option>
         <option value="approved" {% if m.status == 'approved' %}selected{% endif %}>approved</option>
         <option value="rejected" {% if m.status == 'rejected' %}selected{% endif %}>rejected</option>
@@ -45,7 +46,7 @@
       </select>
     </form>
   </td>
-  <td class="px-4 py-3">
+  <td class="px-2 py-3 w-24">
     <form
       class="flex items-center gap-1"
       hx-post="/api/mails/{{ m.id }}/priority"
@@ -54,14 +55,14 @@
       hx-trigger="change"
     >
       <span class="{% if m.priority == 'high' %}text-red-500{% elif m.priority == 'normal' %}text-yellow-500{% else %}text-gray-500{% endif %}">●</span>
-      <select name="priority" class="bg-gray-950 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200">
+      <select name="priority" class="bg-gray-950 border border-gray-700 rounded px-1 py-1 text-xs text-gray-200 w-full">
         <option value="high" {% if m.priority == 'high' %}selected{% endif %}>high</option>
         <option value="normal" {% if m.priority == 'normal' %}selected{% endif %}>normal</option>
         <option value="low" {% if m.priority == 'low' %}selected{% endif %}>low</option>
       </select>
     </form>
   </td>
-  <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-400">{{ m.processed_at or '-' }}</td>
+  <td class="px-2 py-3 whitespace-nowrap text-xs text-gray-400 w-24">{{ m.processed_at or '-' }}</td>
 </tr>
 {% endfor %}
 {% endif %}

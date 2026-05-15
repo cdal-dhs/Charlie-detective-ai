@@ -118,38 +118,29 @@
     <table class="w-full text-sm text-left">
       <thead class="bg-gray-900 text-gray-400 uppercase text-xs">
         <tr>
-          {% set cols = [
-            ('mailbox', 'Boîte'),
-            ('subject', 'Sujet'),
-            ('sender', 'Expéditeur'),
-            ('category', 'Catégorie'),
-            ('status', 'Statut'),
-            ('priority', 'Priorité'),
-            ('date', 'Date'),
-          ] %}
-          {% for col_key, col_label in cols %}
-          <th class="px-4 py-3">
-            <button
-              class="flex items-center gap-1 hover:text-white cursor-pointer uppercase text-xs"
-              @click="
-                if (sort === '{{ col_key }}') {
-                  order = (order === 'asc') ? 'desc' : 'asc';
-                } else {
-                  sort = '{{ col_key }}';
-                  order = 'asc';
-                }
-                htmx.trigger('#filter-form', 'submit');
-              "
-            >
-              {{ col_label }}
-              {% if sort == col_key %}
-                <span class="text-blue-400">{{ '▲' if order == 'asc' else '▼' }}</span>
-              {% else %}
-                <span class="text-gray-600">↕</span>
-              {% endif %}
-            </button>
+          <th class="px-2 py-3 w-12 text-center">
+            <button class="flex items-center justify-center gap-1 hover:text-white cursor-pointer uppercase text-xs w-full"
+              @click="if (sort === 'mailbox') { order = (order === 'asc') ? 'desc' : 'asc'; } else { sort = 'mailbox'; order = 'asc'; } htmx.trigger('#filter-form', 'submit');"
+            >Boîte{% if sort == 'mailbox' %}<span class="text-blue-400 ml-1">{{ '▲' if order == 'asc' else '▼' }}</span>{% else %}<span class="text-gray-600 ml-1">↕</span>{% endif %}</button>
           </th>
-          {% endfor %}
+          <th class="px-3 py-3">
+            <button class="flex items-center gap-1 hover:text-white cursor-pointer uppercase text-xs"
+              @click="if (sort === 'subject') { order = (order === 'asc') ? 'desc' : 'asc'; } else { sort = 'subject'; order = 'asc'; } htmx.trigger('#filter-form', 'submit');"
+            >Sujet{% if sort == 'subject' %}<span class="text-blue-400 ml-1">{{ '▲' if order == 'asc' else '▼' }}</span>{% else %}<span class="text-gray-600 ml-1">↕</span>{% endif %}</button>
+          </th>
+          <th class="px-2 py-3 max-w-[140px]">
+            <button class="flex items-center gap-1 hover:text-white cursor-pointer uppercase text-xs"
+              @click="if (sort === 'sender') { order = (order === 'asc') ? 'desc' : 'asc'; } else { sort = 'sender'; order = 'asc'; } htmx.trigger('#filter-form', 'submit');"
+            >Expéditeur{% if sort == 'sender' %}<span class="text-blue-400 ml-1">{{ '▲' if order == 'asc' else '▼' }}</span>{% else %}<span class="text-gray-600 ml-1">↕</span>{% endif %}</button>
+          </th>
+          <th class="px-2 py-3 w-32">Catégorie</th>
+          <th class="px-2 py-3 w-28">Statut</th>
+          <th class="px-2 py-3 w-24">Priorité</th>
+          <th class="px-2 py-3 w-24">
+            <button class="flex items-center gap-1 hover:text-white cursor-pointer uppercase text-xs"
+              @click="if (sort === 'date') { order = (order === 'asc') ? 'desc' : 'asc'; } else { sort = 'date'; order = 'asc'; } htmx.trigger('#filter-form', 'submit');"
+            >Date{% if sort == 'date' %}<span class="text-blue-400 ml-1">{{ '▲' if order == 'asc' else '▼' }}</span>{% else %}<span class="text-gray-600 ml-1">↕</span>{% endif %}</button>
+          </th>
         </tr>
       </thead>
       <tbody id="inbox-table-body" class="divide-y divide-gray-800">
