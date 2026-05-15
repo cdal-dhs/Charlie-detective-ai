@@ -4,16 +4,21 @@
 
 ---
 
-## [1.1.9] — 2026-05-15
+## [1.5.3] — 2026-05-15
 
 ### Ajouté
 - **Chat AI Charlie** dans l'inbox : bouton flottant violet qui ouvre un panneau de chat. L'opérateur pose des questions en langage naturel sur les emails en base (ex: "recherche les factures depuis le 05/05/26"). Charlie génère du SQL SELECT, l'exécute en read-only et retourne la réponse sous forme de tableau + texte.
-- **Badge version** (`v1.1.9`) affiché dans le coin inférieur gauche de toutes les pages du cockpit.
+- **Badge version** (`v1.5.3`) affiché dans le coin inférieur gauche de toutes les pages du cockpit — source unique de vérité : `pyproject.toml`.
 - **Liens cliquables dans les résultats Charlie** : les colonnes `id` et `subject` des tableaux SQL sont des liens `<a href="/app/conversation/{id}" target="_blank">` qui ouvrent la conversation dans un nouvel onglet sans fermer le chat.
 - **Redimensionnement manuel** de la fenêtre Charlie : handle visible en bas à droite (curseur ↘) qui permet d'agrandir/réduire la fenêtre avec la souris.
+- **Abréviations boîtes** dans les résultats Charlie : `detective_belgique` → D_FR, `detective_belgium` → D_NL, `dpdh_investigations` → D_PD.
+- **Guard anti-double-submit** sur le bouton Envoyer de Charlie.
 
 ### Modifié
 - **Chat Charlie : soumission via `fetch()` pur + Alpine.js** au lieu de HTMX (`hx-post`) : résout le bug où Enter et le bouton Envoyer ne déclenchaient aucune action dans le modal caché par `x-show`.
+- **Source unique de vérité pour la version** : `pyproject.toml` → `app/__init__.py` lit dynamiquement via `importlib.metadata`.
+- **Prompt Charlie enrichi** : règles pour inclure `id`+`subject` dans les SELECT, et expliquer que `body_preview` est tronqué.
+- **Script de déploiement** : pre-flight checks systématiques (branche main, pas de modifs non commitées, push auto des commits locaux).
 
 ---
 
