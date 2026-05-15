@@ -160,7 +160,7 @@
   </div>
 
   <!-- Charlie AI Chat ──────────────────────────────────────────────────── -->
-  <div x-data="{ open: false, loading: false }" class="relative">
+  <div x-data="charlieData()" class="relative">
     <!-- Bouton flottant -->
     <button
       x-show="!open"
@@ -184,15 +184,18 @@
       x-transition:leave-end="opacity-0 scale-95"
       class="fixed inset-0 z-[100] flex items-center justify-center p-4"
       @keydown.escape.window="open = false"
-      x-init="$watch('open', value => { if (value) { $nextTick(() => { htmx.process(document.getElementById('charlie-form')); }); } })"
     >
       <!-- Backdrop -->
       <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" @click="open = false"></div>
 
-      <!-- Contenu -->
-      <div class="relative w-full max-w-4xl h-[80vh] flex flex-col bg-gray-900 border border-gray-700 rounded-xl shadow-2xl resize overflow-auto min-w-[400px] min-h-[300px]">
+      <!-- Contenu redimensionnable -->
+      <div
+        class="relative flex flex-col bg-gray-900 border border-gray-700 rounded-xl shadow-2xl"
+        :style="{ width: width + 'px', height: height + 'px' }"
+        x-ref="modalContent"
+      >
         <!-- Header -->
-        <div class="flex items-center justify-between px-6 py-4 border-b border-gray-700 bg-gray-800/50 rounded-t-xl">
+        <div class="flex items-center justify-between px-6 py-4 border-b border-gray-700 bg-gray-800/50 rounded-t-xl shrink-0">
           <div class="flex items-center gap-3">
             <div class="w-9 h-9 rounded-full bg-purple-600 flex items-center justify-center text-sm font-bold">AI</div>
             <div>
@@ -204,7 +207,7 @@
         </div>
 
         <!-- Messages -->
-        <div id="charlie-messages" class="flex-1 overflow-y-auto p-6 space-y-4 bg-gray-900">
+        <div id="charlie-messages" class="flex-1 overflow-y-auto p-6 space-y-4 bg-gray-900 min-h-0">
           <div class="flex gap-3">
             <div class="w-9 h-9 rounded-full bg-purple-600 flex items-center justify-center text-sm font-bold shrink-0">AI</div>
             <div class="bg-gray-800 rounded-lg px-4 py-3 max-w-[85%] text-sm text-gray-200 leading-relaxed">
@@ -221,13 +224,8 @@
         <!-- Input -->
         <form
           id="charlie-form"
-          class="p-4 border-t border-gray-700 bg-gray-800/30 flex gap-3"
-          hx-post="/api/charlie/ask"
-          hx-target="#charlie-messages"
-          hx-swap="beforeend"
-          hx-trigger="submit"
-          @submit="loading = true"
-          @htmx:afterRequest="loading = false; document.getElementById('charlie-input').value = ''; document.getElementById('charlie-messages').scrollTop = document.getElementById('charlie-messages').scrollHeight;"
+          class="p-4 border-t border-gray-700 bg-gray-800/30 flex gap-3 shrink-0"
+          @submit.prevent="ask()"
         >
           <input
             id="charlie-input"
@@ -242,14 +240,86 @@
             type="submit"
             class="px-5 py-3 bg-purple-600 hover:bg-purple-500 rounded-lg text-base font-medium text-white transition-colors"
             :disabled="loading"
-          >Envoyer</button>
+          >
+            <span x-show="!loading">Envoyer</span>
+            <span x-show="loading">Chargement...</span>
+          </button>
         </form>
+
+        <!-- Resize handle -->
+        <div
+          class="absolute bottom-0 right-0 w-6 h-6 cursor-se-resize z-20 flex items-end justify-end pr-1 pb-1"
+          @mousedown.prevent="startResize($event)"
+          title="Redimensionner"
+        >
+          <svg class="w-4 h-4 text-gray-500 hover:text-gray-300" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M22 22H20V20H22V22ZM22 18H18V20H22V18ZM22 14H14V16H22V14ZM22 10H10V12H22V10Z"/>
+          </svg>
+        </div>
       </div>
     </div>
   </div>
 </div>
 
 <script>
+  function charlieData() {
+    return {
+      open: false,
+      loading: false,
+      width: Math.min(window.innerWidth - 64, 1024),
+      height: Math.round(window.innerHeight * 0.8),
+      ask() {
+        const input = document.getElementById('charlie-input');
+        const question = input.value.trim();
+        if (!question) return;
+        this.loading = true;
+        const messages = document.getElementById('charlie-messages');
+        const safeQ = question.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        messages.insertAdjacentHTML('beforeend',
+          '<div class="flex gap-3 justify-end animate-in fade-in slide-in-from-bottom-2"><div class="bg-gray-700 rounded-xl px-5 py-3 max-w-[80%] text-base text-gray-100 leading-relaxed">' + safeQ + '</div></div>'
+        );
+        messages.scrollTop = messages.scrollHeight;
+        const form = document.getElementById('charlie-form');
+        fetch('/api/charlie/ask', { method: 'POST', body: new FormData(form) })
+        .then(r => {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.text();
+        })
+        .then(html => {
+          messages.insertAdjacentHTML('beforeend', html);
+          messages.scrollTop = messages.scrollHeight;
+          input.value = '';
+          input.focus();
+        })
+        .catch(err => {
+          messages.insertAdjacentHTML('beforeend',
+            '<div class="flex gap-3 animate-in fade-in slide-in-from-bottom-2"><div class="w-9 h-9 rounded-full bg-red-600 flex items-center justify-center text-sm font-bold shrink-0 mt-1">!</div><div class="bg-red-900/40 rounded-xl px-5 py-3 text-base text-red-300 leading-relaxed">Erreur : ' + String(err).replace(/</g,'&lt;') + '</div></div>'
+          );
+          messages.scrollTop = messages.scrollHeight;
+        })
+        .finally(() => { this.loading = false; });
+      },
+      startResize(e) {
+        e.preventDefault();
+        const el = this.$refs.modalContent;
+        const startX = e.clientX;
+        const startY = e.clientY;
+        const startW = el.offsetWidth;
+        const startH = el.offsetHeight;
+        const onMove = (ev) => {
+          this.width = Math.max(400, startW + ev.clientX - startX);
+          this.height = Math.max(300, startH + ev.clientY - startY);
+        };
+        const onUp = () => {
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+        };
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      }
+    };
+  }
+
   // Copier la réponse de Charlie
   document.addEventListener('click', function(e) {
     if (e.target.closest('.charlie-copy')) {
@@ -262,7 +332,7 @@
         btn.innerHTML = 'Copié !';
         setTimeout(function() {
           btn.innerHTML = '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg> Copier';
-      }, 2000);
+        }, 2000);
       });
     }
   });

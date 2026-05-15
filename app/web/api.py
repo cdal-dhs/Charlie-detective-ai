@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
+from app import __version__
 from app.config import get_settings
 from app.llm.router import complete
 from app.pipeline.generator import generate_draft
@@ -117,6 +118,7 @@ async def inbox_partial(
                 "box": box_raw, "category": category, "status": status,
                 "priority": priority, "q": q, "sort": sort_col, "order": sort_order,
             },
+            "version": __version__,
         },
     )
 
@@ -607,16 +609,23 @@ async def charlie_ask(
         try:
             rows = await _run_sql(db, sql)
             if rows:
-                # Formater le résultat en tableau HTML
+                # Formater le résultat en tableau HTML avec liens cliquables
                 headers = list(rows[0].keys())
+                has_id = "id" in headers
                 header_html = "".join(f'<th class="px-4 py-2 text-left text-sm font-medium text-gray-400 border-b border-gray-600 bg-gray-900/50">{h}</th>' for h in headers)
                 rows_html = ""
                 for idx, r in enumerate(rows[:20]):
                     bg = "bg-gray-900/30" if idx % 2 == 0 else "bg-transparent"
-                    rows_html += f'<tr class="{bg} hover:bg-gray-700/30 transition-colors">' + "".join(
-                        f'<td class="px-4 py-2 text-sm text-gray-200 border-b border-gray-800 whitespace-nowrap">{str(v)[:80] if v is not None else "-"}</td>'
-                        for v in r.values()
-                    ) + "</tr>"
+                    cells = ""
+                    for h in headers:
+                        v = r.get(h)
+                        val = str(v)[:80] if v is not None else "-"
+                        if h == "id" and v is not None:
+                            val = f'<a href="/app/conversation/{v}" target="_blank" class="text-blue-400 hover:underline font-medium">#{v}</a>'
+                        elif h == "subject" and has_id and r.get("id") is not None:
+                            val = f'<a href="/app/conversation/{r["id"]}" target="_blank" class="text-blue-400 hover:underline">{val}</a>'
+                        cells += f'<td class="px-4 py-2 text-sm text-gray-200 border-b border-gray-800 whitespace-nowrap">{val}</td>'
+                    rows_html += f'<tr class="{bg} hover:bg-gray-700/30 transition-colors">{cells}</tr>'
                 results_html = (
                     f'<div class="mt-4 overflow-x-auto border border-gray-700 rounded-lg">'
                     f'<table class="w-full text-base"><thead><tr>{header_html}</tr></thead>'

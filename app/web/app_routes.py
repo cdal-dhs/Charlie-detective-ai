@@ -5,6 +5,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.templating import Jinja2Templates
 
+from app import __version__
 from app.web.deps import get_db, require_operator
 
 log = structlog.get_logger()
@@ -212,6 +213,7 @@ async def app_index(
             "priorities": _PRIORITIES,
             "counts": counts,
             "user": user,
+            "version": __version__,
         },
     )
 
@@ -235,5 +237,6 @@ async def conversation_page(
             "mail": mail,
             "versions": versions,
             "user": user,
+            "version": __version__,
         },
     )
