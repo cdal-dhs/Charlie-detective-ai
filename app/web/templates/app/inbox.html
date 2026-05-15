@@ -269,6 +269,7 @@
       width: Math.min(window.innerWidth - 64, 1024),
       height: Math.round(window.innerHeight * 0.8),
       ask() {
+        if (this.loading) return;
         const input = document.getElementById('charlie-input');
         const question = input.value.trim();
         if (!question) return;
@@ -279,8 +280,10 @@
           '<div class="flex gap-3 justify-end animate-in fade-in slide-in-from-bottom-2"><div class="bg-gray-700 rounded-xl px-5 py-3 max-w-[80%] text-base text-gray-100 leading-relaxed">' + safeQ + '</div></div>'
         );
         messages.scrollTop = messages.scrollHeight;
-        const form = document.getElementById('charlie-form');
-        fetch('/api/charlie/ask', { method: 'POST', body: new FormData(form) })
+        const formData = new FormData(document.getElementById('charlie-form'));
+        input.value = '';
+        input.focus();
+        fetch('/api/charlie/ask', { method: 'POST', body: formData })
         .then(r => {
           if (!r.ok) throw new Error('HTTP ' + r.status);
           return r.text();
@@ -288,8 +291,6 @@
         .then(html => {
           messages.insertAdjacentHTML('beforeend', html);
           messages.scrollTop = messages.scrollHeight;
-          input.value = '';
-          input.focus();
         })
         .catch(err => {
           messages.insertAdjacentHTML('beforeend',

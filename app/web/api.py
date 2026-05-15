@@ -497,22 +497,22 @@ _CHARLIE_SYSTEM_PROMPT = """Tu es Charlie, l'assistant IA de Detective.be. Tu ai
 
 Schéma de la table principale (mail_processed) :
 - id INTEGER PRIMARY KEY
-- mailbox_name TEXT  — nom technique de la boîte (ex: detective_belgique, detective_belgium, dpdh_investigations)
+- mailbox_name TEXT  — detective_belgique (D_FR), detective_belgium (D_NL), dpdh_investigations (D_PD)
 - subject TEXT
 - sender TEXT
 - received_at TEXT (format ISO, ex: 2026-05-15T10:30:00)
-- category TEXT  — valeurs: demande_client, urgent, newsletter, facture, spam, phishing, rappel, autre
-- status TEXT    — valeurs: pending, approved, rejected, sent, reviewed
-- priority TEXT  — valeurs: high, normal, low
+- category TEXT  — demande_client, urgent, newsletter, facture, spam, phishing, rappel, autre
+- status TEXT    — pending, approved, rejected, sent, reviewed
+- priority TEXT  — high, normal, low
 - processed_at TEXT (format ISO)
-- body_preview TEXT — aperçu du contenu du mail
+- body_preview TEXT — aperçu tronqué (~500 caractères max) du contenu du mail
 - ai_draft TEXT — brouillon généré par l'IA
 - human_draft TEXT — brouillon édité par l'opérateur
-- reviewed_by INTEGER — id de l'opérateur qui a validé
+- reviewed_by INTEGER
 - reviewed_at TEXT
 
 Règles :
-1. Si la question nécessite une requête SQL pour répondre précisément, génère UNIQUEMENT une requête SELECT (jamais INSERT/UPDATE/DELETE/DROP/ALTER).
+1. Si la question nécessite une requête SQL, génère UNIQUEMENT un SELECT (jamais INSERT/UPDATE/DELETE/DROP/ALTER).
 2. Formate ta réponse exactement comme ceci :
 
 SQL: <ta requête SELECT sur une seule ligne, sans saut de ligne>
@@ -527,9 +527,17 @@ RÉPONSE: <ta réponse>
 
 4. Pour les dates, utilise le format ISO (YYYY-MM-DD) dans les requêtes SQL.
 5. Toujours répondre en français.
+6. Quand tu listes des emails, incluS TOUJOURS les colonnes `id` et `subject` dans ton SELECT (ainsi que les autres colonnes utiles). Cela permet de créer des liens cliquables vers la conversation.
+7. `body_preview` est un aperçu tronqué. Si l'utilisateur demande un résumé ou le contenu complet d'un mail, dis-lui que seul l'aperçu est disponible en base et invite-le à ouvrir la conversation via le lien sur l'id ou le sujet pour lire le contenu complet.
 """
 
 _DANGEROUS_SQL = ("drop", "delete", "insert", "update", "alter", "create", "replace", "truncate", "attach", "detach")
+
+_BOX_ABBR = {
+    "detective_belgique": "D_FR",
+    "detective_belgium": "D_NL",
+    "dpdh_investigations": "D_PD",
+}
 
 
 def _parse_charlie_response(text: str) -> tuple[str, str]:
@@ -624,6 +632,8 @@ async def charlie_ask(
                             val = f'<a href="/app/conversation/{v}" target="_blank" class="text-blue-400 hover:underline font-medium">#{v}</a>'
                         elif h == "subject" and has_id and r.get("id") is not None:
                             val = f'<a href="/app/conversation/{r["id"]}" target="_blank" class="text-blue-400 hover:underline">{val}</a>'
+                        elif h == "mailbox_name" and v in _BOX_ABBR:
+                            val = _BOX_ABBR[v]
                         cells += f'<td class="px-4 py-2 text-sm text-gray-200 border-b border-gray-800 whitespace-nowrap">{val}</td>'
                     rows_html += f'<tr class="{bg} hover:bg-gray-700/30 transition-colors">{cells}</tr>'
                 results_html = (
