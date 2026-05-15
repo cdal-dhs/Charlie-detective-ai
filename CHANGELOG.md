@@ -8,6 +8,12 @@
 
 ### Ajouté
 - **Chat AI Charlie** dans l'inbox : bouton flottant violet qui ouvre un panneau de chat. L'opérateur pose des questions en langage naturel sur les emails en base (ex: "recherche les factures depuis le 05/05/26"). Charlie génère du SQL SELECT, l'exécute en read-only et retourne la réponse sous forme de tableau + texte.
+- **Badge version** (`v1.1.9`) affiché dans le coin inférieur gauche de toutes les pages du cockpit.
+- **Liens cliquables dans les résultats Charlie** : les colonnes `id` et `subject` des tableaux SQL sont des liens `<a href="/app/conversation/{id}" target="_blank">` qui ouvrent la conversation dans un nouvel onglet sans fermer le chat.
+- **Redimensionnement manuel** de la fenêtre Charlie : handle visible en bas à droite (curseur ↘) qui permet d'agrandir/réduire la fenêtre avec la souris.
+
+### Modifié
+- **Chat Charlie : soumission via `fetch()` pur + Alpine.js** au lieu de HTMX (`hx-post`) : résout le bug où Enter et le bouton Envoyer ne déclenchaient aucune action dans le modal caché par `x-show`.
 
 ---
 
