@@ -5,14 +5,17 @@ import structlog
 
 from app.config import get_settings
 from app.delivery.slack_bot import init_slack_bot
+from app.logging_config import cleanup_old_logs, setup_logging
 from app.web.app import run_web_server
 from app.workers.imap_poller import poll_mailbox
-
-log = structlog.get_logger()
 
 
 async def main() -> None:
     settings = get_settings()
+    setup_logging(log_level=settings.log_level, log_dir=settings.log_dir)
+    cleanup_old_logs(settings.log_dir, keep_days=7)
+
+    log = structlog.get_logger()
     log.info("agent.start", mailboxes=[m.name for m in settings.mailboxes()])
 
     init_slack_bot()

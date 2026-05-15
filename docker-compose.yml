@@ -5,6 +5,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./data:/app/data
+      - ./logs:/app/logs
       - ./.env.production:/app/.env:ro
       - hf_cache:/root/.cache/huggingface
     environment:
@@ -12,6 +13,7 @@ services:
       WEB_BIND_HOST: "0.0.0.0"
       HEALTHCHECK_HOST: "0.0.0.0"
       DATA_DIR: "/app/data"
+      LOG_DIR: "/app/logs"
       DB_BOITE_1: "/app/data/boite1.sqlite"
       DB_BOITE_2: "/app/data/boite2.sqlite"
       DB_BOITE_3: "/app/data/boite3.sqlite"

@@ -79,6 +79,7 @@ class Settings(BaseSettings):
     process_since_date: str = ""  # ex: 2026-05-01
 
     log_level: str = "INFO"
+    log_dir: Path = Path("./logs")
 
     # --- Web UI ---
     web_secret_key: str = ""
