@@ -1,6 +1,7 @@
 import asyncio
 import re
 import sqlite3
+from datetime import datetime
 from email import header, message_from_bytes
 from email.message import Message
 from email.utils import parseaddr
@@ -133,6 +134,19 @@ async def _poll_once(mailbox: MailboxConfig) -> None:
             await asyncio.sleep(backoff)
 
 
+def _build_search_criteria(settings) -> str:
+    """Construit le critère SEARCH IMAP : UNKEYWORD $AgentProcessed + SINCE si configuré."""
+    criteria = ["UNKEYWORD", "$AgentProcessed"]
+    if settings.process_since_date:
+        try:
+            dt = datetime.strptime(settings.process_since_date, "%Y-%m-%d")
+            since_str = dt.strftime("%d-%b-%Y")  # ex: 01-May-2026
+            criteria += ["SINCE", since_str]
+        except ValueError:
+            log.warning("config.invalid_process_since_date", value=settings.process_since_date)
+    return " ".join(criteria)
+
+
 async def _process_mailbox(mailbox: MailboxConfig) -> None:
     settings = get_settings()
     client = aioimaplib.IMAP4_SSL(settings.imap_host, settings.imap_port)
@@ -148,7 +162,8 @@ async def _process_mailbox(mailbox: MailboxConfig) -> None:
         if select_resp.result != "OK":
             raise RuntimeError(f"SELECT INBOX failed: {select_resp}")
 
-        search_resp = await client.search("UNKEYWORD $AgentProcessed")
+        search_criteria = _build_search_criteria(settings)
+        search_resp = await client.search(search_criteria)
         if search_resp.result != "OK":
             raise RuntimeError(f"SEARCH failed: {search_resp}")
 
