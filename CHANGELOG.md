@@ -9,13 +9,20 @@
 ### Ajouté
 - **Colonne `body`** : stockage du contenu complet des emails dans la DB (en plus de `body_preview` tronqué à 2000 chars). Les nouveaux mails auront le contenu complet accessible par Charlie AI et la web UI.
 - **Affichage complet dans Slack** : les champs `body`, `ai_draft`, `human_draft` s'affichent jusqu'à 800 chars dans les réponses Block Kit (au lieu de 60 chars).
+- **ID cliquable dans les notifications Slack** : chaque notification de nouveau brouillon inclut l'ID du mail avec un lien vers la conversation dans le cockpit web.
+- **Logs quotidiens** : fichiers `logs/agent-YYYY-MM-DD.log` en JSON structuré, avec rotation automatique (suppression après 7 jours). Variable `LOG_DIR` configurable.
+- **Module `app/logging_config.py`** : configuration structlog avec sortie console + fichier journalier.
+- **Prefilter `demande_client`** : règle rapide qui attrape les sujets contenant "demande", "filature", "surveillance", "investigation", etc. avant le LLM classifier — évite les mauvaises classifications (ex: "DEMANDE TEST / CDAL - Filature" classé facture).
 
 ### Modifié
 - **Prompt Charlie** : `body` documenté dans le schéma, règle de déflexion supprimée — Charlie peut désormais afficher le contenu complet d'un mail.
 - **Web UI** : la page conversation affiche `body` en priorité, `body_preview` en fallback.
 - **IMAP poller** : `_persist()` stocke désormais `body` en plus de `body_preview`.
+- **Docker Compose** : volume `./logs:/app/logs` monté, variable `LOG_DIR=/app/logs`.
+- **Priorité `demande_client`** : toujours HIGH — c'est du business vital pour Detective.be.
 
 ### Corrigé
+- **IMAP flag critique** : le flag `$AgentProcessed` était rejeté par le serveur IMAP d'Infomaniak (erreur BAD), ce qui bloquait **tout** le pipeline email. Remplacé par `AgentProcessed` (sans `$`). C'est ce bug qui empêchait les mails d'être détectés.
 - **Slack Bot route** : l'import `from ... import slack_handler` capturait `None` au chargement du module au lieu de lire la valeur à l'exécution. Corrigé en important le module (`slack_bot_module.slack_handler`).
 
 ---
@@ -110,22 +117,23 @@
 ## [1.1.1] — 2026-05-15
 
 ### Modifié
-- **Poller IMAP** : traite maintenant **tous les emails** (lus et non lus), pas seulement `UNSEEN`. Le flag `$AgentProcessed` évite les doublons.
+- **Poller IMAP** : traite maintenant **tous les emails** (lus et non lus), pas seulement `UNSEEN`. Le flag `AgentProcessed` évite les doublons.
 
 ## [1.1.0] — 2026-05-15
 
 ### Ajouté
 - **8 catégories de classification** (au lieu de 6) : `phishing` (menace sécurité), `rappel` (relance/échéance/rdv)
-- **Priorité intelligente** (`app/pipeline/priority.py`) : demande client chaude (formulaire, ton insistant) = `high`
+- **Priorité intelligente** (`app/pipeline/priority.py`) : demande client = `high` (business vital)
 - **Pré-filtre renforcé** (`app/pipeline/prefilter.py`) :
   - Détection phishing par spoofing Reply-To, headers suspects, mots-clés menaces, pièces jointes dangereuses (`.exe`, `.zip`)
   - Détection rappel par keywords (échéance, impayé, relance, convocation, deadline)
   - Facture enrichie (fournisseurs connus : OVH, Infomaniak, Stripe, etc.)
+  - Détection demande client (demande, filature, surveillance, investigation)
 - **Prompt classifier avec few-shots** : 8 exemples (un par catégorie), règles de décision précises, règle d'or de hiérarchie
 - **Cockpit web** mis à jour avec les nouvelles catégories `phishing` et `rappel` dans les filtres
 
 ### Modifié
-- **Poller IMAP** : traite maintenant **tous les emails** (lus et non lus), pas seulement `UNSEEN`. Le flag `$AgentProcessed` évite les doublons.
+- **Poller IMAP** : traite maintenant **tous les emails** (lus et non lus), pas seulement `UNSEEN`. Le flag `AgentProcessed` évite les doublons.
 
 ### Corrigé
 - Docker Compose `env_file` remplacé par volume mount direct (`.env.production:/app/.env`) pour éviter l'interpolation des `$` dans les mots de passe
@@ -168,11 +176,11 @@
 ### Ajouté
 - MVP initial — pipeline IMAP + classification + RAG + génération
 - 3 boîtes Infomaniak pollées toutes les 5 min
-- Classification 6 catégories (`demande_client`, `facture`, `newsletter`, `spam`, `urgent`, `autre`)
+- Classification catégories (`demande_client`, `facture`, `newsletter`, `spam`, `urgent`, `autre`)
 - RAG sur 2042 paires Q/R historiques (`sqlite-vec` + `multilingual-e5-large`)
 - Génération brouillon style Daniel Hurchon, multilingue FR/NL/EN
 - Livraison brouillon via Resend API → `cdal@digitalhs.biz`
 - Notifications Slack (webhook) pour les nouveaux brouillons
-- Flag IMAP `$AgentProcessed` pour idempotence
+- Flag IMAP `AgentProcessed` pour idempotence
 - Healthcheck FastAPI sur `127.0.0.1:8765`
 - Bootstrap embeddings + extraction personnalité

@@ -17,7 +17,7 @@ L'agent surveille 3 boîtes Infomaniak (3 marques : Detective Belgique, Detectiv
 [Worker asyncio Python]
          ↓
 [Pipeline]
-  Pré-filtre règles    → newsletter / facture / phishing / rappel évidents → tag & skip
+  Pré-filtre règles    → newsletter / facture / phishing / rappel / demande_client évidents → tag & skip
   Classification LLM   → 8 catégories avec few-shots
   Priorité intelligente → demande client chaude = HIGH
   Si demande_client :
@@ -25,7 +25,7 @@ L'agent surveille 3 boîtes Infomaniak (3 marques : Detective Belgique, Detectiv
     RAG sur 1200 paires Q/R historiques (sqlite-vec + multilingual-e5-large)
     Génération brouillon (Kimi K2 via LiteLLM, style "Daniel")
          ↓
-[Flag IMAP $AgentProcessed]     → idempotence
+[Flag IMAP AgentProcessed]       → idempotence
 [DB SQLite mail_processed]      → stockage + cockpit web
 [Cockpit web FastAPI]           → detective.digitalhs.biz
   - Auth magic link
@@ -130,7 +130,8 @@ DETECTIVE_BE/
 │   │   ├── imap_poller.py       # 1 task asyncio par boîte
 │   │   └── newsletter_digest.py # Digest quotidien Slack
 │   ├── pipeline/
-│   │   ├── prefilter.py         # Règles headers/expéditeurs
+│   ├── logging_config.py      # structlog : console + fichier journalier (rotation 7j)
+│   │   ├── prefilter.py         # Règles headers/expéditeurs + détection demande_client
 │   │   ├── classifier.py        # LLM → 8 catégories avec few-shots
 │   │   ├── priority.py          # Priorité intelligente (high/normal/low)
 │   │   ├── language.py          # Détection langue FR/NL/EN

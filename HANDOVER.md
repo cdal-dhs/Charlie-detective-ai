@@ -1,7 +1,7 @@
 # HANDOVER — Detective.be Agent (Charlie)
 
 > **Date** : 2026-05-15
-> **Version** : 1.6.0
+> **Version** : 1.6.1
 > **Intégrateur** : CDAL (`cdal@digitalhs.biz`)
 > **Client** : Daniel Hurchon — Detective.be (3 marques : Detective Belgique FR, Detective Belgium EN/multi, DPDH Investigations)
 > **Repo** : https://github.com/cdal-dhs/Charlie-detective-ai
@@ -28,7 +28,7 @@ Agent IA Python (asyncio) qui poll 3 boîtes mail Infomaniak toutes les 5 min, c
 [Worker asyncio Python — app/main.py]
          ↓
 [Pipeline]
-  Pré-filtre règles      → newsletter / facture / phishing / rappel évidents → tag & skip
+  Pré-filtre règles      → newsletter / facture / phishing / rappel / demande_client évidents → tag & skip
   Classification LLM     → 8 catégories avec few-shots (phishing, rappel, demande_client, facture, newsletter, spam, urgent, autre)
   Priorité intelligente  → demande client chaude = HIGH
   Si demande_client :
@@ -36,7 +36,7 @@ Agent IA Python (asyncio) qui poll 3 boîtes mail Infomaniak toutes les 5 min, c
     RAG sqlite-vec (multilingual-e5-large)
     Génération brouillon (Kimi K2 via LiteLLM + OpenRouter fallback)
          ↓
-[Flag IMAP $AgentProcessed]   → évite les doublons
+[Flag IMAP AgentProcessed]     → évite les doublons (sans $, Infomaniak rejette les flags avec $)
 [DB SQLite mail_processed]    → stockage + cockpit web
 [Cockpit web FastAPI]         → detective.digitalhs.biz
   - Auth magic link (Resend)
@@ -68,7 +68,7 @@ Agent IA Python (asyncio) qui poll 3 boîtes mail Infomaniak toutes les 5 min, c
 | Frontend | HTMX + Alpine.js + Tailwind CSS (CDN) |
 | Auth | Magic link email (Resend) + sessions `itsdangerous` |
 | Healthcheck | FastAPI sur `127.0.0.1:8765` |
-| Logs | `structlog` (JSON structuré) |
+| Logs | `structlog` (JSON structuré, fichier journalier + rotation 7j) |
 | Config | `pydantic-settings` depuis `.env` |
 | Prod hosting | Docker + Docker Compose + Traefik + Let's Encrypt |
 
@@ -152,7 +152,7 @@ DETECTIVE_BE/
 ├── README.md                    # Vue d'ensemble publique
 ├── CHANGELOG.md                 # Historique versions (format Keep a Changelog)
 ├── HANDOVER.md                  # Ce fichier (état + contexte pour nouvel agent)
-├── pyproject.toml               # Version source de vérité (1.5.3), deps, ruff, pytest
+├── pyproject.toml               # Version source de vérité (1.6.1), deps, ruff, pytest
 ├── .env.example                 # Template config (sans secrets)
 ├── Dockerfile                   # Python 3.11 slim
 ├── docker-compose.yml           # Service + labels Traefik
@@ -167,13 +167,14 @@ DETECTIVE_BE/
 │   ├── __init__.py              # __version__ lit dynamiquement depuis pyproject.toml
 │   ├── main.py                  # Entrypoint : pollers + serveur web
 │   ├── config.py                # pydantic-settings depuis .env
+│   ├── logging_config.py      # structlog : console + fichier journalier (rotation 7j)
 │   ├── healthcheck.py           # FastAPI /health
 │   ├── workers/
 │   │   ├── imap_poller.py       # Boucle polling 3 boîtes
 │   │   └── newsletter_digest.py # Digest quotidien newsletters
 │   ├── charlie.py              # Logique partagée Charlie AI (prompt, SQL, CharlieResult)
 │   ├── pipeline/
-│   │   ├── prefilter.py         # Règles rapides (newsletter, spam, phishing, rappel)
+│   │   ├── prefilter.py         # Règles rapides (newsletter, spam, phishing, rappel, demande_client)
 │   │   ├── classifier.py        # LLM → 8 catégories avec few-shots
 │   │   ├── priority.py          # Priorité intelligente (high/normal/low)
 │   │   ├── language.py          # Détection langue FR/NL/EN
@@ -181,7 +182,7 @@ DETECTIVE_BE/
 │   │   └── generator.py         # Assemblage prompt + appel LLM
 │   ├── delivery/
 │   │   ├── resend_notifier.py   # Email brouillon → CDAL
-│   │   ├── slack_notifier.py    # Webhook Slack #detective (notifications sortantes)
+│   │   ├── slack_notifier.py    # Webhook Slack #detective (notifications + ID cliquable)
 │   │   └── slack_bot.py         # Slack Bolt App (Charlie AI interactif)
 │   ├── llm/
 │   │   └── router.py            # Wrapper LiteLLM avec fallback OpenRouter
@@ -215,7 +216,8 @@ DETECTIVE_BE/
 │   ├── boite1.sqlite            # DB historique anonymisée (NE PAS MODIFIER)
 │   ├── boite2.sqlite            # DB historique anonymisée (NE PAS MODIFIER)
 │   ├── boite3.sqlite            # DB historique anonymisée (NE PAS MODIFIER)
-│   └── agent_state.db           # Traçabilité mails traités
+│   └── agent_state.db           # Traçabilité mails traités (+ colonne body complet)
+├── logs/                        # Fichiers journaliers agent-YYYY-MM-DD.log (rotation 7j)
 ├── logs/
 └── tests/                       # (peuplé partiellement)
 ```
@@ -252,6 +254,8 @@ Lis impérativement **`CLAUDE.md`** pour les conventions complètes. Points clé
 
 ⚠️ **Multilingue obligatoire** : la réponse générée DOIT être dans la langue détectée du mail entrant (FR/NL/EN).
 
+⚠️ **Flag IMAP = `AgentProcessed`** (sans `$`) — Infomaniak rejette les flags avec préfixe `$`.
+
 ⚠️ **Pas de Docker au MVP** — le projet est déjà en prod Docker. Ne pas introduire d'autres infra lourde (Redis, Postgres, K8s) sans discussion explicite.
 
 ---
@@ -262,8 +266,8 @@ Lis impérativement **`CLAUDE.md`** pour les conventions complètes. Points clé
 
 | Fonctionnalité | État | Notes |
 |---|---|---|
-| Polling IMAP 3 boîtes | ✅ | Tous les emails (lus + non lus), flag `$AgentProcessed` |
-| Classification 8 catégories | ✅ | Avec pré-filtre règles + LLM few-shots |
+| Polling IMAP 3 boîtes | ✅ | Tous les emails (lus + non lus), flag `AgentProcessed` (sans $) |
+| Classification 8 catégories | ✅ | Pré-filtre règles (newsletter, facture, phishing, rappel, **demande_client**) + LLM few-shots |
 | Priorité intelligente | ✅ | `high`/`normal`/`low` |
 | RAG + génération brouillon | ✅ | Style Daniel, multilingue FR/NL/EN |
 | Livraison Resend | ✅ | → `cdal@digitalhs.biz` (validation humaine) |
@@ -271,11 +275,13 @@ Lis impérativement **`CLAUDE.md`** pour les conventions complètes. Points clé
 | Cockpit web auth | ✅ | Magic link via Resend |
 | Inbox filtrable | ✅ | Tabs, checkboxes boîtes, recherche texte, tri |
 | Édition inline | ✅ | Catégorie, statut, priorité via HTMX |
-| Conversation détaillée | ✅ | Body preview + génération brouillon inline |
+| Conversation détaillée | ✅ | Body complet + body_preview fallback + génération brouillon inline |
 | Chat AI Charlie | ✅ | SQL read-only, liens cliquables, resizeable |
-| Slack Bot Charlie AI | ✅ | @mention ou DM sur #detective, même pipeline Charlie AI |
+| Slack Bot Charlie AI | ✅ | @mention ou DM sur #detective, même pipeline Charlie AI, ID cliquable dans notifications |
+| Logs quotidiens | ✅ | JSON structuré, rotation 7j, `LOG_DIR` configurable |
 | Dashboard admin | ✅ | Stats, settings LLM, audit logs |
 | Filtre date IMAP | ✅ | `PROCESS_SINCE_DATE` configurable |
+| Contenu complet mail | ✅ | Colonne `body` en DB, affichée par Charlie AI et cockpit |
 
 ### ⏳ En cours / À améliorer
 
@@ -327,4 +333,4 @@ Les fichiers suivants persistent entre sessions Claude Code et guident le compor
 
 ---
 
-*Document maintenu à jour à chaque itération. Dernière mise à jour : 2026-05-15 (v1.6.0).*
+*Document maintenu à jour à chaque itération. Dernière mise à jour : 2026-05-15 (v1.6.1).*

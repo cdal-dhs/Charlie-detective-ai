@@ -112,20 +112,24 @@ ruff format .
 
 ⚠️ **Pas de Docker au MVP**. Si tu es tenté, relis `docs/SPEC.md` section "Stack technique".
 
+⚠️ **Flag IMAP = `AgentProcessed`** (sans `$`). Infomaniak rejette les flags IMAP avec préfixe `$`. Ne jamais remettre `$AgentProcessed`.
+
 ⚠️ **Multilingue obligatoire** : la réponse générée DOIT être dans la langue détectée du mail entrant (FR/NL/EN). Tester systématiquement les 3 langues.
 
 ---
 
 ## 7. État courant du projet
 
-Voir `docs/ROADMAP.md` pour l'état détaillé. À l'instant T :
+Voir `docs/ROADMAP.md` pour l'état détaillé. À l'instant T (v1.6.1) :
 
-- ✅ **Brainstorm + spec validés** — `docs/SPEC.md` figé
-- ✅ **Scaffolding code** — squelette en place, modules `config`, `healthcheck`, `llm/router`, `pipeline/language`, `pipeline/prefilter`, `pipeline/classifier`, `delivery/resend_notifier` codés
-- ⏳ **S1 — Infra & data** — en attente : récupération des 3 DB SQLite + leur schéma, setup venv local, smoke test LLM
-- ⬜ **S2 — Pipeline ingestion IMAP** — à faire après S1
-- ⬜ **S3 — Cœur RAG + génération** — à faire après S2
-- ⬜ **S4 — Prod sur KVM8 + supervision** — à faire après S3
+- ✅ **MVP opérationnel en production** — `detective.digitalhs.biz`
+- ✅ **Pipeline IMAP complet** : polling 3 boîtes, classification 8 catégories, priorité intelligente, RAG + génération brouillon
+- ✅ **Cockpit web** : inbox, conversation, chat AI Charlie, dashboard admin
+- ✅ **Slack Bot Charlie AI** : @mention + DM sur #detective
+- ✅ **Logs quotidiens** : JSON structuré, rotation 7j
+- ⏳ **Calibration qualité** : affiner prompt Daniel avec retours terrain
+- ⬜ **V2 — Drafts IMAP natifs** : basculer livraison Resend → Drafts boîte mail
+- ⬜ **V3 — Bot WhatsApp client** : canal client direct
 
 ---
 
