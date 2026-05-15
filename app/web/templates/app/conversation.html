@@ -110,14 +110,37 @@
           </div>
           <div>
             <div class="text-gray-500">Priorité</div>
-            <div class="flex items-center gap-1">
+            <form
+              class="flex items-center gap-1"
+              hx-post="/api/mails/{{ mail.id }}/priority"
+              hx-target="this"
+              hx-swap="outerHTML"
+              hx-trigger="change"
+            >
               <span class="{% if mail.priority == 'high' %}text-red-500{% elif mail.priority == 'normal' %}text-yellow-500{% else %}text-gray-500{% endif %}">●</span>
-              <span>{{ mail.priority or '-' }}</span>
-            </div>
+              <select name="priority" class="bg-gray-950 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200">
+                <option value="high" {% if mail.priority == 'high' %}selected{% endif %}>high</option>
+                <option value="normal" {% if mail.priority == 'normal' %}selected{% endif %}>normal</option>
+                <option value="low" {% if mail.priority == 'low' %}selected{% endif %}>low</option>
+              </select>
+            </form>
           </div>
           <div>
             <div class="text-gray-500">Statut</div>
-            <div class="font-medium">{{ mail.status or 'pending' }}</div>
+            <form
+              hx-post="/api/mails/{{ mail.id }}/status"
+              hx-target="this"
+              hx-swap="outerHTML"
+              hx-trigger="change"
+            >
+              <select name="status" class="bg-gray-950 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200">
+                <option value="pending" {% if mail.status == 'pending' %}selected{% endif %}>pending</option>
+                <option value="approved" {% if mail.status == 'approved' %}selected{% endif %}>approved</option>
+                <option value="rejected" {% if mail.status == 'rejected' %}selected{% endif %}>rejected</option>
+                <option value="sent" {% if mail.status == 'sent' %}selected{% endif %}>sent</option>
+                <option value="reviewed" {% if mail.status == 'reviewed' %}selected{% endif %}>reviewed</option>
+              </select>
+            </form>
           </div>
         </div>
         {% if mail.reviewed_by %}

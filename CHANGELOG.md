@@ -4,6 +4,13 @@
 
 ---
 
+## [1.1.4] — 2026-05-15
+
+### Ajouté
+- **Édition inline statut & priorité** dans le Cockpit : dropdowns HTMX dans la vue conversation (`/app/conversation`) et dans le listing inbox (`/app/inbox`). Changement immédiat sans rechargement de page.
+
+---
+
 ## [1.1.3] — 2026-05-15
 
 ### Corrigé

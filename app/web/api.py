@@ -340,3 +340,82 @@ async def draft_approve(
         f'Brouillon approuvé.{extra_msg}'
         '</div>'
     )
+
+
+_STATUSES = ["pending", "approved", "rejected", "sent", "reviewed"]
+_PRIORITIES = ["high", "normal", "low"]
+
+
+@router.post("/mails/{mail_id}/status")
+async def mail_update_status(
+    request: Request,
+    mail_id: int,
+    db: aiosqlite.Connection = Depends(get_db),  # noqa: B008
+    user: dict = Depends(require_operator),  # noqa: B008
+) -> HTMLResponse:
+    form = await request.form()
+    new_status = str(form.get("status", "")).strip()
+    if new_status not in _STATUSES:
+        raise HTTPException(status_code=400, detail="Statut invalide")
+
+    await db.execute(
+        "UPDATE mail_processed SET status = ?, reviewed_by = ?, reviewed_at = datetime('now') WHERE id = ?",
+        (new_status, user["id"], mail_id),
+    )
+    await db.commit()
+
+    ip = request.client.host if request.client else None
+    await audit_log(
+        db, user["id"], "status_update", "mail_processed", str(mail_id),
+        new_status, ip, request.headers.get("user-agent"),
+    )
+
+    return HTMLResponse(
+        f'<form class="inline" hx-post="/api/mails/{mail_id}/status" '
+        f'hx-target="this" hx-swap="outerHTML" hx-trigger="change">'
+        f'<select name="status" class="bg-gray-950 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200">'
+        f'<option value="pending" {"selected" if new_status == "pending" else ""}>pending</option>'
+        f'<option value="approved" {"selected" if new_status == "approved" else ""}>approved</option>'
+        f'<option value="rejected" {"selected" if new_status == "rejected" else ""}>rejected</option>'
+        f'<option value="sent" {"selected" if new_status == "sent" else ""}>sent</option>'
+        f'<option value="reviewed" {"selected" if new_status == "reviewed" else ""}>reviewed</option>'
+        f'</select></form>'
+    )
+
+
+@router.post("/mails/{mail_id}/priority")
+async def mail_update_priority(
+    request: Request,
+    mail_id: int,
+    db: aiosqlite.Connection = Depends(get_db),  # noqa: B008
+    user: dict = Depends(require_operator),  # noqa: B008
+) -> HTMLResponse:
+    form = await request.form()
+    new_priority = str(form.get("priority", "")).strip()
+    if new_priority not in _PRIORITIES:
+        raise HTTPException(status_code=400, detail="Priorité invalide")
+
+    await db.execute(
+        "UPDATE mail_processed SET priority = ? WHERE id = ?",
+        (new_priority, mail_id),
+    )
+    await db.commit()
+
+    ip = request.client.host if request.client else None
+    await audit_log(
+        db, user["id"], "priority_update", "mail_processed", str(mail_id),
+        new_priority, ip, request.headers.get("user-agent"),
+    )
+
+    return HTMLResponse(
+        f'<form class="flex items-center gap-1" hx-post="/api/mails/{mail_id}/priority" '
+        f'hx-target="this" hx-swap="outerHTML" hx-trigger="change">'
+        f'<span class="'
+        f"{'text-red-500' if new_priority == 'high' else 'text-yellow-500' if new_priority == 'normal' else 'text-gray-500'}"
+        f'">●</span>'
+        f'<select name="priority" class="bg-gray-950 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200">'
+        f'<option value="high" {"selected" if new_priority == "high" else ""}>high</option>'
+        f'<option value="normal" {"selected" if new_priority == "normal" else ""}>normal</option>'
+        f'<option value="low" {"selected" if new_priority == "low" else ""}>low</option>'
+        f'</select></form>'
+    )

@@ -15,18 +15,44 @@
       {% elif m.category == 'newsletter' %}bg-green-600 text-white
       {% elif m.category == 'facture' %}bg-yellow-600 text-white
       {% elif m.category == 'spam' %}bg-gray-600 text-white
+      {% elif m.category == 'phishing' %}bg-purple-600 text-white
+      {% elif m.category == 'rappel' %}bg-orange-600 text-white
       {% else %}bg-gray-700 text-gray-300{% endif %}">
       {{ m.category or '-' }}
     </span>
   </td>
-  <td class="px-4 py-3">{{ m.status or '-' }}</td>
   <td class="px-4 py-3">
-    <span class="text-sm
-      {% if m.priority == 'high' %}text-red-500
-      {% elif m.priority == 'normal' %}text-yellow-500
-      {% elif m.priority == 'low' %}text-gray-500
-      {% else %}text-gray-500{% endif %}">●</span>
-    {{ m.priority or '-' }}
+    <form
+      class="inline"
+      hx-post="/api/mails/{{ m.id }}/status"
+      hx-target="this"
+      hx-swap="outerHTML"
+      hx-trigger="change"
+    >
+      <select name="status" class="bg-gray-950 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200">
+        <option value="pending" {% if m.status == 'pending' %}selected{% endif %}>pending</option>
+        <option value="approved" {% if m.status == 'approved' %}selected{% endif %}>approved</option>
+        <option value="rejected" {% if m.status == 'rejected' %}selected{% endif %}>rejected</option>
+        <option value="sent" {% if m.status == 'sent' %}selected{% endif %}>sent</option>
+        <option value="reviewed" {% if m.status == 'reviewed' %}selected{% endif %}>reviewed</option>
+      </select>
+    </form>
+  </td>
+  <td class="px-4 py-3">
+    <form
+      class="flex items-center gap-1"
+      hx-post="/api/mails/{{ m.id }}/priority"
+      hx-target="this"
+      hx-swap="outerHTML"
+      hx-trigger="change"
+    >
+      <span class="{% if m.priority == 'high' %}text-red-500{% elif m.priority == 'normal' %}text-yellow-500{% else %}text-gray-500{% endif %}">●</span>
+      <select name="priority" class="bg-gray-950 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200">
+        <option value="high" {% if m.priority == 'high' %}selected{% endif %}>high</option>
+        <option value="normal" {% if m.priority == 'normal' %}selected{% endif %}>normal</option>
+        <option value="low" {% if m.priority == 'low' %}selected{% endif %}>low</option>
+      </select>
+    </form>
   </td>
   <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-400">{{ m.processed_at or '-' }}</td>
   <td class="px-4 py-3">
