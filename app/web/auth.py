@@ -69,10 +69,8 @@ async def send_magic_link_email(raw_token: str, user_email: str) -> None:
         log.warning("auth.magic_link_no_resend_key", email=user_email)
         return
 
-    link = (
-        f"http://{settings.web_bind_host}:{settings.web_bind_port}"
-        f"/auth/verify?token={raw_token}"
-    )
+    base = settings.public_base_url or f"http://{settings.web_bind_host}:{settings.web_bind_port}"
+    link = f"{base.rstrip('/')}/auth/verify?token={raw_token}"
 
     payload = {
         "from": settings.resend_from,

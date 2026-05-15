@@ -78,6 +78,7 @@ class Settings(BaseSettings):
     web_session_ttl_hours: int = 24
     web_bind_host: str = "127.0.0.1"
     web_bind_port: int = 8080
+    public_base_url: str = ""  # ex: https://detective.digitalhs.biz
     admin_email: str = "cdal@digitalhs.biz"
     operator_email: str = "contact@detectivebelgique.be"
     magic_link_ttl_minutes: int = 15
