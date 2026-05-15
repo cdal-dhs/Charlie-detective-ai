@@ -58,6 +58,30 @@ python -m app.main
 
 ---
 
+## Déploiement production (VPS Hostinger + Docker + Traefik)
+
+L'agent est containerisé et exposé via Traefik sur `detective.digitalhs.biz`.
+
+```bash
+# Depuis le Mac de Cyril — one-shot
+./scripts/deploy-to-vps.sh
+```
+
+**Manuellement sur le VPS** (si besoin) :
+```bash
+ssh root@69.62.110.165
+cd /opt/DETECTIVE
+git pull
+docker compose up -d --build
+```
+
+**Prérequis sur le VPS** :
+- Docker + Docker Compose
+- Réseau Traefik externe `root_default`
+- DNS A record `detective.digitalhs.biz` → `69.62.110.165`
+
+---
+
 ## Stack
 
 Python 3.11+ · asyncio · aioimaplib · LiteLLM (Kimi K2 / Ollama Pro + OpenRouter fallback) · sentence-transformers (e5-large) · sqlite-vec · fasttext · Resend · FastAPI healthcheck · structlog · pydantic-settings.
@@ -109,4 +133,7 @@ DETECTIVE_BE/
 
 ## Statut
 
-🚧 **MVP en construction** — voir `docs/ROADMAP.md` pour l'avancement détaillé.
+✅ **MVP opérationnel en production** — `detective.digitalhs.biz`
+- Backend IMAP + génération IA : Docker sur VPS Hostinger
+- Cockpit web : FastAPI via Traefik + HTTPS
+- Voir `docs/ROADMAP.md` pour les phases restantes (S4 supervision, V2 Drafts IMAP).

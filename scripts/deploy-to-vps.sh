@@ -6,22 +6,9 @@ VPS_USER="root"
 VPS_HOST="69.62.110.165"
 VPS_DIR="/opt/DETECTIVE"
 
-# --- 1. Sync code (sans data, venv, secrets) ---
-echo ">>> Syncing code to ${VPS_USER}@${VPS_HOST}:${VPS_DIR} ..."
-rsync -avz --delete \
-  --exclude='venv' \
-  --exclude='.venv' \
-  --exclude='.git' \
-  --exclude='data' \
-  --exclude='.env' \
-  --exclude='__pycache__' \
-  --exclude='*.pyc' \
-  --exclude='.ruff_cache' \
-  --exclude='.DS_Store' \
-  --exclude='*.png' \
-  --exclude='*.jpg' \
-  --exclude='logs' \
-  ./ "${VPS_USER}@${VPS_HOST}:${VPS_DIR}/"
+# --- 1. Pull latest code on VPS ---
+echo ">>> Pulling latest code on VPS ..."
+ssh "${VPS_USER}@${VPS_HOST}" "cd ${VPS_DIR} && git pull origin main"
 
 # --- 2. Sync data/ (DB SQLite + agent_state) ---
 echo ">>> Syncing data/ ..."
