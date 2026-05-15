@@ -7,7 +7,7 @@
 ## [1.1.8] — 2026-05-15
 
 ### Ajouté
-- **Zone de recherche texte** dans la barre de filtres de l'inbox : filtre sur sujet, expéditeur et contenu du mail (`body_preview`). Recherche via LIKE SQL (case-insensitive sur SQLite).
+- **Zone de recherche texte** dans la barre de filtres de l'inbox : filtre sur sujet, expéditeur et contenu du mail (`body_preview`). Recherche via `LOWER() LIKE` SQL (insensible à la casse : `dutest` trouve aussi `DUTEST`).
 
 ---
 

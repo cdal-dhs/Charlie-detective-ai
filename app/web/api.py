@@ -58,8 +58,8 @@ async def _fetch_mails_partial(
         where.append("priority = ?")
         params.append(priority)
     if q:
-        where.append("(subject LIKE ? OR sender LIKE ? OR body_preview LIKE ?)")
-        like = f"%{q}%"
+        where.append("(LOWER(subject) LIKE ? OR LOWER(sender) LIKE ? OR LOWER(body_preview) LIKE ?)")
+        like = f"%{q.lower()}%"
         params.extend([like, like, like])
 
     col = _SORTABLE_COLS.get(sort_col, "processed_at")
