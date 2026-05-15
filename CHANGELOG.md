@@ -4,6 +4,12 @@
 
 ---
 
+## [1.1.3] — 2026-05-15
+
+### Corrigé
+- **Faux positif phishing** sur les formulaires de contact : `is_phishing()` exclut désormais les mails avec sujet "Nouveau Message De...", "Contact Form", etc. et les mails auto-générés par les propres domaines (detectivebelgique.be, detectivebelgium.com, dpdhuinvestigations.be).
+- **Invitations calendrier** : nouvelle fonction `is_autre()` qui classe automatiquement les "updated invitation", "calendar", "ical", etc. comme `autre` avant qu'ils ne passent par le classifier.
+
 ## [1.1.2] — 2026-05-15
 
 ### Ajouté
