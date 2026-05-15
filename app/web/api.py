@@ -40,10 +40,13 @@ async def _fetch_mails_partial(
 ) -> list[dict]:
     where = ["1=1"]
     params = []
-    if boxes:
-        placeholders = ",".join("?" for _ in boxes)
-        where.append(f"mailbox_name IN ({placeholders})")
-        params.extend(boxes)
+    if boxes is not None:
+        if boxes:
+            placeholders = ",".join("?" for _ in boxes)
+            where.append(f"mailbox_name IN ({placeholders})")
+            params.extend(boxes)
+        else:
+            where.append("1=0")
     if category:
         where.append("category = ?")
         params.append(category)
@@ -86,8 +89,11 @@ async def inbox_partial(
     db: aiosqlite.Connection = Depends(get_db),  # noqa: B008
     user: dict = Depends(require_operator),  # noqa: B008
 ):
-    box_raw = request.query_params.get("box") or None
-    boxes = box_raw.split(",") if box_raw else None
+    box_raw = request.query_params.get("box")
+    if box_raw is None:
+        boxes = None
+    else:
+        boxes = [b for b in box_raw.split(",") if b]
     category = request.query_params.get("category") or None
     status = request.query_params.get("status") or None
     priority = request.query_params.get("priority") or None
