@@ -52,6 +52,20 @@ RAPPEL_KEYWORDS = (
     "convocation", "audience", "déposition", "deposition",
 )
 
+# ── Autre / à ignorer ─────────────────────────────────────────
+AUTRE_KEYWORDS = (
+    "updated invitation", "invitation updated", "calendar",
+    "ical", "vcalendar", "event invitation", "meeting request",
+    "accepté", "refusé", "tentative", "provisoire",
+    "notification", "noreply", "no-reply", "donotreply",
+)
+
+# ── Formulaire de contact (whitelist) ─────────────────────────
+FORM_SUBJECTS = (
+    "nouveau message de", "contact form", "formulaire de contact",
+    "demande de contact", "prise de contact",
+)
+
 # ── Facture ──────────────────────────────────────────────────
 FACTURE_KEYWORDS = (
     "facture", "invoice", "vat", "tva", "acompte", "devis",
@@ -127,10 +141,24 @@ def is_newsletter(msg: Message) -> bool:
     return False
 
 
+def _is_own_domain(sender: str) -> bool:
+    """Vérifie si l'expéditeur appartient à un des domaines de Detective.be."""
+    own_domains = ("detectivebelgique.be", "detectivebelgium.com", "dpdhuinvestigations.be")
+    return any(d in sender.lower() for d in own_domains)
+
+
 def is_phishing(msg: Message) -> bool:
     subject = (msg.get("Subject", "") or "").lower()
     body_snippet = _get_body_snippet(msg)
     sender = (msg.get("From", "") or "").lower()
+
+    # Exception 1 : formulaires de contact du propre site
+    if any(fs in subject for fs in FORM_SUBJECTS):
+        return False
+
+    # Exception 2 : mails auto-générés par le propre domaine
+    if _is_own_domain(sender):
+        return False
 
     # Mots-clés forts dans sujet ou corps
     if any(kw in subject for kw in PHISHING_KEYWORDS):
@@ -158,6 +186,18 @@ def is_phishing(msg: Message) -> bool:
     if _has_attachment(msg):
         return True
 
+    return False
+
+
+def is_autre(msg: Message) -> bool:
+    """Notifications automatiques, invitations calendrier, etc."""
+    subject = (msg.get("Subject", "") or "").lower()
+    body_snippet = _get_body_snippet(msg)
+
+    if any(kw in subject for kw in AUTRE_KEYWORDS):
+        return True
+    if any(kw in body_snippet for kw in AUTRE_KEYWORDS):
+        return True
     return False
 
 
@@ -189,6 +229,8 @@ def is_facture(msg: Message) -> bool:
 def quick_classify(msg: Message) -> str | None:
     """Retourne une catégorie si une règle évidente s'applique, sinon None
     (→ on délègue au LLM classifier)."""
+    if is_autre(msg):
+        return "autre"
     if is_phishing(msg):
         return "phishing"
     if is_newsletter(msg):
