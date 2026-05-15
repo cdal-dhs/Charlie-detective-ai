@@ -72,9 +72,29 @@
     </div>
 
     <input type="hidden" name="category" id="filter-category" value="{{ filters.category or '' }}">
-    <input type="hidden" name="priority" id="filter-priority" value="{{ filters.priority or '' }}">
     <input type="hidden" name="sort" x-model="sort">
     <input type="hidden" name="order" x-model="order">
+
+    <!-- Filtres statut & priorité -->
+    <div class="flex items-center gap-3">
+      <select name="status" id="filter-status" class="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm"
+              @change="htmx.trigger('#filter-form', 'submit')">
+        <option value="" {% if not filters.status %}selected{% endif %}>Tous statuts</option>
+        <option value="pending" {% if filters.status == 'pending' %}selected{% endif %}>pending</option>
+        <option value="approved" {% if filters.status == 'approved' %}selected{% endif %}>approved</option>
+        <option value="rejected" {% if filters.status == 'rejected' %}selected{% endif %}>rejected</option>
+        <option value="sent" {% if filters.status == 'sent' %}selected{% endif %}>sent</option>
+        <option value="reviewed" {% if filters.status == 'reviewed' %}selected{% endif %}>reviewed</option>
+      </select>
+
+      <select name="priority" id="filter-priority" class="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm"
+              @change="htmx.trigger('#filter-form', 'submit')">
+        <option value="" {% if not filters.priority %}selected{% endif %}>Toutes priorités</option>
+        <option value="high" {% if filters.priority == 'high' %}selected{% endif %}>high</option>
+        <option value="normal" {% if filters.priority == 'normal' %}selected{% endif %}>normal</option>
+        <option value="low" {% if filters.priority == 'low' %}selected{% endif %}>low</option>
+      </select>
+    </div>
 
     <div class="flex items-center gap-2 ml-auto">
       <button type="submit" class="px-3 py-1 bg-gray-800 hover:bg-gray-700 rounded text-sm">Filtrer</button>
@@ -85,6 +105,7 @@
           activeTab = 'all';
           boxes = [];
           document.getElementById('filter-category').value = '';
+          document.getElementById('filter-status').value = '';
           document.getElementById('filter-priority').value = '';
           htmx.trigger('#filter-form', 'submit');
         "

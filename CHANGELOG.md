@@ -4,6 +4,13 @@
 
 ---
 
+## [1.1.7] — 2026-05-15
+
+### Ajouté
+- **Dropdowns Statut & Priorité** dans la barre de filtres de l'inbox : à côté des checkboxes boîtes, avec changement immédiat via HTMX.
+
+---
+
 ## [1.1.6] — 2026-05-15
 
 ### Ajouté
