@@ -101,7 +101,7 @@ async def inbox_partial(
         {
             "mails": mails,
             "filters": {
-                "box": box, "category": category, "status": status,
+                "box": box_raw, "category": category, "status": status,
                 "priority": priority, "sort": sort_col, "order": sort_order,
             },
         },
