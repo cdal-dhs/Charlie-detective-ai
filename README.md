@@ -40,7 +40,7 @@ Spec complète : [`docs/SPEC.md`](docs/SPEC.md). Roadmap : [`docs/ROADMAP.md`](d
 
 ---
 
-## Setup local (Mac de Cyril)
+## Setup local (Mac de CDAL)
 
 ```bash
 # 1. Environnement Python
@@ -72,7 +72,7 @@ python -m app.main
 L'agent est containerisé et exposé via Traefik sur `detective.digitalhs.biz`.
 
 ```bash
-# Depuis le Mac de Cyril — one-shot avec pre-flight checks
+# Depuis le Mac de CDAL — one-shot avec pre-flight checks
 bash scripts/deploy-to-vps.sh
 ```
 
@@ -137,7 +137,7 @@ DETECTIVE_BE/
 │   │   ├── rag.py               # Embed + retrieve sqlite-vec
 │   │   └── generator.py         # Assemblage prompt + appel LLM
 │   ├── delivery/
-│   │   ├── resend_notifier.py   # Email brouillon → Cyril
+│   │   ├── resend_notifier.py   # Email brouillon → CDAL
 │   │   └── slack_notifier.py    # Notifications webhook Slack
 │   ├── llm/router.py            # Wrapper LiteLLM avec fallback
 │   ├── web/                     # Cockpit web FastAPI

@@ -8,7 +8,7 @@ import structlog
 log = structlog.get_logger()
 
 _DEFAULT_USERS = [
-    ("cdal@digitalhs.biz", "super_admin", "Cyril Dal"),
+    ("cdal@digitalhs.biz", "super_admin", "CDAL"),
     ("contact@detectivebelgique.be", "operator", "Detective Belgique"),
 ]
 

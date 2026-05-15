@@ -2,7 +2,7 @@
 
 > **Date** : 2026-05-15
 > **Version** : 1.5.3
-> **Intégrateur** : Cyril Dal (`cdal@digitalhs.biz`)
+> **Intégrateur** : CDAL (`cdal@digitalhs.biz`)
 > **Client** : Daniel Hurchon — Detective.be (3 marques : Detective Belgique FR, Detective Belgium EN/multi, DPDH Investigations)
 > **Repo** : https://github.com/cdal-dhs/Charlie-detective-ai
 
@@ -13,7 +13,7 @@
 Agent IA Python (asyncio) qui poll 3 boîtes mail Infomaniak toutes les 5 min, classifie les emails entrants en 8 catégories, assigne une priorité intelligente, et génère des brouillons de réponse "à la Daniel" via RAG sur 1200 paires Q/R historiques anonymisées. Le tout est supervisé via un cockpit web sécurisé.
 
 **Environnements** :
-- **Local (Mac Cyril)** : développement, tests
+- **Local (Mac CDAL)** : développement, tests
 - **Production (VPS Hostinger KVM8)** : Docker + Traefik + Let's Encrypt
 
 **URL cockpit** : https://detective.digitalhs.biz
@@ -57,7 +57,7 @@ Agent IA Python (asyncio) qui poll 3 boîtes mail Infomaniak toutes les 5 min, c
 | Concurrence | `asyncio` |
 | IMAP | `aioimaplib` |
 | LLM router | **LiteLLM** (proxy OpenAI-compat) |
-| LLM principal | **Kimi K2 via Ollama Pro** (abonnement 20€/mois Cyril) |
+| LLM principal | **Kimi K2 via Ollama Pro** (abonnement 20€/mois CDAL) |
 | LLM fallback | **OpenRouter** (Claude / GPT-4o à la demande) |
 | Embeddings | `intfloat/multilingual-e5-large` (sentence-transformers, local CPU) |
 | Vector store | **`sqlite-vec`** (extension SQLite, vit dans les DB existantes) |
@@ -101,7 +101,7 @@ ssh root@69.62.110.165 'cd /opt/DETECTIVE && docker compose up -d --build'
 ssh root@69.62.110.165 'cd /opt/DETECTIVE && docker compose ps'
 ```
 
-### 4.2 Déploiement (Mac Cyril → VPS)
+### 4.2 Déploiement (Mac CDAL → VPS)
 
 ```bash
 # One-shot depuis le repo local
@@ -115,7 +115,7 @@ Le script inclut des **pre-flight checks systématiques** :
 - Sync `data/` (DB SQLite) et `.env`
 - Build Docker et restart conteneur
 
-### 4.3 Développement local (Mac Cyril)
+### 4.3 Développement local (Mac CDAL)
 
 ```bash
 # Setup (à faire une fois)
@@ -165,7 +165,7 @@ DETECTIVE_BE/
 │   │   ├── rag.py               # Embed + retrieve sqlite-vec
 │   │   └── generator.py         # Assemblage prompt + appel LLM
 │   ├── delivery/
-│   │   ├── resend_notifier.py   # Email brouillon → Cyril
+│   │   ├── resend_notifier.py   # Email brouillon → CDAL
 │   │   └── slack_notifier.py    # Webhook Slack #detective
 │   ├── llm/
 │   │   └── router.py            # Wrapper LiteLLM avec fallback OpenRouter
@@ -280,7 +280,7 @@ Lis impérativement **`CLAUDE.md`** pour les conventions complètes. Points clé
 2. **Lire `docs/ROADMAP.md`** — identifier la phase en cours (S1/S2/S3/S4/V2).
 3. **Lire ce HANDOVER.md** — comprendre l'état actuel et les conventions.
 4. **Lire le module concerné en entier** avant de le modifier.
-5. **Si une décision n'est pas dans la spec**, demander à Cyril. N'invente pas d'archi parallèle.
+5. **Si une décision n'est pas dans la spec**, demander à CDAL. N'invente pas d'archi parallèle.
 6. **Tests d'abord** quand c'est un module pur (RAG, prefilter, language, prompt assembly).
 7. **Avant déploiement** : vérifier que `pyproject.toml` version est à jour, mettre à jour `CHANGELOG.md`.
 8. **Déployer** : `bash scripts/deploy-to-vps.sh` (pre-flight checks intégrés).
@@ -290,7 +290,7 @@ Lis impérativement **`CLAUDE.md`** pour les conventions complètes. Points clé
 
 ## 10. Contacts et ressources
 
-- **Intégrateur** : Cyril Dal (`cdal@digitalhs.biz`)
+- **Intégrateur** : CDAL (`cdal@digitalhs.biz`)
 - **Client** : Daniel Hurchon — detectivebelgique.be / detectivebelgium.com / dpdhuinvestigations.be
 - **Repo GitHub** : https://github.com/cdal-dhs/Charlie-detective-ai
 - **Cockpit prod** : https://detective.digitalhs.biz
