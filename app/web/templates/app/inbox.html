@@ -5,7 +5,9 @@
 {% block content %}
 {% set sort = filters.sort or 'date' %}
 {% set order = filters.order or 'desc' %}
-<div class="space-y-4" x-data="{ activeTab: '{{ filters.category or 'all' }}', sort: '{{ sort }}', order: '{{ order }}' }">
+<div class="space-y-4"
+     x-data="{ activeTab: '{{ 'urgent_prio' if filters.priority == 'high' else filters.category or 'all' }}', sort: '{{ sort }}', order: '{{ order }}', boxes: [] }"
+     x-init="boxes = '{{ filters.box or '' }}'.split(',').filter(x => x)">
   <div class="flex items-center justify-between">
     <h1 class="text-2xl font-semibold">Inbox Daniel</h1>
     <div class="text-sm text-gray-400">{{ user.email }}</div>
@@ -14,62 +16,80 @@
   <!-- Tabs -->
   <div class="flex space-x-1 border-b border-gray-800 pb-1 overflow-x-auto">
     {% set tabs = [
+      ('urgent_prio', 'Urgent'),
       ('all', 'Toutes'),
-      ('urgent', 'Urgentes'),
       ('demande_client', 'Demandes client'),
       ('newsletter', 'Newsletters'),
       ('facture', 'Factures'),
       ('spam', 'Spam'),
+      ('phishing', 'Phishing'),
+      ('rappel', 'Rappels'),
       ('autre', 'Autres')
     ] %}
     {% for key, label in tabs %}
       <button
         class="px-3 py-2 text-sm rounded-t font-medium whitespace-nowrap"
         :class="activeTab === '{{ key }}' ? 'bg-gray-800 text-blue-400 border-b-2 border-blue-400' : 'text-gray-400 hover:text-gray-200'"
-        @click="activeTab = '{{ key }}'; document.getElementById('filter-category').value = '{{ key if key != 'all' else '' }}'; htmx.trigger('#filter-form', 'submit')"
+        @click="
+          activeTab = '{{ key }}';
+          {% if key == 'urgent_prio' %}
+            document.getElementById('filter-category').value = '';
+            document.getElementById('filter-priority').value = 'high';
+          {% elif key == 'all' %}
+            document.getElementById('filter-category').value = '';
+            document.getElementById('filter-priority').value = '';
+          {% else %}
+            document.getElementById('filter-category').value = '{{ key }}';
+            document.getElementById('filter-priority').value = '';
+          {% endif %}
+          htmx.trigger('#filter-form', 'submit');
+        "
       >
         {{ label }}
-        <span class="ml-1 text-xs text-gray-500">({{ counts.get(key, 0) if key != 'all' else mails|length }})</span>
+        <span class="ml-1 text-xs text-gray-500">
+          ({% if key == 'all' %}{{ mails|length }}{% else %}{{ counts.get(key, 0) }}{% endif %})
+        </span>
       </button>
     {% endfor %}
   </div>
 
   <!-- Filters -->
-  <form id="filter-form" class="flex flex-wrap gap-3"
+  <form id="filter-form" class="flex flex-wrap items-center gap-4"
         hx-get="/api/inbox" hx-target="#inbox-table-body" hx-swap="innerHTML"
-        hx-trigger="submit, change from:select">
-    <select name="box" class="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm">
-      <option value="">Toutes les boîtes</option>
-      {% for m in mailboxes %}
-        <option value="{{ m }}" {% if filters.box == m %}selected{% endif %}>{{ m }}</option>
+        hx-trigger="submit">
+    <!-- Boîtes : checkboxes côte à côte -->
+    <div class="flex items-center gap-4">
+      {% set box_labels = {'detective_belgique': 'Detective Belgique', 'detective_belgium': 'Detective Belgium', 'dpdh_investigations': 'DPDH'} %}
+      {% for mb in mailboxes %}
+        <label class="flex items-center gap-2 text-sm cursor-pointer select-none">
+          <input type="checkbox" value="{{ mb }}" x-model="boxes"
+                 class="accent-blue-500 w-4 h-4 rounded border-gray-600 bg-gray-900"
+                 @change="document.getElementById('filter-box').value = boxes.join(','); htmx.trigger('#filter-form', 'submit')">
+          <span>{{ box_labels.get(mb, mb) }}</span>
+        </label>
       {% endfor %}
-    </select>
-    <select id="filter-category" name="category" class="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm">
-      <option value="">Toutes catégories</option>
-      {% for c in categories %}
-        <option value="{{ c }}" {% if filters.category == c %}selected{% endif %}>{{ c }}</option>
-      {% endfor %}
-    </select>
-    <select name="status" class="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm">
-      <option value="">Tous statuts</option>
-      {% for s in statuses %}
-        <option value="{{ s }}" {% if filters.status == s %}selected{% endif %}>{{ s }}</option>
-      {% endfor %}
-    </select>
-    <select name="priority" class="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm">
-      <option value="">Toutes priorités</option>
-      {% for p in priorities %}
-        <option value="{{ p }}" {% if filters.priority == p %}selected{% endif %}>{{ p }}</option>
-      {% endfor %}
-    </select>
+      <input type="hidden" name="box" id="filter-box" :value="boxes.join(',')">
+    </div>
+
+    <input type="hidden" name="category" id="filter-category" value="{{ filters.category or '' }}">
+    <input type="hidden" name="priority" id="filter-priority" value="{{ filters.priority or '' }}">
     <input type="hidden" name="sort" x-model="sort">
     <input type="hidden" name="order" x-model="order">
-    <button type="submit" class="px-3 py-1 bg-gray-800 hover:bg-gray-700 rounded text-sm">Filtrer</button>
-    <button
-      type="button"
-      class="px-3 py-1 bg-gray-800 hover:bg-gray-700 rounded text-sm"
-      @click="activeTab = 'all'; document.getElementById('filter-category').value = ''; document.querySelector('#filter-form select[name=box]').value = ''; document.querySelector('#filter-form select[name=status]').value = ''; document.querySelector('#filter-form select[name=priority]').value = ''; htmx.trigger('#filter-form', 'submit')"
-    >Réinitialiser</button>
+
+    <div class="flex items-center gap-2 ml-auto">
+      <button type="submit" class="px-3 py-1 bg-gray-800 hover:bg-gray-700 rounded text-sm">Filtrer</button>
+      <button
+        type="button"
+        class="px-3 py-1 bg-gray-800 hover:bg-gray-700 rounded text-sm"
+        @click="
+          activeTab = 'all';
+          boxes = [];
+          document.getElementById('filter-category').value = '';
+          document.getElementById('filter-priority').value = '';
+          htmx.trigger('#filter-form', 'submit');
+        "
+      >Réinitialiser</button>
+    </div>
   </form>
 
   <!-- Table -->

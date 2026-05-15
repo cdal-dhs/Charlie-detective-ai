@@ -30,7 +30,7 @@ _SORTABLE_COLS = {
 
 async def _fetch_mails_partial(
     db: aiosqlite.Connection,
-    box: str | None,
+    boxes: list[str] | None,
     category: str | None,
     status: str | None,
     priority: str | None,
@@ -40,9 +40,10 @@ async def _fetch_mails_partial(
 ) -> list[dict]:
     where = ["1=1"]
     params = []
-    if box:
-        where.append("mailbox_name = ?")
-        params.append(box)
+    if boxes:
+        placeholders = ",".join("?" for _ in boxes)
+        where.append(f"mailbox_name IN ({placeholders})")
+        params.extend(boxes)
     if category:
         where.append("category = ?")
         params.append(category)
@@ -85,14 +86,15 @@ async def inbox_partial(
     db: aiosqlite.Connection = Depends(get_db),  # noqa: B008
     user: dict = Depends(require_operator),  # noqa: B008
 ):
-    box = request.query_params.get("box") or None
+    box_raw = request.query_params.get("box") or None
+    boxes = box_raw.split(",") if box_raw else None
     category = request.query_params.get("category") or None
     status = request.query_params.get("status") or None
     priority = request.query_params.get("priority") or None
     sort_col = request.query_params.get("sort") or "date"
     sort_order = request.query_params.get("order") or "desc"
 
-    mails = await _fetch_mails_partial(db, box, category, status, priority, sort_col, sort_order)
+    mails = await _fetch_mails_partial(db, boxes, category, status, priority, sort_col, sort_order)
     return templates.TemplateResponse(
         request,
         "app/inbox_rows.html",

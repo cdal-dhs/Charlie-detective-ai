@@ -4,6 +4,19 @@
 
 ---
 
+## [1.1.6] — 2026-05-15
+
+### Ajouté
+- **Tab "Urgent" en premier** dans l'inbox : filtre sur la priorité `high` (et non plus la catégorie `urgent`).
+- **Tabs Phishing et Rappels** ajoutés au bandeau de catégories.
+- **Filtre boîtes par checkboxes** : 3 cases à cocher côte à côte (Detective Belgique, Detective Belgium, DPDH) avec multi-sélection supportée en backend (`IN` clause SQL).
+
+### Modifié
+- **Suppression des dropdowns filtres** (catégorie, statut, priorité) : remplacés par les tabs et l'édition inline dans les lignes.
+- **Backend** : `_fetch_mails`, `_fetch_mails_partial` et `_fetch_counts` supportent désormais une liste de boîtes (`mailbox_names`).
+
+---
+
 ## [1.1.5] — 2026-05-15
 
 ### Ajouté

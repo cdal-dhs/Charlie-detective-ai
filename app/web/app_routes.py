@@ -19,7 +19,11 @@ _PRIORITIES = ["high", "normal", "low"]
 async def _fetch_counts(db: aiosqlite.Connection, filters: dict) -> dict:
     base_where = "1=1"
     params = []
-    for col in ("mailbox_name", "status", "priority"):
+    if filters.get("mailbox_names"):
+        placeholders = ",".join("?" for _ in filters["mailbox_names"])
+        base_where += f" AND mailbox_name IN ({placeholders})"
+        params.extend(filters["mailbox_names"])
+    for col in ("status", "priority"):
         if filters.get(col):
             base_where += f" AND {col} = ?"
             params.append(filters[col])
@@ -32,6 +36,24 @@ async def _fetch_counts(db: aiosqlite.Connection, filters: dict) -> dict:
         ) as cursor:
             row = await cursor.fetchone()
             counts[cat] = row[0] if row else 0
+
+    # Count urgent (high priority) — sans le filtre priority pour éviter 0 quand on filtre déjà par high
+    urgent_where = "1=1"
+    urgent_params = []
+    if filters.get("mailbox_names"):
+        placeholders = ",".join("?" for _ in filters["mailbox_names"])
+        urgent_where += f" AND mailbox_name IN ({placeholders})"
+        urgent_params.extend(filters["mailbox_names"])
+    if filters.get("status"):
+        urgent_where += " AND status = ?"
+        urgent_params.append(filters["status"])
+    async with db.execute(
+        f"SELECT COUNT(*) FROM mail_processed WHERE priority = 'high' AND {urgent_where}",
+        urgent_params,
+    ) as cursor:
+        row = await cursor.fetchone()
+        counts["urgent_prio"] = row[0] if row else 0
+
     return counts
 
 
@@ -48,7 +70,7 @@ _SORTABLE_COLS = {
 
 async def _fetch_mails(
     db: aiosqlite.Connection,
-    box: str | None,
+    boxes: list[str] | None,
     category: str | None,
     status: str | None,
     priority: str | None,
@@ -58,9 +80,10 @@ async def _fetch_mails(
 ) -> list[dict]:
     where = ["1=1"]
     params = []
-    if box:
-        where.append("mailbox_name = ?")
-        params.append(box)
+    if boxes:
+        placeholders = ",".join("?" for _ in boxes)
+        where.append(f"mailbox_name IN ({placeholders})")
+        params.extend(boxes)
     if category:
         where.append("category = ?")
         params.append(category)
@@ -136,19 +159,20 @@ async def app_index(
     db: aiosqlite.Connection = Depends(get_db),  # noqa: B008
     user: dict = Depends(require_operator),  # noqa: B008
 ):
-    box = request.query_params.get("box") or None
+    box_raw = request.query_params.get("box") or None
+    boxes = box_raw.split(",") if box_raw else None
     category = request.query_params.get("category") or None
     status = request.query_params.get("status") or None
     priority = request.query_params.get("priority") or None
     sort_col = request.query_params.get("sort") or "date"
     sort_order = request.query_params.get("order") or "desc"
 
-    mails = await _fetch_mails(db, box, category, status, priority, sort_col, sort_order)
+    mails = await _fetch_mails(db, boxes, category, status, priority, sort_col, sort_order)
     mailboxes = await _fetch_mailboxes(db)
     counts = await _fetch_counts(
         db,
         {
-            "mailbox_name": box,
+            "mailbox_names": boxes,
             "status": status,
             "priority": priority,
         },

@@ -158,7 +158,7 @@ DETECTIVE_BE/
 
 ✅ **MVP opérationnel en production** — `detective.digitalhs.biz`
 - Backend IMAP + génération IA : Docker sur VPS Hostinger
-- Cockpit web : FastAPI via Traefik + HTTPS, avec édition inline catégorie/statut/priorité dans inbox et conversation
+- Cockpit web : FastAPI via Traefik + HTTPS, avec tabs priorité/catégories, filtres boîtes en checkboxes et édition inline catégorie/statut/priorité
 - Classification enrichie : 8 catégories (phishing, rappel, demande_client, facture, newsletter, spam, urgent, autre)
 - Priorité intelligente : demande client chaude = HIGH
 - Voir `docs/ROADMAP.md` pour les phases restantes (S4 supervision, V2 Drafts IMAP).
