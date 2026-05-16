@@ -4,6 +4,17 @@
 
 ---
 
+## [1.7.2] — 2026-05-16
+
+### Ajouté
+- **Body preview dans les notifications Slack** : la notification de nouveau brouillon inclut désormais un aperçu du contenu du mail (tronqué à 400 caractères) pour que Daniel puisse lire rapidement sans ouvrir le cockpit.
+- **Bouton "Ouvrir dans le cockpit"** dans les notifications Slack : lien direct et visible vers la conversation dans le cockpit web (`detective.digitalhs.biz/app/conversation/{id}`).
+
+### Corrigé
+- **Variable `body_preview` utilisée avant sa définition** dans `imap_poller.py` — déplacée avant le bloc `if category == "demande_client"`.
+
+---
+
 ## [1.7.1] — 2026-05-16
 
 ### Corrigé

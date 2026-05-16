@@ -29,17 +29,23 @@ async def send_slack_message(text: str, blocks: list[dict] | None = None) -> Non
     log.info("slack.sent", text=text[:50])
 
 
+_MAX_BODY_PREVIEW_SLACK = 400
+
+
 async def notify_new_draft(
     draft_id: str | int,
     sender: str,
     subject: str,
     category: str,
+    body_preview: str = "",
     base_url: str = "",
 ) -> None:
     """Notification quand un nouveau brouillon est généré."""
     id_display = f"#{draft_id}"
+    cockpit_url = ""
     if base_url:
-        id_display = f"<{base_url}/app/conversation/{draft_id}|#{draft_id}>"
+        cockpit_url = f"{base_url}/app/conversation/{draft_id}"
+        id_display = f"<{cockpit_url}|#{draft_id}>"
 
     blocks = [
         {
@@ -59,14 +65,37 @@ async def notify_new_draft(
                 {"type": "mrkdwn", "text": f"*Catégorie:*\n{category}"},
             ],
         },
-        {
+    ]
+
+    if body_preview:
+        preview = body_preview[:_MAX_BODY_PREVIEW_SLACK]
+        if len(body_preview) > _MAX_BODY_PREVIEW_SLACK:
+            preview += " …"
+        blocks.append({
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": f"*Brouillon à valider dans votre inbox*\nTRIAL DETECTIVE AI : {subject}",
+                "text": f"*Aperçu du mail :*\n```{preview}```",
             },
-        },
-    ]
+        })
+
+    if cockpit_url:
+        blocks.append({
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {
+                        "type": "plain_text",
+                        "text": "Ouvrir dans le cockpit",
+                        "emoji": True,
+                    },
+                    "url": cockpit_url,
+                    "action_id": "open_cockpit",
+                }
+            ],
+        })
+
     await send_slack_message("Nouveau brouillon généré", blocks)
 
 

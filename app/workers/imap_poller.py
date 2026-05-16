@@ -269,6 +269,7 @@ async def _process_single_mail(
     priority = assign_priority(category, subject, body, sender)
     log.info("poller.priority", mailbox=mailbox.name, uid=uid, category=category, priority=priority)
 
+    body_preview = body[:2000] if body else ""
     draft_generated = 0
     verified_draft = False
     if category == "demande_client":
@@ -293,6 +294,7 @@ async def _process_single_mail(
                     sender=sender,
                     subject=subject,
                     category=category,
+                    body_preview=body_preview,
                     base_url=settings.public_base_url.rstrip("/")
                     if settings.public_base_url
                     else "",
@@ -315,7 +317,6 @@ async def _process_single_mail(
                 verified=verified_draft,
             )
 
-    body_preview = body[:2000] if body else ""
     ai_draft_text = ""
     if category == "demande_client" and draft_generated:
         ai_draft_text = gen.draft
