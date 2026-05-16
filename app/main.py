@@ -13,7 +13,7 @@ from app.workers.imap_poller import poll_mailbox
 async def main() -> None:
     settings = get_settings()
     setup_logging(log_level=settings.log_level, log_dir=settings.log_dir)
-    cleanup_old_logs(settings.log_dir, keep_days=7)
+    cleanup_old_logs(settings.log_dir, keep_days=3)
 
     log = structlog.get_logger()
     log.info("agent.start", mailboxes=[m.name for m in settings.mailboxes()])

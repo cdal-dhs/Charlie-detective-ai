@@ -210,12 +210,24 @@ async def _process_mailbox(mailbox: MailboxConfig) -> None:
         uids = search_resp.lines[0].split() if search_resp.lines else []
         log.info("poller.found", mailbox=mailbox.name, count=len(uids))
 
+        cycle_stats: dict[str, int] = {}
         for uid_bytes in uids:
             uid = uid_bytes.decode()
             try:
-                await _process_single_mail(client, uid, mailbox)
+                cat = await _process_single_mail(client, uid, mailbox)
+                cycle_stats[cat] = cycle_stats.get(cat, 0) + 1
             except Exception:
                 log.exception("poller.mail_error", mailbox=mailbox.name, uid=uid)
+
+        if cycle_stats:
+            log.info(
+                "poller.cycle_summary",
+                mailbox=mailbox.name,
+                processed=sum(cycle_stats.values()),
+                breakdown=cycle_stats,
+            )
+        else:
+            log.info("poller.cycle_empty", mailbox=mailbox.name)
 
         await client.logout()
         health.mark_imap(mailbox.name, True)
@@ -229,7 +241,7 @@ async def _process_single_mail(
     client: aioimaplib.IMAP4,
     uid: str,
     mailbox: MailboxConfig,
-) -> None:
+) -> str:
     settings = get_settings()
     fetch_resp = await client.fetch(uid, "RFC822")
     if fetch_resp.result != "OK":
@@ -343,3 +355,5 @@ async def _process_single_mail(
             log.warning("poller.flag_failed", mailbox=mailbox.name, uid=uid, response=store_resp)
     else:
         log.info("dry_run.skip_flag", mailbox=mailbox.name, uid=uid)
+
+    return category

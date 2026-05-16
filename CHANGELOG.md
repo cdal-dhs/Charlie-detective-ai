@@ -4,6 +4,27 @@
 
 ---
 
+## [1.7.5] — 2026-05-16
+
+### Ajouté
+- **Résumé de cycle polling** : à chaque cycle IMAP, un log `poller.cycle_summary` affiche le nombre de mails traités et le breakdown par catégorie (`{"demande_client": 1, "autre": 2}`). Si aucun mail, log `poller.cycle_empty`.
+- **Logs journaliers lisibles** : les fichiers `logs/agent-YYYY-MM-DD.log` utilisent désormais un format lisible (ConsoleRenderer sans couleurs) au lieu de JSON brut. Le `tail` et le `grep` sont plus faciles.
+
+### Modifié
+- **Rétention logs** : `cleanup_old_logs` passe de 7 jours à **3 jours** (72h), comme demandé.
+
+---
+
+## [1.7.4] — 2026-05-16
+
+### Corrigé
+- **Route /app/inbox 404** : ajout d'une route `/app/inbox` qui redirige vers `/app/` (la page inbox utilise `/app/` comme racine, mais les bookmarks/utilisateurs tapent parfois `/app/inbox`).
+
+### Modifié
+- **Healthcheck post-deploy** : `deploy-to-vps.sh` vérifie désormais `/health=200` et `/auth/login=200` après le build Docker. S'échoue avec les logs d'erreur si le cockpit ne revient pas dans les 60s.
+
+---
+
 ## [1.7.3] — 2026-05-16
 
 ### Corrigé
