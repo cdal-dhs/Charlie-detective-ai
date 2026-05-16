@@ -104,6 +104,7 @@ def _persist(
     body: str = "",
     ai_draft: str = "",
     priority: str = "normal",
+    status: str = "pending",
 ) -> int:
     """Persiste le mail et retourne l'id SQLite auto-incrémenté (pour liens cockpit)."""
     conn = sqlite3.connect(db_path)
@@ -113,7 +114,7 @@ def _persist(
             INSERT INTO mail_processed
                 (imap_uid, mailbox_name, subject, sender, received_at, category, draft_generated,
                  body_preview, body, ai_draft, status, priority)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(imap_uid, mailbox_name) DO UPDATE SET
                 category = excluded.category,
                 draft_generated = excluded.draft_generated,
@@ -122,11 +123,12 @@ def _persist(
                 body = COALESCE(NULLIF(excluded.body, ''), mail_processed.body),
                 ai_draft = COALESCE(NULLIF(excluded.ai_draft, ''), mail_processed.ai_draft),
                 priority = excluded.priority,
+                status = excluded.status,
                 processed_at = CURRENT_TIMESTAMP
             RETURNING id
             """,
             (imap_uid, mailbox_name, subject, sender, received_at, category, draft_generated,
-             body_preview, body, ai_draft, priority),
+             body_preview, body, ai_draft, status, priority),
         )
         row = cursor.fetchone()
         conn.commit()
@@ -314,6 +316,11 @@ async def _process_single_mail(
     # Garde-fou inconditionnel : toute demande client = high (business vital)
     if category == "demande_client":
         priority = "high"
+    # Newsletter : auto-approved + low priority (rien à traiter)
+    status = "pending"
+    if category == "newsletter":
+        status = "approved"
+        priority = "low"
     log.info("poller.priority", mailbox=mailbox.name, uid=uid, category=category, priority=priority)
 
     body_preview = body[:2000] if body else ""
@@ -343,6 +350,7 @@ async def _process_single_mail(
         body,
         ai_draft_text,
         priority,
+        status,
     )
 
     if category == "demande_client" and not settings.dry_run:
