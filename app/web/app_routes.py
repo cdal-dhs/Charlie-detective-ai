@@ -14,6 +14,9 @@ log = structlog.get_logger()
 router = APIRouter(prefix="/app", tags=["app"])
 templates = Jinja2Templates(directory="app/web/templates")
 
+# Masquer les mails traités avant le 15/05/2026 (pré-prod)
+_CUTOFF_DATE = "2026-05-15"
+
 _CATEGORIES = [
     "demande_client", "urgent", "newsletter", "facture",
     "spam", "phishing", "rappel", "autre",
@@ -23,8 +26,8 @@ _PRIORITIES = ["high", "normal", "low"]
 
 
 async def _fetch_counts(db: aiosqlite.Connection, filters: dict) -> dict:
-    base_where = "1=1"
-    params = []
+    base_where = "processed_at >= ?"
+    params = [_CUTOFF_DATE]
     mailbox_names = filters.get("mailbox_names")
     if mailbox_names is not None:
         if mailbox_names:
@@ -48,8 +51,8 @@ async def _fetch_counts(db: aiosqlite.Connection, filters: dict) -> dict:
             counts[cat] = row[0] if row else 0
 
     # Count urgent (high priority)
-    urgent_where = "1=1"
-    urgent_params = []
+    urgent_where = "processed_at >= ?"
+    urgent_params = [_CUTOFF_DATE]
     if mailbox_names is not None:
         if mailbox_names:
             placeholders = ",".join("?" for _ in mailbox_names)
@@ -92,8 +95,8 @@ async def _fetch_mails(
     sort_order: str = "desc",
     limit: int = 50,
 ) -> list[dict]:
-    where = ["1=1"]
-    params = []
+    where = ["processed_at >= ?"]
+    params = [_CUTOFF_DATE]
     if boxes is not None:
         if boxes:
             placeholders = ",".join("?" for _ in boxes)

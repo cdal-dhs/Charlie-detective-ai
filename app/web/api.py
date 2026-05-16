@@ -18,6 +18,9 @@ log = structlog.get_logger()
 router = APIRouter(prefix="/api", tags=["api"])
 templates = Jinja2Templates(directory="app/web/templates")
 
+# Masquer les mails traités avant le 15/05/2026 (pré-prod)
+_CUTOFF_DATE = "2026-05-15"
+
 
 _SORTABLE_COLS = {
     "mailbox": "mailbox_name",
@@ -41,8 +44,8 @@ async def _fetch_mails_partial(
     sort_order: str = "desc",
     limit: int = 50,
 ) -> list[dict]:
-    where = ["1=1"]
-    params = []
+    where = ["processed_at >= ?"]
+    params = [_CUTOFF_DATE]
     if boxes is not None:
         if boxes:
             placeholders = ",".join("?" for _ in boxes)

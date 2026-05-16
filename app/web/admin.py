@@ -33,13 +33,14 @@ _SETTINGS_KEYS = [
 
 async def _stats(db: aiosqlite.Connection) -> dict:
     today_sql = "date(processed_at) = date('now')"
+    cutoff = "processed_at >= '2026-05-15'"
     stats = {}
     for key, sql in [
-        ("total_today", f"SELECT COUNT(*) FROM mail_processed WHERE {today_sql}"),
-        ("pending", "SELECT COUNT(*) FROM mail_processed WHERE status = 'pending'"),
-        ("approved", "SELECT COUNT(*) FROM mail_processed WHERE status = 'approved'"),
-        ("rejected", "SELECT COUNT(*) FROM mail_processed WHERE status = 'rejected'"),
-        ("sent", "SELECT COUNT(*) FROM mail_processed WHERE status = 'sent'"),
+        ("total_today", f"SELECT COUNT(*) FROM mail_processed WHERE {today_sql} AND {cutoff}"),
+        ("pending", f"SELECT COUNT(*) FROM mail_processed WHERE status = 'pending' AND {cutoff}"),
+        ("approved", f"SELECT COUNT(*) FROM mail_processed WHERE status = 'approved' AND {cutoff}"),
+        ("rejected", f"SELECT COUNT(*) FROM mail_processed WHERE status = 'rejected' AND {cutoff}"),
+        ("sent", f"SELECT COUNT(*) FROM mail_processed WHERE status = 'sent' AND {cutoff}"),
     ]:
         async with db.execute(sql) as cur:
             row = await cur.fetchone()
