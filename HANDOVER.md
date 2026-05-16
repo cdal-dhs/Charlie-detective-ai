@@ -152,7 +152,7 @@ DETECTIVE_BE/
 ├── README.md                    # Vue d'ensemble publique
 ├── CHANGELOG.md                 # Historique versions (format Keep a Changelog)
 ├── HANDOVER.md                  # Ce fichier (état + contexte pour nouvel agent)
-├── pyproject.toml               # Version source de vérité (1.7.9), deps, ruff, pytest
+├── pyproject.toml               # Version source de vérité (1.8.0), deps, ruff, pytest
 ├── .env.example                 # Template config (sans secrets)
 ├── Dockerfile                   # Python 3.11 slim
 ├── docker-compose.yml           # Service + labels Traefik
@@ -259,7 +259,7 @@ Lis impérativement **`CLAUDE.md`** pour les conventions complètes. Points clé
 
 ---
 
-## 8. État des fonctionnalités (2026-05-15)
+## 8. État des fonctionnalités (2026-05-16)
 
 ### ✅ Opérationnel en production
 
