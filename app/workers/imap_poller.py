@@ -123,12 +123,14 @@ def _persist(
                 ai_draft = COALESCE(NULLIF(excluded.ai_draft, ''), mail_processed.ai_draft),
                 priority = excluded.priority,
                 processed_at = CURRENT_TIMESTAMP
+            RETURNING id
             """,
             (imap_uid, mailbox_name, subject, sender, received_at, category, draft_generated,
              body_preview, body, ai_draft, priority),
         )
+        row = cursor.fetchone()
         conn.commit()
-        return cursor.lastrowid
+        return row[0] if row else 0
     finally:
         conn.close()
 
