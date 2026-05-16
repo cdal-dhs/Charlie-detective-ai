@@ -329,6 +329,7 @@ Les fichiers suivants persistent entre sessions Claude Code et guident le compor
 - `memory/feedback_deploy-check-systematic.md` — Pre-flight checks avant tout déploiement VPS
 - `memory/multilingual_rule.md` — Réponses DOIVENT être dans la langue du client
 - `memory/MEMORY.md` — Index de toutes les mémoires
+- `docs/RUNBOOK.md` — Incidents, post-mortems, procédures de secours
 
 ---
 

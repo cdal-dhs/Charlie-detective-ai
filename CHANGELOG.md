@@ -10,6 +10,7 @@
 - **Hot-row visuel non appliqué sur les vieux mails** : seule la première ligne `demande_client + pending + high` affichait le trait vert (`border-l-green-500`). Les mails persistés avant l'ajout de la colonne `status` avaient `status = NULL`. Le template affichait visuellement "pending" dans le `<select>`, mais la condition `m.status == 'pending'` était fausse. `effective_status = m.status or 'pending'` corrige le critère `is_hot`, et le `<select>` pré-sélectionne désormais "pending" aussi quand `m.status` est vide.
 - **Fond hot-row renforcé** : `bg-green-900/20` au lieu de `/10` pour plus de contraste sur le fond sombre.
 - **Crash serveur web en production** : `app.mount("/static", ...)` échouait silencieusement car le répertoire `app/web/static` n'était pas copié dans l'image Docker (jamais commité dans Git). Le serveur uvicorn ne démarrait jamais → Traefik retournait 502. Corrigé : mount conditionnel avec vérification `Path("app/web/static").exists()`.
+- **Garde-fous deploy** : `scripts/deploy-to-vps.sh` vérifie désormais que les répertoires montés dans `docker-compose.yml` existent localement, effectue un dry-run build Docker avant envoi, et crée `app/web/static/.gitkeep` si absent. Voir `docs/RUNBOOK.md#INC-001`.
 
 ---
 
