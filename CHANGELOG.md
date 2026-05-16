@@ -4,6 +4,13 @@
 
 ---
 
+## [1.7.3] — 2026-05-16
+
+### Corrigé
+- **Checkbox DPDH manquante dans l'inbox** : `_fetch_mailboxes()` scannait la DB (`SELECT DISTINCT mailbox_name`) pour afficher les checkboxes. Si DPDH n'avait encore aucun mail, elle n'apparaissait pas. Corrigé : la fonction retourne désormais les 3 boîtes configurées via `settings.mailboxes`, indépendamment de la présence de mails en base.
+
+---
+
 ## [1.7.2] — 2026-05-16
 
 ### Ajouté

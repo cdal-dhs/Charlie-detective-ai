@@ -6,13 +6,17 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.templating import Jinja2Templates
 
 from app import __version__
+from app.config import get_settings
 from app.web.deps import get_db, require_operator
 
 log = structlog.get_logger()
 router = APIRouter(prefix="/app", tags=["app"])
 templates = Jinja2Templates(directory="app/web/templates")
 
-_CATEGORIES = ["demande_client", "urgent", "newsletter", "facture", "spam", "phishing", "rappel", "autre"]
+_CATEGORIES = [
+    "demande_client", "urgent", "newsletter", "facture",
+    "spam", "phishing", "rappel", "autre",
+]
 _STATUSES = ["pending", "approved", "rejected", "sent", "reviewed"]
 _PRIORITIES = ["high", "normal", "low"]
 
@@ -106,7 +110,9 @@ async def _fetch_mails(
         where.append("priority = ?")
         params.append(priority)
     if q:
-        where.append("(LOWER(subject) LIKE ? OR LOWER(sender) LIKE ? OR LOWER(body_preview) LIKE ?)")
+        where.append(
+            "(LOWER(subject) LIKE ? OR LOWER(sender) LIKE ? OR LOWER(body_preview) LIKE ?)"
+        )
         like = f"%{q.lower()}%"
         params.extend([like, like, like])
 
@@ -131,12 +137,10 @@ async def _fetch_mails(
     return [dict(zip(cols, row, strict=True)) for row in rows]
 
 
-async def _fetch_mailboxes(db: aiosqlite.Connection) -> list[str]:
-    async with db.execute(
-        "SELECT DISTINCT mailbox_name FROM mail_processed WHERE mailbox_name IS NOT NULL"
-    ) as cursor:
-        rows = await cursor.fetchall()
-    return sorted([r[0] for r in rows])
+async def _fetch_mailboxes() -> list[str]:
+    """Retourne les noms des boîtes configurées (toujours 3, pas seulement celles avec mails)."""
+    settings = get_settings()
+    return [mb.name for mb in settings.mailboxes]
 
 
 async def _fetch_mail(db: aiosqlite.Connection, mail_id: int) -> dict | None:
@@ -176,10 +180,7 @@ async def app_index(
     user: dict = Depends(require_operator),  # noqa: B008
 ):
     box_raw = request.query_params.get("box")
-    if box_raw is None:
-        boxes = None
-    else:
-        boxes = [b for b in box_raw.split(",") if b]
+    boxes = None if box_raw is None else [b for b in box_raw.split(",") if b]
     category = request.query_params.get("category") or None
     status = request.query_params.get("status") or None
     priority = request.query_params.get("priority") or None
@@ -188,7 +189,7 @@ async def app_index(
     sort_order = request.query_params.get("order") or "desc"
 
     mails = await _fetch_mails(db, boxes, category, status, priority, q, sort_col, sort_order)
-    mailboxes = await _fetch_mailboxes(db)
+    mailboxes = await _fetch_mailboxes()
     counts = await _fetch_counts(
         db,
         {
