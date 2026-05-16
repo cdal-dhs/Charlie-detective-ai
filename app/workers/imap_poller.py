@@ -104,10 +104,11 @@ def _persist(
     body: str = "",
     ai_draft: str = "",
     priority: str = "normal",
-) -> None:
+) -> int:
+    """Persiste le mail et retourne l'id SQLite auto-incrémenté (pour liens cockpit)."""
     conn = sqlite3.connect(db_path)
     try:
-        conn.execute(
+        cursor = conn.execute(
             """
             INSERT INTO mail_processed
                 (imap_uid, mailbox_name, subject, sender, received_at, category, draft_generated,
@@ -127,6 +128,7 @@ def _persist(
              body_preview, body, ai_draft, priority),
         )
         conn.commit()
+        return cursor.lastrowid
     finally:
         conn.close()
 
@@ -316,52 +318,13 @@ async def _process_single_mail(
         language = detect_language(body, default=mailbox.default_lang)
         gen = await generate_draft(subject, body, sender, mailbox, language, category)
         draft_generated = 1
-
         verified_draft = _is_verified_demande_client(category, msg)
-
-        if not settings.dry_run:
-            incoming = IncomingMail(
-                sender=sender,
-                subject=subject,
-                body=body,
-                received_at=received_at,
-                message_id=message_id,
-            )
-            await notify_draft(incoming, mailbox, gen)
-            if verified_draft:
-                await notify_slack_draft(
-                    draft_id=uid,
-                    sender=sender,
-                    subject=subject,
-                    category=category,
-                    body_preview=body_preview,
-                    base_url=settings.public_base_url.rstrip("/")
-                    if settings.public_base_url
-                    else "",
-                )
-            else:
-                log.info(
-                    "slack.notify_skipped",
-                    mailbox=mailbox.name,
-                    uid=uid,
-                    reason="unverified_automatic_email",
-                    sender=sender,
-                    subject=subject,
-                )
-        else:
-            log.info(
-                "dry_run.skip_notify",
-                mailbox=mailbox.name,
-                uid=uid,
-                recipient=settings.draft_recipient,
-                verified=verified_draft,
-            )
 
     ai_draft_text = ""
     if category == "demande_client" and draft_generated:
         ai_draft_text = gen.draft
 
-    await asyncio.to_thread(
+    mail_id = await asyncio.to_thread(
         _persist,
         settings.db_agent_state,
         uid,
@@ -376,6 +339,44 @@ async def _process_single_mail(
         ai_draft_text,
         priority,
     )
+
+    if category == "demande_client" and not settings.dry_run:
+        incoming = IncomingMail(
+            sender=sender,
+            subject=subject,
+            body=body,
+            received_at=received_at,
+            message_id=message_id,
+        )
+        await notify_draft(incoming, mailbox, gen)
+        if verified_draft:
+            await notify_slack_draft(
+                draft_id=mail_id,
+                sender=sender,
+                subject=subject,
+                category=category,
+                body_preview=body_preview,
+                base_url=settings.public_base_url.rstrip("/")
+                if settings.public_base_url
+                else "",
+            )
+        else:
+            log.info(
+                "slack.notify_skipped",
+                mailbox=mailbox.name,
+                uid=uid,
+                reason="unverified_automatic_email",
+                sender=sender,
+                subject=subject,
+            )
+    elif category == "demande_client" and settings.dry_run:
+        log.info(
+            "dry_run.skip_notify",
+            mailbox=mailbox.name,
+            uid=uid,
+            recipient=settings.draft_recipient,
+            verified=verified_draft,
+        )
 
     if not settings.dry_run:
         store_resp = await client.store(uid, "+FLAGS", f"({AGENT_FLAG})")

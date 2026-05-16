@@ -4,6 +4,17 @@
 
 ---
 
+## [1.7.7] — 2026-05-16
+
+### Corrigé
+- **Lien cockpit dans Slack** : `draft_id` passé à Slack est désormais le vrai `id` SQLite auto-incrémenté (retourné par `_persist`) au lieu de l'`uid` IMAP. Le lien `/app/conversation/{id}` fonctionne correctement.
+- **Bouton Slack invisible** : remplacé le bloc `actions` (button Block Kit non supporté par les webhooks) par une section `mrkdwn` avec un lien cliquable `*<url|Ouvrir dans le cockpit>*`.
+
+### Modifié
+- **Ordre pipeline** : le mail est persisté en DB *avant* la notification Slack, garantissant que `mail_id` existe au moment de construire le lien.
+
+---
+
 ## [1.7.6] — 2026-05-16
 
 ### Ajouté

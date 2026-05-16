@@ -174,14 +174,11 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    mailboxes = settings.mailboxes()
     if args.all:
-        targets = [
-            (settings.mailbox_1.user, settings.mailbox_1.app_password),
-            (settings.mailbox_2.user, settings.mailbox_2.app_password),
-            (settings.mailbox_3.user, settings.mailbox_3.app_password),
-        ]
+        targets = [(mb.user, mb.app_password) for mb in mailboxes]
     else:
-        mbox = [settings.mailbox_1, settings.mailbox_2, settings.mailbox_3][args.mailbox - 1]
+        mbox = mailboxes[args.mailbox - 1]
         targets = [(mbox.user, mbox.app_password)]
 
     log.info("test.start", targets=len(targets), cases=len(TEST_CASES))

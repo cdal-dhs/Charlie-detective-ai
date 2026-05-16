@@ -81,19 +81,11 @@ async def notify_new_draft(
 
     if cockpit_url:
         blocks.append({
-            "type": "actions",
-            "elements": [
-                {
-                    "type": "button",
-                    "text": {
-                        "type": "plain_text",
-                        "text": "Ouvrir dans le cockpit",
-                        "emoji": True,
-                    },
-                    "url": cockpit_url,
-                    "action_id": "open_cockpit",
-                }
-            ],
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": f"*<{cockpit_url}|Ouvrir dans le cockpit>*",
+            },
         })
 
     await send_slack_message("Nouveau brouillon généré", blocks)
