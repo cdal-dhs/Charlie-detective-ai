@@ -313,9 +313,13 @@ async def _process_single_mail(
         log.info("poller.classified", mailbox=mailbox.name, uid=uid, category=category)
 
     priority = assign_priority(category, subject, body, sender)
-    # Garde-fou inconditionnel : toute demande client = high (business vital)
+    # Garde-fous inconditionnels
     if category == "demande_client":
-        priority = "high"
+        priority = "high"          # business vital
+    elif category == "phishing":
+        priority = "high"          # menace sécurité
+    elif category == "autre":
+        priority = "low"           # rien à traiter
     # Newsletter : auto-approved + low priority (rien à traiter)
     status = "pending"
     if category == "newsletter":

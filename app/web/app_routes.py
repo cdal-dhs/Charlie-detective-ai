@@ -123,11 +123,12 @@ async def _fetch_mails(
     col = _SORTABLE_COLS.get(sort_col, "processed_at")
     order = "DESC" if sort_order.lower() == "desc" else "ASC"
 
+    # Tri par défaut intelligent : pending first, high priority first, puis date
     sql = (
         "SELECT id, mailbox_name, subject, sender, received_at, category, "
         "status, priority, processed_at, body_preview "
         "FROM mail_processed WHERE " + " AND ".join(where) + " "
-        f"ORDER BY {col} {order} LIMIT ?"
+        f"ORDER BY (status = 'pending') DESC, (priority = 'high') DESC, {col} {order} LIMIT ?"
     )
     params.append(limit)
 

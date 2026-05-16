@@ -4,7 +4,8 @@
 {% else %}
 {% for m in mails %}
 {% set is_hot = (m.category == 'demande_client' and m.priority == 'high' and m.status == 'pending') %}
-<tr class="border-b border-gray-800 hover:bg-gray-800/50 {% if is_hot %}bg-green-900/10 border-l-4 border-l-green-500{% endif %}">
+{% set is_danger = (m.category == 'phishing') %}
+<tr class="border-b border-gray-800 hover:bg-gray-800/50 {% if is_hot %}bg-green-900/10 border-l-4 border-l-green-500{% elif is_danger %}bg-red-900/20 border-l-4 border-l-red-500{% endif %}">
   <td class="px-2 py-3 whitespace-nowrap w-12 text-center text-xs font-medium text-gray-400">{{ box_short.get(m.mailbox_name, m.mailbox_name or '-') }}</td>
   <td class="px-3 py-3 max-w-md">
     <a href="/app/conversation/{{ m.id }}" class="text-blue-400 hover:underline truncate block">{{ m.subject or '(sans sujet)' }}</a>
