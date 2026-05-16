@@ -3,6 +3,7 @@ from __future__ import annotations
 import aiosqlite
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from app import __version__
@@ -171,6 +172,13 @@ async def _fetch_draft_versions(db: aiosqlite.Connection, mail_id: int) -> list[
         rows = await cursor.fetchall()
     cols = ["id", "version", "body", "editor_id", "ai_generated", "created_at"]
     return [dict(zip(cols, row, strict=True)) for row in rows]
+
+
+@router.get("/inbox")
+async def app_inbox_redirect(request: Request) -> RedirectResponse:
+    """Redirect /app/inbox → /app/ pour éviter les 404."""
+    qp = "?" + request.query_params if request.query_params else ""
+    return RedirectResponse(url=f"/app/{qp}", status_code=302)
 
 
 @router.get("/")
