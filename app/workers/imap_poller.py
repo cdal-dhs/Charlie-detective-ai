@@ -73,6 +73,24 @@ def _get_body_text(msg: Message) -> str:
     return ""
 
 
+def _log_telemetry(
+    db_path: Path,
+    event_type: str,
+    mailbox_name: str | None,
+    details: str,
+) -> None:
+    """Écrit un événement de télémétrie dans agent_state.db (agent_telemetry)."""
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO agent_telemetry (event_type, mailbox_name, details) VALUES (?, ?, ?)",
+            (event_type, mailbox_name, details),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _persist(
     db_path: Path,
     imap_uid: str,
@@ -226,8 +244,18 @@ async def _process_mailbox(mailbox: MailboxConfig) -> None:
                 processed=sum(cycle_stats.values()),
                 breakdown=cycle_stats,
             )
+            details = f"processed={sum(cycle_stats.values())} breakdown={cycle_stats}"
         else:
             log.info("poller.cycle_empty", mailbox=mailbox.name)
+            details = "processed=0"
+
+        await asyncio.to_thread(
+            _log_telemetry,
+            settings.db_agent_state,
+            "poller_cycle",
+            mailbox.name,
+            details,
+        )
 
         await client.logout()
         health.mark_imap(mailbox.name, True)

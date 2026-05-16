@@ -4,6 +4,17 @@
 
 ---
 
+## [1.7.6] — 2026-05-16
+
+### Ajouté
+- **Télémétrie des cycles IMAP** : chaque cycle de polling écrit un événement `poller_cycle` dans `agent_telemetry` (DB `agent_state.db`) avec le nombre de mails traités et le breakdown par catégorie.
+- **Dashboard "Cycles IMAP récents"** : le panel admin affiche les 10 derniers cycles IMAP avec la boîte, les détails et l'heure. Permet de vérifier visuellement quand l'agent a dernièrement travaillé.
+
+### Corrigé
+- **Syntaxe `_persist`** : parenthèse mal placée lors de l'édition précédente, corrigée.
+
+---
+
 ## [1.7.5] — 2026-05-16
 
 ### Ajouté

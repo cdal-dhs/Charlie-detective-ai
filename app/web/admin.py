@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 
 import aiosqlite
-import httpx
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -60,6 +58,17 @@ async def _recent_audit(db: aiosqlite.Connection, limit: int = 20) -> list[dict]
     return [dict(zip(cols, r, strict=True)) for r in rows]
 
 
+async def _recent_telemetry(db: aiosqlite.Connection, limit: int = 10) -> list[dict]:
+    async with db.execute(
+        "SELECT id, event_type, mailbox_name, details, created_at "
+        "FROM agent_telemetry ORDER BY created_at DESC LIMIT ?",
+        (limit,),
+    ) as cur:
+        rows = await cur.fetchall()
+    cols = ["id", "event_type", "mailbox_name", "details", "created_at"]
+    return [dict(zip(cols, r, strict=True)) for r in rows]
+
+
 async def _load_settings(db: aiosqlite.Connection) -> dict:
     settings = {}
     async with db.execute("SELECT key, value, is_encrypted FROM app_settings") as cur:
@@ -86,6 +95,7 @@ async def dashboard(
 ):
     stats = await _stats(db)
     audit = await _recent_audit(db, 20)
+    telemetry = await _recent_telemetry(db, 10)
     snap = health.snapshot()
     db_size = Path(get_settings().db_agent_state).stat().st_size
     return templates.TemplateResponse(
@@ -94,6 +104,7 @@ async def dashboard(
         {
             "stats": stats,
             "audit": audit,
+            "telemetry": telemetry,
             "health": snap,
             "db_size": db_size,
             "user": user,
