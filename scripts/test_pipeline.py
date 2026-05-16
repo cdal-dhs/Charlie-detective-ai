@@ -91,15 +91,24 @@ TEST_CASES = [
 # ---------------------------------------------------------------------------
 
 
-def _build_email(case: dict, to_address: str) -> MIMEMultipart:
+def _build_email(case: dict, to_address: str, batch_id: str) -> MIMEMultipart:
     msg = MIMEMultipart()
     msg["From"] = f"{case['from_name']} <{case['from_email']}>"
     msg["To"] = to_address
-    msg["Subject"] = f"[TEST {case['name']}] {case['subject']}"
+    # Sujet unique et traçable : horodatage + tag batch + nom du cas
+    msg["Subject"] = f"[TEST #{batch_id}] {case['subject']}"
     msg["X-Test-Case"] = case["name"]
     msg["X-Test-Expected"] = case["expected_category"]
+    msg["X-Test-Batch"] = batch_id
     msg["Date"] = datetime.now(UTC).strftime("%a, %d %b %Y %H:%M:%S +0000")
-    msg.attach(MIMEText(case["body"], "plain", "utf-8"))
+    # Tag traçable dans le corps (facile à grep dans les logs/DB)
+    body_tagged = (
+        f"--- TEST EMAIL #{batch_id} | CAS: {case['name']}"
+        f" | ATTENDU: {case['expected_category']} ---\n\n"
+        f"{case['body']}\n\n"
+        f"--- FIN TEST #{batch_id} ---"
+    )
+    msg.attach(MIMEText(body_tagged, "plain", "utf-8"))
     return msg
 
 
@@ -110,11 +119,12 @@ async def _send_one(
     password: str,
     case: dict,
     to_address: str,
+    batch_id: str,
 ) -> bool:
     import smtplib
     from email.utils import formatdate
 
-    msg = _build_email(case, to_address)
+    msg = _build_email(case, to_address, batch_id)
     msg.replace_header("Date", formatdate(localtime=True))
 
     def _send():
@@ -130,21 +140,22 @@ async def _send_one(
             case=case["name"],
             expected=case["expected_category"],
             to=to_address,
+            batch=batch_id,
             subject=msg["Subject"],
         )
         return True
     except Exception:
-        log.exception("test.send_failed", case=case["name"], to=to_address)
+        log.exception("test.send_failed", case=case["name"], batch=batch_id, to=to_address)
         return False
 
 
-async def _send_all(to_address: str, user: str, password: str) -> None:
+async def _send_all(to_address: str, user: str, password: str, batch_id: str) -> None:
     settings = get_settings()
     smtp_host = getattr(settings, "smtp_host", "mail.infomaniak.com")
     smtp_port = getattr(settings, "smtp_port", 587)
 
     for case in TEST_CASES:
-        await _send_one(smtp_host, smtp_port, user, password, case, to_address)
+        await _send_one(smtp_host, smtp_port, user, password, case, to_address, batch_id)
         await asyncio.sleep(1)  # Rate-limit doux
 
 
@@ -174,6 +185,9 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    # ID de batch unique (horodaté) pour tracker les tests dans Slack / cockpit / logs
+    batch_id = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+
     mailboxes = settings.mailboxes()
     if args.all:
         targets = [(mb.user, mb.app_password) for mb in mailboxes]
@@ -181,18 +195,18 @@ def main() -> None:
         mbox = mailboxes[args.mailbox - 1]
         targets = [(mbox.user, mbox.app_password)]
 
-    log.info("test.start", targets=len(targets), cases=len(TEST_CASES))
+    log.info("test.start", targets=len(targets), cases=len(TEST_CASES), batch=batch_id)
     for user, password in targets:
         if not password:
             log.warning("test.skip_no_password", user=user)
             continue
-        asyncio.run(_send_all(user, user, password))
+        asyncio.run(_send_all(user, user, password, batch_id))
 
-    log.info("test.done")
-    print("\n✅ Emails de test envoyés !")
+    log.info("test.done", batch=batch_id)
+    print(f"\n✅ Emails de test envoyés ! (batch #{batch_id})")
     print(f"   Attendez ~{settings.poll_interval_seconds // 60} min et consultez :")
+    print(f"   - Cherche 'TEST #{batch_id}' dans Slack, cockpit et logs")
     print("   - Les logs : ssh root@69.62.110.165 'cd /opt/DETECTIVE && docker compose logs -f'")
-    print("   - Le canal #detective (uniquement la vraie demande_client doit apparaître)")
     print(
         "   - La DB : sqlite3 data/agent_state.db "
         "'SELECT * FROM mail_processed ORDER BY id DESC LIMIT 10;'"
