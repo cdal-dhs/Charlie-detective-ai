@@ -140,7 +140,7 @@ async def _fetch_mails(
 async def _fetch_mailboxes() -> list[str]:
     """Retourne les noms des boîtes configurées (toujours 3, pas seulement celles avec mails)."""
     settings = get_settings()
-    return [mb.name for mb in settings.mailboxes]
+    return [mb.name for mb in settings.mailboxes()]
 
 
 async def _fetch_mail(db: aiosqlite.Connection, mail_id: int) -> dict | None:
