@@ -1,4 +1,25 @@
 {% set box_short = {'detective_belgique': 'D_FR', 'detective_belgium': 'D_NL', 'dpdh_investigations': 'D_PD'} %}
+{% set tabs = [
+  ('urgent_prio', 'Urgent'),
+  ('all', 'Toutes'),
+  ('demande_client', 'Demandes client'),
+  ('newsletter', 'Newsletters'),
+  ('facture', 'Factures'),
+  ('spam', 'Spam'),
+  ('phishing', 'Phishing'),
+  ('rappel', 'Rappels'),
+  ('autre', 'Autres')
+] %}
+{# OOB counts : mis à jour dynamiquement à chaque requête HTMX de la table #}
+{% if counts is defined %}
+<div style="display:none">
+  {% for key, label in tabs %}
+    <span id="tab-count-{{ key }}" hx-swap-oob="true" class="ml-1 text-xs text-gray-500">
+      ({% if key == 'all' %}{{ mails|length }}{% else %}{{ counts.get(key, 0) }}{% endif %})
+    </span>
+  {% endfor %}
+</div>
+{% endif %}
 {% if not mails %}
 <tr><td colspan="7" class="px-4 py-8 text-center text-gray-500">Aucun message</td></tr>
 {% else %}

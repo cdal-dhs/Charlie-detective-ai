@@ -11,6 +11,7 @@ from app.charlie import BOX_ABBR, ask_charlie
 from app.config import get_settings
 from app.pipeline.generator import generate_draft
 from app.pipeline.language import detect_language
+from app.web.app_routes import _fetch_counts
 from app.web.deps import get_db, require_operator
 from app.web.utils import audit_log
 
@@ -113,6 +114,14 @@ async def inbox_partial(
     sort_order = request.query_params.get("order") or "desc"
 
     mails = await _fetch_mails_partial(db, boxes, category, status, priority, q, sort_col, sort_order)
+    counts = await _fetch_counts(
+        db,
+        {
+            "mailbox_names": boxes,
+            "status": status,
+            "priority": priority,
+        },
+    )
     return templates.TemplateResponse(
         request,
         "app/inbox_rows.html",
@@ -122,6 +131,7 @@ async def inbox_partial(
                 "box": box_raw, "category": category, "status": status,
                 "priority": priority, "q": q, "sort": sort_col, "order": sort_order,
             },
+            "counts": counts,
             "version": __version__,
         },
     )

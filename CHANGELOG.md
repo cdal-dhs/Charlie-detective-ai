@@ -9,6 +9,7 @@
 ### Corrigé
 - **BUG CRITIQUE : écrasement des champs cockpit** : le poller IMAP réécrivait `category`, `priority` et `status` à chaque cycle via `ON CONFLICT DO UPDATE`, écrasant les modifications faites par l'opérateur dans le cockpit web. `_persist()` utilise désormais un `SELECT` préalable : si le mail existe déjà, seuls `body_preview`, `body`, `ai_draft` et `processed_at` sont mis à jour — jamais les champs métier.
 - **Re-notification et re-génération de brouillon** : pour un mail déjà en base (flag IMAP manquant ou retiré), le poller regénérait un brouillon et renvoyait une notification Resend/Slack à chaque cycle. Ajout de `_mail_exists()` : la génération de brouillon et les notifications ne se déclenchent désormais que pour les mails **nouveaux** (`is_new`).
+- **Counts des tabs non dynamiques** : quand l'opérateur changeait une catégorie/priorité/statut via HTMX, les compteurs dans les tabs (Urgent, Demandes client, Factures, etc.) restaient figés à leur valeur du chargement initial. Le endpoint `/api/inbox` recalcule désormais les `counts` à chaque requête HTMX et les injecte dans les tabs via `hx-swap-oob`.
 
 ---
 

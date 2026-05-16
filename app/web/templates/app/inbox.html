@@ -46,7 +46,7 @@
         "
       >
         {{ label }}
-        <span class="ml-1 text-xs text-gray-500">
+        <span id="tab-count-{{ key }}" class="ml-1 text-xs text-gray-500">
           ({% if key == 'all' %}{{ mails|length }}{% else %}{{ counts.get(key, 0) }}{% endif %})
         </span>
       </button>
