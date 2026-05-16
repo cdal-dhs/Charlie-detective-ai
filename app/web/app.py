@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 import structlog
 import uvicorn
@@ -32,7 +33,9 @@ def make_app() -> FastAPI:
         https_only=False,
     )
 
-    app.mount("/static", StaticFiles(directory="app/web/static"), name="static")
+    static_dir = Path("app/web/static")
+    if static_dir.exists():
+        app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):

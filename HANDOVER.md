@@ -1,7 +1,7 @@
 # HANDOVER — Detective.be Agent (Charlie)
 
 > **Date** : 2026-05-16
-> **Version** : 1.7.9
+> **Version** : 1.8.0
 > **Intégrateur** : CDAL (`cdal@digitalhs.biz`)
 > **Client** : Daniel Hurchon — Detective.be (3 marques : Detective Belgique FR, Detective Belgium EN/multi, DPDH Investigations)
 > **Repo** : https://github.com/cdal-dhs/Charlie-detective-ai
@@ -144,7 +144,7 @@ Le bot répond aux @mentions dans les canaux où il est invité, et en DM.
 
 ---
 
-## 5. Structure du repo (état au 2026-05-15)
+## 5. Structure du repo (état au 2026-05-16)
 
 ```
 DETECTIVE_BE/
@@ -167,7 +167,7 @@ DETECTIVE_BE/
 │   ├── __init__.py              # __version__ lit dynamiquement depuis pyproject.toml
 │   ├── main.py                  # Entrypoint : pollers + serveur web
 │   ├── config.py                # pydantic-settings depuis .env
-│   ├── logging_config.py      # structlog : console + fichier journalier (rotation 7j)
+│   ├── logging_config.py        # structlog : console + fichier journalier (rotation 7j)
 │   ├── healthcheck.py           # FastAPI /health
 │   ├── workers/
 │   │   ├── imap_poller.py       # Boucle polling 3 boîtes
@@ -217,8 +217,7 @@ DETECTIVE_BE/
 │   ├── boite2.sqlite            # DB historique anonymisée (NE PAS MODIFIER)
 │   ├── boite3.sqlite            # DB historique anonymisée (NE PAS MODIFIER)
 │   └── agent_state.db           # Traçabilité mails traités (+ colonne body complet)
-├── logs/                        # Fichiers journaliers agent-YYYY-MM-DD.log (rotation 7j)
-├── logs/
+├── logs/                        # Fichiers journaliers agent-YYYY-MM-DD.log (rotation 3j)
 └── tests/                       # (peuplé partiellement)
 ```
 
@@ -333,4 +332,4 @@ Les fichiers suivants persistent entre sessions Claude Code et guident le compor
 
 ---
 
-*Document maintenu à jour à chaque itération. Dernière mise à jour : 2026-05-16 (v1.7.9).*
+*Document maintenu à jour à chaque itération. Dernière mise à jour : 2026-05-16 (v1.8.0).*

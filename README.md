@@ -129,8 +129,9 @@ DETECTIVE_BE/
 │   ├── workers/
 │   │   ├── imap_poller.py       # 1 task asyncio par boîte
 │   │   └── newsletter_digest.py # Digest quotidien Slack
+│   ├── logging_config.py        # structlog : console + fichier journalier (rotation 3j)
+│   ├── charlie.py               # Logique partagée Charlie AI (prompt, SQL, résultat)
 │   ├── pipeline/
-│   ├── logging_config.py      # structlog : console + fichier journalier (rotation 7j)
 │   │   ├── prefilter.py         # Règles headers/expéditeurs + détection demande_client
 │   │   ├── classifier.py        # LLM → 8 catégories avec few-shots
 │   │   ├── priority.py          # Priorité intelligente (high/normal/low)
@@ -139,7 +140,8 @@ DETECTIVE_BE/
 │   │   └── generator.py         # Assemblage prompt + appel LLM
 │   ├── delivery/
 │   │   ├── resend_notifier.py   # Email brouillon → CDAL
-│   │   └── slack_notifier.py    # Notifications webhook Slack
+│   │   ├── slack_notifier.py    # Notifications webhook Slack
+│   │   └── slack_bot.py         # Slack Bot Charlie AI interactif
 │   ├── llm/router.py            # Wrapper LiteLLM avec fallback
 │   ├── web/                     # Cockpit web FastAPI
 │   │   ├── app.py               # Application FastAPI
@@ -176,14 +178,15 @@ DETECTIVE_BE/
 - Classification enrichie : 8 catégories (phishing, rappel, demande_client, facture, newsletter, spam, urgent, autre)
 - Priorité intelligente : demande client chaude = HIGH
 - Chat AI Charlie : SQL read-only, liens cliquables, resizeable
+- Slack Bot Charlie AI : @mention et DM sur #detective
 - Voir `docs/ROADMAP.md` pour les phases restantes (S4 supervision, V2 Drafts IMAP, V3 WhatsApp).
 
 ---
 
 ## Versions
 
-Version source de vérité : **`pyproject.toml`** (`version = "1.7.9"`).
+Version source de vérité : **`pyproject.toml`** (`version = "1.8.0"`).
 
-Le badge affiché dans le cockpit (`v1.7.9`) est lu dynamiquement depuis `pyproject.toml` via `importlib.metadata`. Ne modifier la version que dans `pyproject.toml`.
+Le badge affiché dans le cockpit (`v1.8.0`) est lu dynamiquement depuis `pyproject.toml` via `importlib.metadata`. Ne modifier la version que dans `pyproject.toml`.
 
 Voir [`CHANGELOG.md`](CHANGELOG.md) pour l'historique détaillé.
