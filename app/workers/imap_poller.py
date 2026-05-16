@@ -91,6 +91,19 @@ def _log_telemetry(
         conn.close()
 
 
+def _mail_exists(db_path: Path, imap_uid: str, mailbox_name: str) -> bool:
+    """Vérifie si un mail a déjà été persisté (pour éviter re-génération/re-notification)."""
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM mail_processed WHERE imap_uid = ? AND mailbox_name = ?",
+            (imap_uid, mailbox_name),
+        ).fetchone()
+        return row is not None
+    finally:
+        conn.close()
+
+
 def _persist(
     db_path: Path,
     imap_uid: str,
@@ -106,25 +119,39 @@ def _persist(
     priority: str = "normal",
     status: str = "pending",
 ) -> int:
-    """Persiste le mail et retourne l'id SQLite auto-incrémenté (pour liens cockpit)."""
+    """Persiste le mail. En cas de conflit, ne JAMAIS écraser category/priority/status cockpit."""
     conn = sqlite3.connect(db_path)
     try:
+        # Vérifier existence
+        row = conn.execute(
+            "SELECT id FROM mail_processed WHERE imap_uid = ? AND mailbox_name = ?",
+            (imap_uid, mailbox_name),
+        ).fetchone()
+        if row:
+            mail_id = row[0]
+            # Mise à jour minimale : enrichissement seulement, champs cockpit protégés
+            conn.execute(
+                """
+                UPDATE mail_processed SET
+                    draft_generated = COALESCE(NULLIF(?, 0), draft_generated),
+                    body_preview = COALESCE(NULLIF(?, ''), body_preview),
+                    body = COALESCE(NULLIF(?, ''), body),
+                    ai_draft = COALESCE(NULLIF(?, ''), ai_draft),
+                    processed_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (draft_generated, body_preview, body, ai_draft, mail_id),
+            )
+            conn.commit()
+            return mail_id
+
+        # Nouveau mail
         cursor = conn.execute(
             """
             INSERT INTO mail_processed
                 (imap_uid, mailbox_name, subject, sender, received_at, category, draft_generated,
                  body_preview, body, ai_draft, status, priority)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(imap_uid, mailbox_name) DO UPDATE SET
-                category = excluded.category,
-                draft_generated = excluded.draft_generated,
-                body_preview = COALESCE(NULLIF(excluded.body_preview, ''),
-                                        mail_processed.body_preview),
-                body = COALESCE(NULLIF(excluded.body, ''), mail_processed.body),
-                ai_draft = COALESCE(NULLIF(excluded.ai_draft, ''), mail_processed.ai_draft),
-                priority = excluded.priority,
-                status = excluded.status,
-                processed_at = CURRENT_TIMESTAMP
             RETURNING id
             """,
             (imap_uid, mailbox_name, subject, sender, received_at, category, draft_generated,
@@ -327,10 +354,15 @@ async def _process_single_mail(
         priority = "low"
     log.info("poller.priority", mailbox=mailbox.name, uid=uid, category=category, priority=priority)
 
+    is_new = not await asyncio.to_thread(
+        _mail_exists, settings.db_agent_state, uid, mailbox.name
+    )
+
     body_preview = body[:2000] if body else ""
     draft_generated = 0
     verified_draft = False
-    if category == "demande_client":
+    gen = None
+    if category == "demande_client" and is_new:
         language = detect_language(body, default=mailbox.default_lang)
         gen = await generate_draft(subject, body, sender, mailbox, language, category)
         draft_generated = 1
@@ -357,7 +389,7 @@ async def _process_single_mail(
         status,
     )
 
-    if category == "demande_client" and not settings.dry_run:
+    if category == "demande_client" and is_new and not settings.dry_run:
         incoming = IncomingMail(
             sender=sender,
             subject=subject,
@@ -386,7 +418,7 @@ async def _process_single_mail(
                 sender=sender,
                 subject=subject,
             )
-    elif category == "demande_client" and settings.dry_run:
+    elif category == "demande_client" and is_new and settings.dry_run:
         log.info(
             "dry_run.skip_notify",
             mailbox=mailbox.name,
