@@ -311,6 +311,9 @@ async def _process_single_mail(
         log.info("poller.classified", mailbox=mailbox.name, uid=uid, category=category)
 
     priority = assign_priority(category, subject, body, sender)
+    # Garde-fou inconditionnel : toute demande client = high (business vital)
+    if category == "demande_client":
+        priority = "high"
     log.info("poller.priority", mailbox=mailbox.name, uid=uid, category=category, priority=priority)
 
     body_preview = body[:2000] if body else ""
