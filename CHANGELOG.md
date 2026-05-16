@@ -4,76 +4,35 @@
 
 ---
 
-## [1.7.7] — 2026-05-16
+## [1.7.8] — 2026-05-16
 
 ### Corrigé
 - **Lien cockpit dans Slack** : `draft_id` passé à Slack est désormais le vrai `id` SQLite auto-incrémenté (retourné par `_persist`) au lieu de l'`uid` IMAP. Le lien `/app/conversation/{id}` fonctionne correctement.
-- **Bouton Slack invisible** : remplacé le bloc `actions` (button Block Kit non supporté par les webhooks) par une section `mrkdwn` avec un lien cliquable `*<url|Ouvrir dans le cockpit>*`.
-
-### Modifié
-- **Ordre pipeline** : le mail est persisté en DB *avant* la notification Slack, garantissant que `mail_id` existe au moment de construire le lien.
-
----
-
-## [1.7.6] — 2026-05-16
+- **Bouton Slack invisible** : remplacé le bloc `actions` (button Block Kit non supporté par les webhooks) par une section `mrkdwn` avec un lien cliquable.
+- **Lien cockpit dans l'email Resend** : ajout d'un bouton bleu "Ouvrir le dossier #{id}" dans l'email de notification brouillon.
+- **Faux positifs `demande_client` massifs** : le pré-filtre rules-based capturait des emails automatiques (renouvellement Infomaniak, confirmations, reçus) comme demandes client. Retiré `demande_client` du pré-filtre rapide — seuls les formulaires de contact du site passent en pré-filtre. Le LLM classifier prend le relai pour tout le reste.
+- **Garde-fou post-classification** : avant de notifier Slack, `_is_verified_demande_client()` vérifie que l'email n'est pas automatique (expéditeur service, headers `Auto-Submitted`, sujets transactionnels). Les brouillons sont toujours générés pour la trace en DB, mais le canal #detective n'est plus pollué par les faux positifs.
+- **Garde-fou priorité inconditionnel** : `if category == "demande_client": priority = "high"` hard-codé dans le poller — même si `assign_priority` venait à être modifié, les demandes client restent toujours HIGH.
+- **Variable `body_preview` utilisée avant sa définition** dans `imap_poller.py` — déplacée avant le bloc `if category == "demande_client"`.
+- **Syntaxe `_persist`** : parenthèse mal placée lors de l'édition précédente, corrigée.
+- **Route /app/inbox 404** : ajout d'une route `/app/inbox` qui redirige vers `/app/`.
+- **Checkbox DPDH manquante dans l'inbox** : `_fetch_mailboxes()` scannait la DB (`SELECT DISTINCT mailbox_name`) pour afficher les checkboxes. Si DPDH n'avait encore aucun mail, elle n'apparaissait pas. Corrigé : la fonction retourne désormais les 3 boîtes configurées via `settings.mailboxes`, indépendamment de la présence de mails en base.
 
 ### Ajouté
 - **Télémétrie des cycles IMAP** : chaque cycle de polling écrit un événement `poller_cycle` dans `agent_telemetry` (DB `agent_state.db`) avec le nombre de mails traités et le breakdown par catégorie.
 - **Dashboard "Cycles IMAP récents"** : le panel admin affiche les 10 derniers cycles IMAP avec la boîte, les détails et l'heure. Permet de vérifier visuellement quand l'agent a dernièrement travaillé.
-
-### Corrigé
-- **Syntaxe `_persist`** : parenthèse mal placée lors de l'édition précédente, corrigée.
-
----
-
-## [1.7.5] — 2026-05-16
-
-### Ajouté
 - **Résumé de cycle polling** : à chaque cycle IMAP, un log `poller.cycle_summary` affiche le nombre de mails traités et le breakdown par catégorie (`{"demande_client": 1, "autre": 2}`). Si aucun mail, log `poller.cycle_empty`.
-- **Logs journaliers lisibles** : les fichiers `logs/agent-YYYY-MM-DD.log` utilisent désormais un format lisible (ConsoleRenderer sans couleurs) au lieu de JSON brut. Le `tail` et le `grep` sont plus faciles.
+- **Body preview dans les notifications Slack** : la notification de nouveau brouillon inclut désormais un aperçu du contenu du mail (tronqué à 400 caractères).
+- **Logs journaliers lisibles** : les fichiers `logs/agent-YYYY-MM-DD.log` utilisent désormais un format lisible (ConsoleRenderer sans couleurs) au lieu de JSON brut.
+- **Migration DB automatique** : `app/main.py` appelle `migrate()` au démarrage. La colonne `body` manquante sur les DB existantes est ajoutée automatiquement.
+- **Script de test traçable** : `scripts/test_pipeline.py` génère un `batch_id` horodaté (ex: `#20260516-053710`) injecté dans le sujet, le corps et les headers X-Test-* pour reconnaître facilement les emails de test.
 
 ### Modifié
-- **Rétention logs** : `cleanup_old_logs` passe de 7 jours à **3 jours** (72h), comme demandé.
-
----
-
-## [1.7.4] — 2026-05-16
-
-### Corrigé
-- **Route /app/inbox 404** : ajout d'une route `/app/inbox` qui redirige vers `/app/` (la page inbox utilise `/app/` comme racine, mais les bookmarks/utilisateurs tapent parfois `/app/inbox`).
-
-### Modifié
+- **Ordre pipeline** : le mail est persisté en DB *avant* la notification Slack/Resend, garantissant que `mail_id` existe au moment de construire les liens.
+- **Rétention logs** : `cleanup_old_logs` passe de 7 jours à **3 jours** (72h).
 - **Healthcheck post-deploy** : `deploy-to-vps.sh` vérifie désormais `/health=200` et `/auth/login=200` après le build Docker. S'échoue avec les logs d'erreur si le cockpit ne revient pas dans les 60s.
-
----
-
-## [1.7.3] — 2026-05-16
-
-### Corrigé
-- **Checkbox DPDH manquante dans l'inbox** : `_fetch_mailboxes()` scannait la DB (`SELECT DISTINCT mailbox_name`) pour afficher les checkboxes. Si DPDH n'avait encore aucun mail, elle n'apparaissait pas. Corrigé : la fonction retourne désormais les 3 boîtes configurées via `settings.mailboxes`, indépendamment de la présence de mails en base.
-
----
-
-## [1.7.2] — 2026-05-16
-
-### Ajouté
-- **Body preview dans les notifications Slack** : la notification de nouveau brouillon inclut désormais un aperçu du contenu du mail (tronqué à 400 caractères) pour que Daniel puisse lire rapidement sans ouvrir le cockpit.
-- **Bouton "Ouvrir dans le cockpit"** dans les notifications Slack : lien direct et visible vers la conversation dans le cockpit web (`detective.digitalhs.biz/app/conversation/{id}`).
-
-### Corrigé
-- **Variable `body_preview` utilisée avant sa définition** dans `imap_poller.py` — déplacée avant le bloc `if category == "demande_client"`.
-
----
-
-## [1.7.1] — 2026-05-16
-
-### Corrigé
-- **Faux positifs `demande_client` massifs** : le pré-filtre rules-based capturait des emails automatiques (renouvellement Infomaniak, confirmations, reçus) comme demandes client. Retiré `demande_client` du pré-filtre rapide — seuls les formulaires de contact du site passent en pré-filtre. Le LLM classifier prend le relai pour tout le reste.
-- **Garde-fou post-classification** : avant de notifier Slack, `_is_verified_demande_client()` vérifie que l'email n'est pas automatique (expéditeur service, headers `Auto-Submitted`, sujets transactionnels). Les brouillons sont toujours générés pour la trace en DB, mais le canal #detective n'est plus pollué par les faux positifs.
-
-### Modifié
-- **Pré-filtre `prefilter.py`** : ajout de `is_service_email()` qui détecte les expéditeurs de services connus + keywords automatiques (renouvellement, confirmation, reçu, alerte...). Testé en PREMIER dans `quick_classify`.
-- **Prompt classifier LLM** : définition plus stricte de `demande_client` (HUMAIN qui sollicite une ENQUÊTE/DEVIS/CONSULTATION, jamais un email automatique). Ajout de contre-exemples : renouvellement Infomaniak = `autre`, confirmation Stripe = `autre`.
+- **Pré-filtre `prefilter.py`** : ajout de `is_service_email()` qui détecte les expéditeurs de services connus + keywords automatiques. Testé en PREMIER dans `quick_classify`.
+- **Prompt classifier LLM** : définition plus stricte de `demande_client` (HUMAIN qui sollicite une ENQUÊTE/DEVIS/CONSULTATION, jamais un email automatique). Ajout de contre-exemples.
 
 ---
 
