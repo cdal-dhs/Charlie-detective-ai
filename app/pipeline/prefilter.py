@@ -106,7 +106,7 @@ FORM_SUBJECTS = (
 
 # ── Facture ──────────────────────────────────────────────────
 FACTURE_KEYWORDS = (
-    "facture", "invoice", "vat", "tva", "acompte", "devis",
+    "facture", "invoice", "vat", "tva", "acompte",
     "pro forma", "proforma", "bon de commande", "purchase order",
     "pièce jointe : facture", "pièce jointe: facture",
     "facture n°", "facture numero", "numero de facture",
