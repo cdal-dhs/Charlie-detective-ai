@@ -84,11 +84,15 @@ async def notify_new_draft(
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": f"*<{cockpit_url}|Ouvrir dans le cockpit>*",
+                "text": f"*Lien cockpit :* {cockpit_url}",
             },
         })
 
-    await send_slack_message("Nouveau brouillon généré", blocks)
+    # Fallback text inclut toujours le lien (si disponible)
+    fallback = "Nouveau brouillon généré"
+    if cockpit_url:
+        fallback += f" | {cockpit_url}"
+    await send_slack_message(fallback, blocks)
 
 
 async def notify_digest(subject: str, summary: str) -> None:
