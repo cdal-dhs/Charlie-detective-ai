@@ -58,6 +58,28 @@ AUTRE_KEYWORDS = (
     "ical", "vcalendar", "event invitation", "meeting request",
     "accepté", "refusé", "tentative", "provisoire",
     "notification", "noreply", "no-reply", "donotreply",
+    # Emails automatiques de services / transactions
+    "renouvellement", "renewal", "votre abonnement", "your subscription",
+    "confirmation de", "confirmation de commande", "confirmation de paiement",
+    "reçu de", "reçu de paiement", "payment receipt", "receipt",
+    "votre commande", "your order", "commande confirmée",
+    "mise à jour de votre", "mise a jour de votre", "update to your",
+    "état de votre", "etat de votre", "status of your",
+    "facture disponible", "invoice available", "your invoice",
+    "alerte de sécurité", "security alert", "connexion détectée", "new sign-in",
+    "2-step verification", "authentification à deux facteurs", "code de vérification",
+    "bienvenue", "welcome to", "création de compte", "account created",
+    "désabonnement", "désinscription", "unsubscribe", "subscription canceled",
+    "votre espace client", "your customer area", "portail client",
+    "message automatique", "email automatique", "automatic email", "do not reply",
+)
+
+SERVICE_SENDERS = (
+    "infomaniak", "ovh", "stripe", "paypal", "amazon", "microsoft",
+    "google", "apple", "meta", "facebook", "linkedin", "twitter", "x.com",
+    "github", "gitlab", "sendgrid", "mailgun", "brevo", "mailchimp",
+    "hubspot", "zendesk", "intercom", "freshdesk", "noreply", "no-reply",
+    "donotreply", "ne-pas-repondre", "ne pas répondre", "alerte", "notification",
 )
 
 # ── Demande client ────────────────────────────────────────────
@@ -152,9 +174,7 @@ def is_newsletter(msg: Message) -> bool:
         return True
     # Expéditeur connu de plateforme mailing
     sender = (msg.get("From", "") or "").lower()
-    if any(s in sender for s in NEWSLETTER_SENDERS):
-        return True
-    return False
+    return bool(any(s in sender for s in NEWSLETTER_SENDERS))
 
 
 def _is_own_domain(sender: str) -> bool:
@@ -199,22 +219,31 @@ def is_phishing(msg: Message) -> bool:
             return True
 
     # Pièce jointe dangereuse
-    if _has_attachment(msg):
-        return True
+    return bool(_has_attachment(msg))
 
-    return False
+
+def is_service_email(msg: Message) -> bool:
+    """Email automatique d'un service/fournisseur : renouvellement, confirmation, alerte..."""
+    sender = (msg.get("From", "") or "").lower()
+    subject = (msg.get("Subject", "") or "").lower()
+    body_snippet = _get_body_snippet(msg)
+
+    # Expéditeur connu de service
+    if any(s in sender for s in SERVICE_SENDERS):
+        return True
+    # Mots-clés automatiques dans le sujet (forts)
+    if any(kw in subject for kw in AUTRE_KEYWORDS):
+        return True
+    # Mots-clés automatiques dans le corps
+    if any(kw in body_snippet for kw in AUTRE_KEYWORDS):
+        return True
+    # Headers typiques des emails automatiques
+    return bool(msg.get("Auto-Submitted") or msg.get("X-Auto-Response-Suppress"))
 
 
 def is_autre(msg: Message) -> bool:
     """Notifications automatiques, invitations calendrier, etc."""
-    subject = (msg.get("Subject", "") or "").lower()
-    body_snippet = _get_body_snippet(msg)
-
-    if any(kw in subject for kw in AUTRE_KEYWORDS):
-        return True
-    if any(kw in body_snippet for kw in AUTRE_KEYWORDS):
-        return True
-    return False
+    return is_service_email(msg)
 
 
 def is_rappel(msg: Message) -> bool:
@@ -223,9 +252,7 @@ def is_rappel(msg: Message) -> bool:
 
     if any(kw in subject for kw in RAPPEL_KEYWORDS):
         return True
-    if any(kw in body_snippet for kw in RAPPEL_KEYWORDS):
-        return True
-    return False
+    return bool(any(kw in body_snippet for kw in RAPPEL_KEYWORDS))
 
 
 def is_facture(msg: Message) -> bool:
@@ -237,40 +264,45 @@ def is_facture(msg: Message) -> bool:
         return True
     if any(kw in body_snippet for kw in FACTURE_KEYWORDS):
         return True
-    if any(s in sender for s in FACTURE_SENDERS):
-        return True
-    return False
+    return bool(any(s in sender for s in FACTURE_SENDERS))
 
 
 def is_demande_client(msg: Message) -> bool:
+    """Détection EXTRÊMEMENT conservative d'une demande client.
+    Renvoie True UNIQUEMENT pour les formulaires de contact du propre site.
+    TOUT le reste passe par le LLM classifier."""
     subject = (msg.get("Subject", "") or "").lower()
-    body_snippet = _get_body_snippet(msg)
     sender = (msg.get("From", "") or "").lower()
 
-    if any(fs in subject for fs in FORM_SUBJECTS):
-        return True
-    if any(kw in subject for kw in DEMANDE_SUBJECTS):
-        return True
-    if any(kw in subject for kw in DEMANDE_KEYWORDS):
-        return True
-    if any(kw in body_snippet for kw in DEMANDE_KEYWORDS):
-        return True
-    return False
+    # Jamais un email de service automatique
+    if is_service_email(msg):
+        return False
+    # Jamais un email du propre domaine (auto-notifications internes)
+    if _is_own_domain(sender):
+        return False
+
+    # UNIQUEMENT les formulaires de contact du site web
+    return bool(any(fs in subject for fs in FORM_SUBJECTS))
 
 
 def quick_classify(msg: Message) -> str | None:
-    """Retourne une catégorie si une règle évidente s'applique, sinon None
-    (→ on délègue au LLM classifier)."""
-    if is_autre(msg):
+    """Retourne une catégorie si une règle ÉVIDENTE s'applique, sinon None
+    (→ on délègue au LLM classifier qui a un vrai cerveau).
+
+    ORDRE : du plus spécifique/dangereux au plus général.
+    demande_client est EXCLU du pré-filtre rapide (trop de faux positifs).
+    """
+    if is_service_email(msg):
         return "autre"
     if is_phishing(msg):
         return "phishing"
-    if is_demande_client(msg):
-        return "demande_client"
     if is_newsletter(msg):
         return "newsletter"
     if is_facture(msg):
         return "facture"
     if is_rappel(msg):
         return "rappel"
+    # Extrêmement conservatif : uniquement formulaires de contact du site
+    if is_demande_client(msg):
+        return "demande_client"
     return None

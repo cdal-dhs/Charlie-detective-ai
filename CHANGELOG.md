@@ -4,6 +4,18 @@
 
 ---
 
+## [1.7.1] — 2026-05-16
+
+### Corrigé
+- **Faux positifs `demande_client` massifs** : le pré-filtre rules-based capturait des emails automatiques (renouvellement Infomaniak, confirmations, reçus) comme demandes client. Retiré `demande_client` du pré-filtre rapide — seuls les formulaires de contact du site passent en pré-filtre. Le LLM classifier prend le relai pour tout le reste.
+- **Garde-fou post-classification** : avant de notifier Slack, `_is_verified_demande_client()` vérifie que l'email n'est pas automatique (expéditeur service, headers `Auto-Submitted`, sujets transactionnels). Les brouillons sont toujours générés pour la trace en DB, mais le canal #detective n'est plus pollué par les faux positifs.
+
+### Modifié
+- **Pré-filtre `prefilter.py`** : ajout de `is_service_email()` qui détecte les expéditeurs de services connus + keywords automatiques (renouvellement, confirmation, reçu, alerte...). Testé en PREMIER dans `quick_classify`.
+- **Prompt classifier LLM** : définition plus stricte de `demande_client` (HUMAIN qui sollicite une ENQUÊTE/DEVIS/CONSULTATION, jamais un email automatique). Ajout de contre-exemples : renouvellement Infomaniak = `autre`, confirmation Stripe = `autre`.
+
+---
+
 ## [1.7.0] — 2026-05-15
 
 ### Ajouté

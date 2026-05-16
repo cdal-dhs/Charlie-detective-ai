@@ -7,7 +7,7 @@ Règle d'or : si tu hésites entre deux catégories, choisis la plus spécifique
 
 CATÉGORIES (renvoie EXACTEMENT un seul mot, en minuscules) :
 
-1. demande_client — prospect ou client qui sollicite une enquête, un devis, une consultation, un suivi de dossier. Même s'il décrit une situation stressante ou urgente, c'est un contact commercial.
+1. demande_client — PROSPECT ou CLIENT EXISTANT qui sollicite une ENQUÊTE, un DEVIS, une CONSULTATION, ou un SUIVI DE DOSSIER ACTIF. Ce doit être un HUMAIN qui écrit au cabinet. JAMAIS un email automatique de service/fournisseur.
 2. facture — facture entrante, note d'honoraires, devis accepté à payer, justificatif comptable. Contient un montant, une référence, une demande de règlement.
 3. newsletter — lettre d'info commerciale, promotion, mise à jour produit, contenu marketing. Jamais une demande directe.
 4. spam — message indésirable générique, publicité bas de gamme, chaîne de lettres, contenu sans rapport avec le cabinet.
@@ -68,11 +68,24 @@ Sujet : 3 personnes ont consulté votre profil
 Corps : Voici votre résumé hebdomadaire...
 → autre
 
+Exemple 9 — autre (renouvellement automatique, PAS demande_client) :
+De : billing@infomaniak.com
+Sujet : Renouvellement de votre demande d'hébergement — Facture F-2024-12065
+Corps : Cher client, votre abonnement arrive à échéance. Veuillez régulariser votre situation avant le 15/06...
+→ autre
+
+Exemple 10 — autre (confirmation automatique, PAS demande_client) :
+De : no-reply@stripe.com
+Sujet : Confirmation de paiement — Détective Belgium
+Corps : Votre paiement de 29,00 EUR a bien été reçu. Voici votre reçu...
+→ autre
+
 ---
 
 RÈGLES DE DÉCISION :
 
 - Demande de devis = demande_client
+- Email AUTOMATIQUE de service/fournisseur (renouvellement, confirmation, reçu, alerte, facture automatique) = autre, JAMAIS demande_client
 - Confirmation de paiement Stripe/PayPal = autre
 - Email d'un fournisseur demandant un règlement = rappel
 - Email d'un fournisseur avec une facture attachée = facture

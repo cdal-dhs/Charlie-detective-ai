@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import re
 import sqlite3
 from datetime import datetime
@@ -24,6 +25,14 @@ log = structlog.get_logger()
 
 AGENT_FLAG = "AgentProcessed"
 IMAP_RETRY_ATTEMPTS = 3
+
+# Expéditeurs qui ne peuvent JAMAIS être un vrai client
+_SERVICE_SENDERS = (
+    "infomaniak", "ovh", "stripe", "paypal", "amazon", "microsoft",
+    "google", "apple", "meta", "facebook", "linkedin", "twitter", "x.com",
+    "github", "gitlab", "sendgrid", "mailgun", "brevo", "mailchimp",
+    "hubspot", "zendesk", "intercom", "freshdesk",
+)
 
 
 def _decode_header(value: str) -> str:
@@ -89,7 +98,8 @@ def _persist(
             ON CONFLICT(imap_uid, mailbox_name) DO UPDATE SET
                 category = excluded.category,
                 draft_generated = excluded.draft_generated,
-                body_preview = COALESCE(NULLIF(excluded.body_preview, ''), mail_processed.body_preview),
+                body_preview = COALESCE(NULLIF(excluded.body_preview, ''),
+                                        mail_processed.body_preview),
                 body = COALESCE(NULLIF(excluded.body, ''), mail_processed.body),
                 ai_draft = COALESCE(NULLIF(excluded.ai_draft, ''), mail_processed.ai_draft),
                 priority = excluded.priority,
@@ -116,10 +126,8 @@ async def poll_mailbox(mailbox: MailboxConfig, stop_event: asyncio.Event) -> Non
         except Exception as e:
             log.exception("poller.error", mailbox=mailbox.name, error=str(e))
             health.mark_imap(mailbox.name, False)
-        try:
+        with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(stop_event.wait(), timeout=interval)
-        except asyncio.TimeoutError:
-            pass
 
 
 async def _poll_once(mailbox: MailboxConfig) -> None:
@@ -132,8 +140,38 @@ async def _poll_once(mailbox: MailboxConfig) -> None:
                 log.error("poller.gave_up", mailbox=mailbox.name, error=str(e))
                 return
             backoff = 2 ** attempt
-            log.warning("poller.retry", mailbox=mailbox.name, attempt=attempt, backoff=backoff, error=str(e))
+            log.warning(
+                "poller.retry",
+                mailbox=mailbox.name,
+                attempt=attempt,
+                backoff=backoff,
+                error=str(e),
+            )
             await asyncio.sleep(backoff)
+
+
+def _is_verified_demande_client(category: str, msg: Message) -> bool:
+    """Garde-fou final : même si le LLM dit 'demande_client', on bloque les
+    emails automatiques évidents avant de notifier Slack."""
+    if category != "demande_client":
+        return False
+
+    sender = (msg.get("From", "") or "").lower()
+    subject = (msg.get("Subject", "") or "").lower()
+
+    # Expéditeur de service connu
+    if any(s in sender for s in _SERVICE_SENDERS):
+        return False
+    # Headers d'email automatique
+    if msg.get("Auto-Submitted") or msg.get("X-Auto-Response-Suppress"):
+        return False
+    # Sujets typiques d'emails automatiques
+    auto_keywords = (
+        "renouvellement", "renewal", "confirmation", "reçu", "receipt",
+        "facture", "invoice", "votre abonnement", "your subscription",
+        "payment received", "paiement reçu", "alerte", "notification",
+    )
+    return not any(kw in subject for kw in auto_keywords)
 
 
 def _build_search_criteria(settings) -> str:
@@ -182,10 +220,8 @@ async def _process_mailbox(mailbox: MailboxConfig) -> None:
         await client.logout()
         health.mark_imap(mailbox.name, True)
     except Exception:
-        try:
+        with contextlib.suppress(Exception):
             await client.close()
-        except Exception:
-            pass
         raise
 
 
@@ -234,10 +270,13 @@ async def _process_single_mail(
     log.info("poller.priority", mailbox=mailbox.name, uid=uid, category=category, priority=priority)
 
     draft_generated = 0
+    verified_draft = False
     if category == "demande_client":
         language = detect_language(body, default=mailbox.default_lang)
         gen = await generate_draft(subject, body, sender, mailbox, language, category)
         draft_generated = 1
+
+        verified_draft = _is_verified_demande_client(category, msg)
 
         if not settings.dry_run:
             incoming = IncomingMail(
@@ -248,20 +287,38 @@ async def _process_single_mail(
                 message_id=message_id,
             )
             await notify_draft(incoming, mailbox, gen)
-            await notify_slack_draft(
-                draft_id=uid, sender=sender, subject=subject, category=category,
-                base_url=settings.public_base_url.rstrip("/") if settings.public_base_url else "",
-            )
+            if verified_draft:
+                await notify_slack_draft(
+                    draft_id=uid,
+                    sender=sender,
+                    subject=subject,
+                    category=category,
+                    base_url=settings.public_base_url.rstrip("/")
+                    if settings.public_base_url
+                    else "",
+                )
+            else:
+                log.info(
+                    "slack.notify_skipped",
+                    mailbox=mailbox.name,
+                    uid=uid,
+                    reason="unverified_automatic_email",
+                    sender=sender,
+                    subject=subject,
+                )
         else:
             log.info(
                 "dry_run.skip_notify",
                 mailbox=mailbox.name,
                 uid=uid,
                 recipient=settings.draft_recipient,
+                verified=verified_draft,
             )
 
     body_preview = body[:2000] if body else ""
-    ai_draft_text = gen.draft if (category == "demande_client" and draft_generated) else ""
+    ai_draft_text = ""
+    if category == "demande_client" and draft_generated:
+        ai_draft_text = gen.draft
 
     await asyncio.to_thread(
         _persist,
