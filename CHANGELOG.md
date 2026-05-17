@@ -4,6 +4,13 @@
 
 ---
 
+## [1.8.1] — 2026-05-17
+
+### Corrigé
+- **Hot-row visuel totalement absent** : `border-l-4 border-l-green-500` appliqué sur `<tr>` ne s'affiche pas car les navigateurs ignorent les bordures latérales sur les lignes de table en mode `border-collapse: separate` (défaut Tailwind). Déplacé sur le premier `<td>`. Fond renforcé `bg-green-900/40` (au lieu de `/20`) pour meilleure lisibilité sur le fond sombre.
+
+---
+
 ## [1.8.0] — 2026-05-16
 
 ### Corrigé
