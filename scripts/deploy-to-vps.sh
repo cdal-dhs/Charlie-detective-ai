@@ -34,7 +34,7 @@ fi
 
 # Vérifier que les répertoires montés dans docker-compose.yml existent (INC-001)
 echo ">>> Vérification des répertoires montés (docker-compose.yml) ..."
-MOUNTED_DIRS=$(grep -oP '(?<=\- \./)[^:]+' docker-compose.yml | sort -u || true)
+MOUNTED_DIRS=$(grep -o '\- \./[^:]*' docker-compose.yml | sed 's/- \.\///' | sort -u || true)
 for dir in $MOUNTED_DIRS; do
     # Ignorer les fichiers (ex: .env.production)
     if [[ -f "$dir" ]]; then
