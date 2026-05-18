@@ -179,14 +179,16 @@ DETECTIVE_BE/
 - Priorité intelligente : demande client chaude = HIGH
 - Chat AI Charlie : SQL read-only, liens cliquables, resizeable
 - Slack Bot Charlie AI : @mention et DM sur #detective
+- **Charlie AI × Cerveau2 vault** (v1.9.x) : recherche dans le second cerveau depuis le chat web et Slack
+- **Recherche par dossier spécifique** (v1.9.3) : extraction auto `dossier_id` (ex: ADF), prompt enrichi SQL + vault forcé
 - Voir `docs/ROADMAP.md` pour les phases restantes (S4 supervision, V2 Drafts IMAP, V3 WhatsApp).
 
 ---
 
 ## Versions
 
-Version source de vérité : **`pyproject.toml`** (`version = "1.9.0"`).
+Version source de vérité : **`pyproject.toml`** (`version = "1.9.3"`).
 
-Le badge affiché dans le cockpit (`v1.9.0`) est lu dynamiquement depuis `pyproject.toml` via `importlib.metadata`. Ne modifier la version que dans `pyproject.toml`.
+Le badge affiché dans le cockpit (`v1.9.3`) est lu dynamiquement depuis `pyproject.toml` via `importlib.metadata`. Ne modifier la version que dans `pyproject.toml`.
 
 Voir [`CHANGELOG.md`](CHANGELOG.md) pour l'historique détaillé.
