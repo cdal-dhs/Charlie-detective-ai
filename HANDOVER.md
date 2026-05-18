@@ -1,7 +1,7 @@
 # HANDOVER — Detective.be Agent (Charlie)
 
-> **Date** : 2026-05-16
-> **Version** : 1.8.1
+> **Date** : 2026-05-18
+> **Version** : 1.9.0
 > **Intégrateur** : CDAL (`cdal@digitalhs.biz`)
 > **Client** : Daniel Hurchon — Detective.be (3 marques : Detective Belgique FR, Detective Belgium EN/multi, DPDH Investigations)
 > **Repo** : https://github.com/cdal-dhs/Charlie-detective-ai
@@ -268,7 +268,7 @@ Lis impérativement **`CLAUDE.md`** pour les conventions complètes. Points clé
 | Polling IMAP 3 boîtes | ✅ | Tous les emails (lus + non lus), flag `AgentProcessed` (sans $) |
 | Classification 8 catégories | ✅ | Pré-filtre règles (newsletter, facture, phishing, rappel, **demande_client**) + LLM few-shots |
 | Priorité intelligente | ✅ | `high`/`normal`/`low` |
-| RAG + génération brouillon | ✅ | Style Daniel, multilingue FR/NL/EN |
+| RAG + génération brouillon | ✅ | Style Daniel, multilingue FR/NL/EN, enrichi via Cerveau2 vault |
 | Livraison Resend | ✅ | → `cdal@digitalhs.biz` (validation humaine) |
 | Notifications Slack | ✅ | Webhook `#detective` |
 | Cockpit web auth | ✅ | Magic link via Resend |
@@ -286,6 +286,7 @@ Lis impérativement **`CLAUDE.md`** pour les conventions complètes. Points clé
 
 | Fonctionnalité | État | Notes |
 |---|---|---|
+| **Sprint 5 ext — Charlie chat vault** | 🚧 | **PROCHAIN TICKET** — Voir section "Sprint 5 extension" ci-dessous |
 | Calibration qualité brouillons | ⏳ | Faire traiter 20-50 vrais mails par Daniel, noter corrections, affiner prompt |
 | Signature par marque (boîte 2 & 3) | ⏳ | Testé uniquement boîte 1 (Detective Belgique) |
 | Tests unitaires automatisés | ⏳ | Mocker IMAP/LLM, fixtures classification |
@@ -294,6 +295,129 @@ Lis impérativement **`CLAUDE.md`** pour les conventions complètes. Points clé
 | Approbation/rejet depuis Slack | ⬜ | V2 — nécessite Slack App interactive |
 | Bot WhatsApp client (V3) | ⬜ | Canal client direct réutilisant RAG |
 | Supervision / monitoring S4 | ⬜ | Grafana ou alerting basique |
+
+---
+
+### 🚧 Sprint 5 extension — Charlie AI chat × Cerveau2 vault (PROCHAIN TICKET)
+
+**Objectif** : quand l'opérateur pose une question à Charlie (via le cockpit web ou Slack), Charlie doit pouvoir consulter le vault Cerveau2-Det en plus de la DB SQLite `mail_processed`.
+
+**Ce qui est déjà fait (v1.9.0)** :
+- `app/cerveau_client.py` — `query_vault()` fonctionnel et testé
+- `app/pipeline/generator.py` — vault enrichi dans `generate_draft()`
+- `.env` — variables `CERVEAU2_BASE_URL`, `CERVEAU2_API_SECRET`, `CERVEAU2_LIMIT` configurées
+
+**Ce qui reste à coder** :
+
+#### 1. `app/charlie.py`
+
+Ajouter dans `CharlieResult` :
+```python
+from dataclasses import dataclass, field
+from app.cerveau_client import VaultNote, query_vault
+
+@dataclass
+class CharlieResult:
+    response_text: str
+    sql: str
+    rows: list[dict] | None
+    sql_safe: bool
+    sql_error: str | None
+    vault_notes: list[VaultNote] = field(default_factory=list)  # NOUVEAU
+```
+
+Ajouter les helpers de détection de pertinence et l'appel vault dans `ask_charlie()` :
+```python
+_VAULT_KEYWORDS = (
+    "similaire", "historique", "passe", "precedent",
+    "anterieur", "archive", "contexte", "dossier",
+    "affaire", "enquete", "investigation", "correspondance",
+)
+
+def _is_vault_relevant(question: str, sql: str) -> bool:
+    if not sql:  # question conversationnelle → vault toujours utile
+        return True
+    q = _normalize(question)
+    return any(kw in q for kw in _VAULT_KEYWORDS)
+```
+
+Dans `ask_charlie()`, après la logique SQL :
+```python
+if _is_vault_relevant(question, sql):
+    result.vault_notes = await query_vault(
+        question=question,
+        base_url=settings.cerveau2_base_url,
+        api_secret=settings.cerveau2_api_secret,
+        limit=settings.cerveau2_limit,
+    )
+```
+
+#### 2. `app/web/api.py` — endpoint `charlie_ask`
+
+Après `results_html`, ajouter la génération de `vault_html` :
+```python
+vault_html = ""
+if result.vault_notes:
+    items_html = ""
+    for note in result.vault_notes:
+        filename = note.path.split("/")[-1].replace(".md", "")
+        preview = (note.content[:300]
+                   .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+        items_html += (
+            f'<div class="mt-2 text-xs bg-gray-900 rounded px-3 py-2">'
+            f'<div class="text-purple-400 font-mono mb-1">{filename}</div>'
+            f'<div class="text-gray-400 whitespace-pre-wrap">{preview}…</div>'
+            f'</div>'
+        )
+    vault_html = (
+        f'<div class="mt-4 border-t border-gray-700 pt-3">'
+        f'<div class="text-xs text-purple-400 font-semibold mb-1">📚 Second cerveau '
+        f'({len(result.vault_notes)} note(s))</div>'
+        f'{items_html}'
+        f'</div>'
+    )
+```
+
+Dans `ai_bubble`, ajouter `{vault_html}` après `{results_html}` :
+```python
+ai_bubble = (
+    ...
+    f'<div class="charlie-text whitespace-pre-wrap">{safe_response}</div>'
+    f'{results_html}'
+    f'{vault_html}'     # ← AJOUTER ICI
+    f'<div class="flex">{copy_btn}</div>'
+    ...
+)
+```
+
+#### 3. `app/delivery/slack_bot.py` — `format_charlie_response()`
+
+Ajouter en fin de fonction, avant le dernier divider :
+```python
+if result.vault_notes:
+    blocks.append({"type": "divider"})
+    blocks.append({
+        "type": "context",
+        "elements": [{"type": "mrkdwn",
+                      "text": f":books: *Second cerveau* — {len(result.vault_notes)} note(s)"}],
+    })
+    for note in result.vault_notes:
+        filename = note.path.split("/")[-1].replace(".md", "")
+        preview = note.content[:300]
+        blocks.append({
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": f"*{filename}*\n{preview}…"},
+        })
+```
+
+#### 4. Tests à ajouter
+
+Fichier `tests/test_charlie_vault.py` :
+- `test_is_vault_relevant_no_sql()` — sans SQL → True
+- `test_is_vault_relevant_with_sql_no_keyword()` — SQL + pas de mot-clé → False
+- `test_is_vault_relevant_with_sql_and_keyword()` — SQL + "dossier" → True
+- `test_ask_charlie_calls_vault_when_no_sql()` — mock LLM (no SQL) + mock vault → vault_notes rempli
+- `test_ask_charlie_no_vault_for_pure_sql()` — mock LLM (avec SQL) + pas de keyword → vault_notes vide
 
 ---
 
@@ -333,4 +457,4 @@ Les fichiers suivants persistent entre sessions Claude Code et guident le compor
 
 ---
 
-*Document maintenu à jour à chaque itération. Dernière mise à jour : 2026-05-17 (v1.8.1).*
+*Document maintenu à jour à chaque itération. Dernière mise à jour : 2026-05-18 (v1.9.0).*

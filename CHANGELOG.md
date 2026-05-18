@@ -4,6 +4,19 @@
 
 ---
 
+## [1.9.0] — 2026-05-18
+
+### Ajouté
+- **`app/cerveau_client.py`** (nouveau module) : client async `query_vault()` vers l'API Cerveau2-Det. Retourne une liste de `VaultNote` (path + content). Dégradation silencieuse : retourne `[]` si config absente, erreur réseau, zone rouge, ou HTTP 4xx/5xx.
+- **Intégration Cerveau2 dans `generate_draft()`** : après le retrieve RAG sqlite-vec, un appel `query_vault()` enrichit le contexte LLM avec les correspondances historiques du vault. Les notes sont injectées sous `=== Correspondances historiques du vault ===` dans le prompt.
+- **Configuration** : 3 nouvelles variables `.env` — `CERVEAU2_BASE_URL`, `CERVEAU2_API_SECRET`, `CERVEAU2_LIMIT` (défaut 3).
+- **Tests** : `tests/test_cerveau_client.py` — 10 tests couvrant dégradation silencieuse, réponses nominales, headers auth, zone rouge, context_only.
+
+### Prochaine étape (Sprint 5 extension — non déployée)
+- Intégration vault dans Charlie AI chat (web + Slack) — voir HANDOVER.md section "Sprint 5 extension".
+
+---
+
 ## [1.8.1] — 2026-05-17
 
 ### Corrigé

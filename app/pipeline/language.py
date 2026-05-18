@@ -1,6 +1,6 @@
 from typing import Literal
 
-from langdetect import detect, LangDetectException
+from langdetect import LangDetectException, detect
 
 Language = Literal["fr", "nl", "en"]
 

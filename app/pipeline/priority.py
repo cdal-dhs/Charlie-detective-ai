@@ -3,7 +3,6 @@
 Principe : une vraie demande client (formulaire, email direct, ton insistant) = HIGH.
 """
 
-import re
 
 HIGH_KEYWORDS = (
     "urgent", "immédiat", "immediate", "asap", "aujourd'hui", "aujourdhui",
