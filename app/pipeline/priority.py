@@ -25,7 +25,6 @@ FORM_KEYWORDS = (
 def assign_priority(category: str, subject: str, body: str, sender: str) -> str:
     """Retourne 'high', 'normal' ou 'low'."""
     text = f"{subject} {body}".lower()
-    sender_lower = sender.lower()
 
     # 1. Sécurité / urgence objective → HIGH
     if category in ("phishing", "urgent"):

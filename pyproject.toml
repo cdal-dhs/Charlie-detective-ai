@@ -1,6 +1,6 @@
 [project]
 name = "detective-agent"
-version = "1.9.0"
+version = "1.9.1"
 description = "Agent IA email pour Detective.be — classification + brouillons de réponse style Daniel Hurchon"
 requires-python = ">=3.11"
 dependencies = [

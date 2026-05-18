@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 from __future__ import annotations
 
 import aiosqlite
@@ -101,10 +102,7 @@ async def inbox_partial(
     user: dict = Depends(require_operator),  # noqa: B008
 ):
     box_raw = request.query_params.get("box")
-    if box_raw is None:
-        boxes = None
-    else:
-        boxes = [b for b in box_raw.split(",") if b]
+    boxes = None if box_raw is None else [b for b in box_raw.split(",") if b]
     category = request.query_params.get("category") or None
     status = request.query_params.get("status") or None
     priority = request.query_params.get("priority") or None
@@ -470,17 +468,6 @@ async def mail_update_category(
         new_category, ip, request.headers.get("user-agent"),
     )
 
-    badge_class = (
-        "bg-blue-600 text-white" if new_category == "demande_client" else
-        "bg-red-600 text-white" if new_category == "urgent" else
-        "bg-green-600 text-white" if new_category == "newsletter" else
-        "bg-yellow-600 text-white" if new_category == "facture" else
-        "bg-gray-600 text-white" if new_category == "spam" else
-        "bg-purple-600 text-white" if new_category == "phishing" else
-        "bg-orange-600 text-white" if new_category == "rappel" else
-        "bg-gray-700 text-gray-300"
-    )
-
     options = ""
     for c in _CATEGORIES:
         sel = "selected" if c == new_category else ""
@@ -557,6 +544,27 @@ async def charlie_ask(
     elif result.rows is not None:
         results_html = _format_rows_html(result.rows)
 
+    vault_html = ""
+    if result.vault_notes:
+        items_html = ""
+        for note in result.vault_notes:
+            filename = note.path.split("/")[-1].replace(".md", "")
+            preview = (note.content[:300]
+                       .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+            items_html += (
+                f'<div class="mt-2 text-xs bg-gray-900 rounded px-3 py-2">'
+                f'<div class="text-purple-400 font-mono mb-1">{filename}</div>'
+                f'<div class="text-gray-400 whitespace-pre-wrap">{preview}…</div>'
+                f'</div>'
+            )
+        vault_html = (
+            f'<div class="mt-4 border-t border-gray-700 pt-3">'
+            f'<div class="text-xs text-purple-400 font-semibold mb-1">📚 Second cerveau '
+            f'({len(result.vault_notes)} note(s))</div>'
+            f'{items_html}'
+            f'</div>'
+        )
+
     ip = request.client.host if request.client else None
     await audit_log(
         db, user["id"], "charlie_ask", "mail_processed", "",
@@ -583,8 +591,8 @@ async def charlie_ask(
     )
 
     copy_btn = (
-        f'<button type="button" class="ml-auto text-gray-500 hover:text-gray-300 text-xs flex items-center gap-1 mt-2 charlie-copy">'
-        f'<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg> Copier</button>'
+        '<button type="button" class="ml-auto text-gray-500 hover:text-gray-300 text-xs flex items-center gap-1 mt-2 charlie-copy">'
+        '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg> Copier</button>'
     )
 
     ai_bubble = (
@@ -593,6 +601,7 @@ async def charlie_ask(
         f'<div class="flex-1 bg-gray-800 rounded-xl px-5 py-4 text-base text-gray-200 leading-relaxed">'
         f'<div class="charlie-text whitespace-pre-wrap">{safe_response}</div>'
         f'{results_html}'
+        f'{vault_html}'
         f'<div class="flex">{copy_btn}</div>'
         f'</div>'
         f'</div>'

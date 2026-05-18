@@ -48,7 +48,7 @@ def _build_digest_prompt(newsletters: list[dict]) -> str:
     ]
     for i, n in enumerate(newsletters, 1):
         lines.append(
-            f"{i}. [{n['mailbox_name']}] {n['sender']} – {n['subject']}"
+            f"{i}. [{n['mailbox_name']}] {n['sender']} - {n['subject']}"
         )
     return "\n".join(lines)
 
@@ -72,7 +72,7 @@ def _format_digest_text(summary: str, newsletters: list[dict], date_str: str) ->
     if newsletters:
         lines.append("*Détail :*")
         for n in newsletters:
-            lines.append(f"• [{n['mailbox_name']}] {n['sender']} – {n['subject']}")
+            lines.append(f"• [{n['mailbox_name']}] {n['sender']} - {n['subject']}")
     return "\n".join(lines)
 
 

@@ -95,6 +95,21 @@ def format_charlie_response(result: CharlieResult, base_url: str) -> list[dict]:
         blocks.append({"type": "divider"})
         blocks.extend(_format_rows_blocks(result.rows, base_url))
 
+    if result.vault_notes:
+        blocks.append({"type": "divider"})
+        blocks.append({
+            "type": "context",
+            "elements": [{"type": "mrkdwn",
+                          "text": f":books: *Second cerveau* — {len(result.vault_notes)} note(s)"}],
+        })
+        for note in result.vault_notes:
+            filename = note.path.split("/")[-1].replace(".md", "")
+            preview = note.content[:300]
+            blocks.append({
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": f"*{filename}*\n{preview}…"},
+            })
+
     blocks.append({"type": "divider"})
     return blocks
 

@@ -49,7 +49,10 @@ def make_app() -> FastAPI:
     def get_health() -> dict:
         snap = health.snapshot()
         all_connected = all(snap["imap"].values()) if snap["imap"] else False
-        all_recent = all(s < 600 for s in snap["last_cycle_seconds_ago"].values()) if snap["last_cycle_seconds_ago"] else False
+        all_recent = (
+            all(s < 600 for s in snap["last_cycle_seconds_ago"].values())
+            if snap["last_cycle_seconds_ago"] else False
+        )
         ok = all_connected and all_recent
         return {"ok": ok, **snap}
 

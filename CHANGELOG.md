@@ -4,6 +4,17 @@
 
 ---
 
+## [1.9.1] — 2026-05-18
+
+### Ajouté
+- **Charlie AI chat × Cerveau2 vault (Sprint 5 extension)** :
+  - `app/charlie.py` : `CharlieResult` enrichi avec `vault_notes: list[VaultNote]`. Ajout du helper `_is_vault_relevant()` et appel `query_vault()` dans `ask_charlie()` pour les questions conversationnelles (sans SQL) ou contenant des mots-clés historique/dossier/similaire.
+  - `app/web/api.py` : le endpoint `charlie_ask` génère désormais un bloc HTML `vault_html` injecté dans la bulle AI du chat, affichant les notes du vault avec prévisualisation.
+  - `app/delivery/slack_bot.py` : `format_charlie_response()` ajoute les vault notes en blocs Slack (context + sections) avant le divider final.
+  - **Tests** : `tests/test_charlie_vault.py` — 5 tests couvrant la détection de pertinence vault et les appels conditionnels.
+
+---
+
 ## [1.9.0] — 2026-05-18
 
 ### Ajouté
@@ -11,9 +22,6 @@
 - **Intégration Cerveau2 dans `generate_draft()`** : après le retrieve RAG sqlite-vec, un appel `query_vault()` enrichit le contexte LLM avec les correspondances historiques du vault. Les notes sont injectées sous `=== Correspondances historiques du vault ===` dans le prompt.
 - **Configuration** : 3 nouvelles variables `.env` — `CERVEAU2_BASE_URL`, `CERVEAU2_API_SECRET`, `CERVEAU2_LIMIT` (défaut 3).
 - **Tests** : `tests/test_cerveau_client.py` — 10 tests couvrant dégradation silencieuse, réponses nominales, headers auth, zone rouge, context_only.
-
-### Prochaine étape (Sprint 5 extension — non déployée)
-- Intégration vault dans Charlie AI chat (web + Slack) — voir HANDOVER.md section "Sprint 5 extension".
 
 ---
 

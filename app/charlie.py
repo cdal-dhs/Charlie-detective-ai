@@ -1,26 +1,30 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from unicodedata import normalize
 
 import aiosqlite
 import structlog
 
+from app.cerveau_client import VaultNote, query_vault
 from app.config import get_settings
 from app.llm.router import complete
 
 log = structlog.get_logger()
 
-CHARLIE_SYSTEM_PROMPT = """Tu es Charlie, l'assistant IA de Detective.be. Tu aides l'opérateur à interroger la base de données des emails traités.  # noqa: E501
+CHARLIE_SYSTEM_PROMPT = """Tu es Charlie, l'assistant IA de Detective.be.
+Tu aides l'opérateur à interroger la base de données des emails traités.
 
 Schéma de la table principale (mail_processed) :
 - id INTEGER PRIMARY KEY
-- mailbox_name TEXT  — detective_belgique (D_FR), detective_belgium (D_NL), dpdh_investigations (D_PD)  # noqa: E501
+- mailbox_name TEXT  — detective_belgique (D_FR), detective_belgium (D_NL),
+  dpdh_investigations (D_PD)
 - subject TEXT
 - sender TEXT
 - received_at TEXT (format ISO, ex: 2026-05-15T10:30:00)
-- category TEXT  — demande_client, urgent, newsletter, facture, spam, phishing, rappel, autre
+- category TEXT  — demande_client, urgent, newsletter, facture, spam,
+  phishing, rappel, autre
 - status TEXT    — pending, approved, rejected, sent, reviewed
 - priority TEXT  — high, normal, low
 - processed_at TEXT (format ISO)
@@ -32,14 +36,16 @@ Schéma de la table principale (mail_processed) :
 - reviewed_at TEXT
 
 Règles :
-1. Si la question nécessite une requête SQL, génère UNIQUEMENT un SELECT (jamais INSERT/UPDATE/DELETE/DROP/ALTER).  # noqa: E501
+1. Si la question nécessite une requête SQL, génère UNIQUEMENT un SELECT
+   (jamais INSERT/UPDATE/DELETE/DROP/ALTER).
 2. Formate ta réponse exactement comme ceci :
 
 SQL: <ta requête SELECT sur une seule ligne, sans saut de ligne>
 ---
 RÉPONSE: <ta réponse conversationnelle en français, courte et directe>
 
-3. Si la question ne nécessite pas de SQL (salutation, question générale), laisse SQL vide :
+3. Si la question ne nécessite pas de SQL (salutation, question générale),
+   laisse SQL vide :
 
 SQL:
 ---
@@ -47,9 +53,15 @@ RÉPONSE: <ta réponse>
 
 4. Pour les dates, utilise le format ISO (YYYY-MM-DD) dans les requêtes SQL.
 5. Toujours répondre en français.
-6. Quand tu listes des emails, inclus TOUJOURS les colonnes `id` et `subject` dans ton SELECT (ainsi que les autres colonnes utiles). Cela permet de créer des liens cliquables vers la conversation.  # noqa: E501
-7. Quand l'utilisateur demande le contenu, le détail ou un résumé d'un dossier, utilise la colonne `body` (contenu complet) dans ton SELECT, pas `body_preview`. Inclus aussi `ai_draft` si pertinent.  # noqa: E501
-8. Quand l'utilisateur demande un résumé ou une synthèse, ta RÉPONSE doit contenir le résumé en langage naturel — pas juste une liste de champs. Analyse le contenu des mails et rédige une synthèse claire et utile.  # noqa: E501
+6. Quand tu listes des emails, inclus TOUJOURS les colonnes `id` et `subject`
+   dans ton SELECT (ainsi que les autres colonnes utiles).
+   Cela permet de créer des liens cliquables vers la conversation.
+7. Quand l'utilisateur demande le contenu, le détail ou un résumé d'un dossier,
+   utilise la colonne `body` (contenu complet) dans ton SELECT, pas `body_preview`.
+   Inclus aussi `ai_draft` si pertinent.
+8. Quand l'utilisateur demande un résumé ou une synthèse, ta RÉPONSE doit
+   contenir le résumé en langage naturel — pas juste une liste de champs.
+   Analyse le contenu des mails et rédige une synthèse claire et utile.
 """
 
 _DANGEROUS_SQL = (
@@ -71,6 +83,7 @@ class CharlieResult:
     rows: list[dict] | None
     sql_safe: bool
     sql_error: str | None
+    vault_notes: list[VaultNote] = field(default_factory=list)
 
 
 def parse_charlie_response(text: str) -> tuple[str, str]:
@@ -97,10 +110,7 @@ def is_safe_sql(sql: str) -> bool:
     cleaned = sql.lower().strip()
     if not cleaned.startswith("select"):
         return False
-    for dangerous in _DANGEROUS_SQL:
-        if dangerous in cleaned:
-            return False
-    return True
+    return all(dangerous not in cleaned for dangerous in _DANGEROUS_SQL)
 
 
 async def run_sql(db_path: Path, sql: str) -> list[dict]:
@@ -114,7 +124,8 @@ async def run_sql(db_path: Path, sql: str) -> list[dict]:
         return [dict(zip(keys, row, strict=True)) for row in rows]
 
 
-_SUMMARY_PROMPT = """Tu es Charlie, l'assistant IA de Detective.be. Tu viens d'exécuter une requête SQL pour l'opérateur et voici les résultats.
+_SUMMARY_PROMPT = """Tu es Charlie, l'assistant IA de Detective.be.
+Tu viens d'exécuter une requête SQL pour l'opérateur et voici les résultats.
 
 Question de l'opérateur : {question}
 
@@ -122,7 +133,8 @@ Résultats SQL ({count} lignes) :
 {rows}
 
 Rédige une réponse en français, concise et utile :
-- Si l'opérateur demande un résumé ou une synthèse, analyse le contenu des mails et rédige une synthèse claire.
+- Si l'opérateur demande un résumé ou une synthèse, analyse le contenu des mails
+  et rédige une synthèse claire.
 - Si l'opérateur demande un détail, présente l'information de façon lisible.
 - Si les résultats sont une simple liste, présente-les proprement.
 - Toujours mentionner les ID et sujets pour permettre les liens cliquables.
@@ -154,25 +166,31 @@ async def ask_charlie(question: str, db_path: Path, model: str | None = None) ->
         response_text=response_text, sql=sql, rows=None, sql_safe=True, sql_error=None,
     )
 
-    if not sql:
-        return result
+    if sql:
+        if not is_safe_sql(sql):
+            result.sql_safe = False
+            return result
 
-    if not is_safe_sql(sql):
-        result.sql_safe = False
-        return result
+        try:
+            rows = await run_sql(db_path, sql)
+            result.rows = rows
+        except Exception as e:
+            log.warning("charlie.sql_failed", sql=sql, error=str(e))
+            result.sql_error = str(e)
+            return result
 
-    try:
-        rows = await run_sql(db_path, sql)
-        result.rows = rows
-    except Exception as e:
-        log.warning("charlie.sql_failed", sql=sql, error=str(e))
-        result.sql_error = str(e)
-        return result
+        if rows and _needs_summary(question):
+            summary = await _summarize_results(question, rows, model, settings)
+            if summary:
+                result.response_text = summary
 
-    if rows and _needs_summary(question):
-        summary = await _summarize_results(question, rows, model, settings)
-        if summary:
-            result.response_text = summary
+    if _is_vault_relevant(question, sql):
+        result.vault_notes = await query_vault(
+            question=question,
+            base_url=settings.cerveau2_base_url,
+            api_secret=settings.cerveau2_api_secret,
+            limit=settings.cerveau2_limit,
+        )
 
     return result
 
@@ -184,6 +202,12 @@ _NEEDS_SUMMARY_KEYWORDS = (
     "donne-moi le contenu", "de quoi parle",
 )
 
+_VAULT_KEYWORDS = (
+    "similaire", "historique", "passe", "precedent",
+    "anterieur", "archive", "contexte", "dossier",
+    "affaire", "enquete", "investigation", "correspondance",
+)
+
 
 def _normalize(text: str) -> str:
     return normalize("NFKD", text.lower()).encode("ascii", "ignore").decode("ascii")
@@ -192,6 +216,13 @@ def _normalize(text: str) -> str:
 def _needs_summary(question: str) -> bool:
     q = _normalize(question)
     return any(kw in q for kw in _NEEDS_SUMMARY_KEYWORDS)
+
+
+def _is_vault_relevant(question: str, sql: str) -> bool:
+    if not sql:  # question conversationnelle → vault toujours utile
+        return True
+    q = _normalize(question)
+    return any(kw in q for kw in _VAULT_KEYWORDS)
 
 
 async def _summarize_results(

@@ -215,7 +215,8 @@ async def test_imap(
     status = "green" if ok else "red"
     msg = "Connexion IMAP OK" if ok else "Échec connexion IMAP"
     return HTMLResponse(
-        f'<div class="p-2 bg-{status}-900/40 border border-{status}-800 rounded text-{status}-300 text-sm">{msg}</div>'
+        f'<div class="p-2 bg-{status}-900/40 border border-{status}-800 '
+        f'rounded text-{status}-300 text-sm">{msg}</div>'
     )
 
 
@@ -234,7 +235,8 @@ async def test_slack(
     status = "green" if ok else "red"
     msg = "Message Slack envoyé" if ok else "Échec envoi Slack"
     return HTMLResponse(
-        f'<div class="p-2 bg-{status}-900/40 border border-{status}-800 rounded text-{status}-300 text-sm">{msg}</div>'
+        f'<div class="p-2 bg-{status}-900/40 border border-{status}-800 '
+        f'rounded text-{status}-300 text-sm">{msg}</div>'
     )
 
 
@@ -328,7 +330,10 @@ async def audit_page(
     )
     async with db.execute(sql, (*params, per_page, offset)) as cur:
         rows = await cur.fetchall()
-    cols = ["id", "user_id", "action", "resource_type", "resource_id", "details", "ip_address", "created_at"]
+    cols = [
+        "id", "user_id", "action", "resource_type",
+        "resource_id", "details", "ip_address", "created_at",
+    ]
     logs = [dict(zip(cols, r, strict=True)) for r in rows]
 
     total_pages = (total + per_page - 1) // per_page
