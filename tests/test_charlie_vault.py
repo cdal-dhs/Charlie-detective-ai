@@ -4,7 +4,23 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.cerveau_client import VaultNote
-from app.charlie import _is_vault_relevant, ask_charlie
+from app.charlie import _extract_dossier_id, _is_vault_relevant, ask_charlie
+
+
+def test_extract_dossier_id_from_dossier_colon():
+    assert _extract_dossier_id("donne moi ce que tu sais sur le dossier : ADF") == "ADF"
+
+
+def test_extract_dossier_id_from_affaire():
+    assert _extract_dossier_id("l'affaire XYZ123") == "XYZ123"
+
+
+def test_extract_dossier_id_from_hash():
+    assert _extract_dossier_id("Que sais-tu sur #PROJ42 ?") == "PROJ42"
+
+
+def test_extract_dossier_id_none():
+    assert _extract_dossier_id("Combien de mails aujourd'hui ?") is None
 
 
 def test_is_vault_relevant_no_sql():
@@ -73,3 +89,35 @@ async def test_ask_charlie_no_vault_for_pure_sql():
 
     assert result.vault_notes == []
     mock_vault.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ask_charlie_passes_dossier_id_to_vault():
+    mock_settings = MagicMock()
+    mock_settings.llm_model_default = "test-model"
+    mock_settings.cerveau2_base_url = "http://test"
+    mock_settings.cerveau2_api_secret = "secret"
+    mock_settings.cerveau2_limit = 3
+
+    with (
+        patch("app.charlie.get_settings", return_value=mock_settings),
+        patch(
+            "app.charlie.complete",
+            new=AsyncMock(
+                return_value="SQL: SELECT id FROM mail_processed\n---\nRÉPONSE: Voici"
+            ),
+        ),
+        patch("app.charlie.run_sql", new=AsyncMock(return_value=[{"id": 1}])),
+        patch(
+            "app.charlie.query_vault", new=AsyncMock(return_value=[])
+        ) as mock_vault,
+    ):
+        result = await ask_charlie(
+            "donne moi ce que tu sais sur le dossier : ADF",
+            db_path=Path("/dev/null"),
+        )
+
+    assert result.vault_notes == []
+    mock_vault.assert_awaited_once()
+    call_kwargs = mock_vault.await_args.kwargs
+    assert call_kwargs["dossier_id"] == "ADF"

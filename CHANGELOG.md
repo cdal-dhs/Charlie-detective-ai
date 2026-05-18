@@ -4,6 +4,16 @@
 
 ---
 
+## [1.9.2] — 2026-05-18
+
+### Ajouté
+- **Recherche par dossier spécifique dans Charlie AI** :
+  - `app/charlie.py` : extraction automatique d'un `dossier_id` (ex: "ADF") via regex sur la question utilisateur (`_extract_dossier_id()`). Quand un dossier est détecté, le prompt système est enrichi pour forcer le LLM à chercher ce terme dans les emails via `LIKE`. Le vault Cerveau2 est toujours interrogé avec `dossier_id` passé à `query_vault()`.
+  - `app/cerveau_client.py` : supporte déjà `dossier_id` dans `query_vault()`.
+  - **Tests** : 4 nouveaux tests dans `tests/test_charlie_vault.py` couvrant l'extraction de `dossier_id` (syntaxe `dossier : ADF`, `affaire XYZ`, `#PROJ42`) et l'appel forcé au vault malgré un SQL généré.
+
+---
+
 ## [1.9.1] — 2026-05-18
 
 ### Ajouté

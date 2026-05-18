@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from unicodedata import normalize
@@ -147,8 +148,19 @@ async def ask_charlie(question: str, db_path: Path, model: str | None = None) ->
     settings = get_settings()
     model = model or settings.llm_model_default
 
+    dossier_id = _extract_dossier_id(question)
+
+    system_prompt = CHARLIE_SYSTEM_PROMPT
+    if dossier_id:
+        extra = (
+            f"\n\nNote : l'utilisateur demande spécifiquement le dossier "
+            f"'{dossier_id}'. Inclus ce terme dans ta recherche SQL (subject, "
+            "body, body_preview, ai_draft) via des clauses LIKE."
+        )
+        system_prompt += extra
+
     messages = [
-        {"role": "system", "content": CHARLIE_SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": question},
     ]
 
@@ -184,11 +196,12 @@ async def ask_charlie(question: str, db_path: Path, model: str | None = None) ->
             if summary:
                 result.response_text = summary
 
-    if _is_vault_relevant(question, sql):
+    if _is_vault_relevant(question, sql) or dossier_id:
         result.vault_notes = await query_vault(
             question=question,
             base_url=settings.cerveau2_base_url,
             api_secret=settings.cerveau2_api_secret,
+            dossier_id=dossier_id,
             limit=settings.cerveau2_limit,
         )
 
@@ -207,6 +220,23 @@ _VAULT_KEYWORDS = (
     "anterieur", "archive", "contexte", "dossier",
     "affaire", "enquete", "investigation", "correspondance",
 )
+
+_DOSSIER_RE = re.compile(
+    r"(?:dossier|affaire|projet|enquete|investigation)"
+    r"[\s:]+([A-Z][A-Z0-9]{2,})",
+    re.IGNORECASE,
+)
+_HASH_DOSSIER_RE = re.compile(r"#([A-Z][A-Z0-9]{2,})")
+
+
+def _extract_dossier_id(question: str) -> str | None:
+    m = _DOSSIER_RE.search(question)
+    if m:
+        return m.group(1)
+    m = _HASH_DOSSIER_RE.search(question)
+    if m:
+        return m.group(1)
+    return None
 
 
 def _normalize(text: str) -> str:
