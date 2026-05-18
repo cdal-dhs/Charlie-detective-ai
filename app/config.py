@@ -71,6 +71,10 @@ class Settings(BaseSettings):
     slack_bot_token: str = ""          # xoxb-... Bot User OAuth Token
     slack_signing_secret: str = ""      # Signing secret de l'app Slack
 
+    cerveau2_base_url: str = ""
+    cerveau2_api_secret: str = ""
+    cerveau2_limit: int = 3
+
     dry_run: bool = False
 
     # --- Date limite de traitement ---
