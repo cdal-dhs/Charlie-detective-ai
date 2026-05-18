@@ -4,6 +4,14 @@
 
 ---
 
+## [1.9.3] — 2026-05-18
+
+### Corrigé
+- **Charlie AI : le summary écrasait les vault notes** — dans `app/charlie.py`, `ask_charlie()` interroge désormais le vault Cerveau2 **avant** de générer le summary. Le prompt de summary (`_SUMMARY_PROMPT_VAULT`) intègre explicitement les notes du vault quand elles existent, évitant que Charlie ne mentionne que les résultats SQL.
+- Ajout de logs `charlie.dossier_detected` et `charlie.vault_fetched` pour tracer le `dossier_id` extrait et le nombre de notes retournées.
+
+---
+
 ## [1.9.2] — 2026-05-18
 
 ### Ajouté

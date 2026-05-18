@@ -142,13 +142,37 @@ Rédige une réponse en français, concise et utile :
 - Si aucun résultat, dis-le simplement.
 """
 
+_SUMMARY_PROMPT_VAULT = """Tu es Charlie, l'assistant IA de Detective.be.
+Tu viens d'exécuter une requête SQL ET consulté le "second cerveau" (vault Cerveau2)
+pour l'opérateur.
+
+Question de l'opérateur : {question}
+
+Résultats SQL ({count} lignes) :
+{rows}
+
+Notes du second cerveau ({vault_count}) :
+{vault_notes}
+
+Rédige une réponse en français, concise et utile :
+- Synthétise les informations des emails ET des notes du vault.
+- Si les notes du vault apportent un contexte historique ou complémentaire,
+  mentionne-le explicitement.
+- Si aucun résultat dans les emails mais des notes existent, base ta réponse
+  sur les notes du vault.
+- Si aucun résultat nulle part, dis-le simplement.
+- Toujours mentionner les ID et sujets pour permettre les liens cliquables.
+"""
+
 
 async def ask_charlie(question: str, db_path: Path, model: str | None = None) -> CharlieResult:
-    """Pipeline Charlie AI complet : question → LLM → SQL → validation → exécution → synthèse."""
+    """Pipeline Charlie AI complet : question → LLM → SQL → vault → synthèse."""
     settings = get_settings()
     model = model or settings.llm_model_default
 
     dossier_id = _extract_dossier_id(question)
+    if dossier_id:
+        log.info("charlie.dossier_detected", dossier_id=dossier_id)
 
     system_prompt = CHARLIE_SYSTEM_PROMPT
     if dossier_id:
@@ -178,6 +202,7 @@ async def ask_charlie(question: str, db_path: Path, model: str | None = None) ->
         response_text=response_text, sql=sql, rows=None, sql_safe=True, sql_error=None,
     )
 
+    # --- Phase 1 : exécution SQL si présente ---
     if sql:
         if not is_safe_sql(sql):
             result.sql_safe = False
@@ -191,19 +216,26 @@ async def ask_charlie(question: str, db_path: Path, model: str | None = None) ->
             result.sql_error = str(e)
             return result
 
-        if rows and _needs_summary(question):
-            summary = await _summarize_results(question, rows, model, settings)
-            if summary:
-                result.response_text = summary
-
+    # --- Phase 2 : appel vault (avant le summary pour qu'il en ait connaissance) ---
+    vault_notes = []
     if _is_vault_relevant(question, sql) or dossier_id:
-        result.vault_notes = await query_vault(
+        vault_notes = await query_vault(
             question=question,
             base_url=settings.cerveau2_base_url,
             api_secret=settings.cerveau2_api_secret,
             dossier_id=dossier_id,
             limit=settings.cerveau2_limit,
         )
+        result.vault_notes = vault_notes
+        log.info("charlie.vault_fetched", count=len(vault_notes), dossier_id=dossier_id)
+
+    # --- Phase 3 : summary intelligent avec les deux sources ---
+    if sql and result.rows and _needs_summary(question):
+        summary = await _summarize_results(
+            question, result.rows, vault_notes, model, settings,
+        )
+        if summary:
+            result.response_text = summary
 
     return result
 
@@ -256,13 +288,32 @@ def _is_vault_relevant(question: str, sql: str) -> bool:
 
 
 async def _summarize_results(
-    question: str, rows: list[dict], model: str, settings,
+    question: str,
+    rows: list[dict],
+    vault_notes: list[VaultNote],
+    model: str,
+    settings,
 ) -> str | None:
-    """Appelle le LLM une seconde fois pour synthétiser les résultats SQL."""
+    """Appelle le LLM une seconde fois pour synthétiser les résultats SQL + vault."""
     import json
 
     rows_text = json.dumps(rows[:20], ensure_ascii=False, default=str)
-    prompt = _SUMMARY_PROMPT.format(question=question, count=len(rows), rows=rows_text)
+
+    if vault_notes:
+        vault_lines = []
+        for note in vault_notes:
+            fname = note.path.split("/")[-1].replace(".md", "")
+            vault_lines.append(f"- {fname}: {note.content[:500]}")
+        vault_text = "\n".join(vault_lines)
+        prompt = _SUMMARY_PROMPT_VAULT.format(
+            question=question,
+            count=len(rows),
+            rows=rows_text,
+            vault_count=len(vault_notes),
+            vault_notes=vault_text,
+        )
+    else:
+        prompt = _SUMMARY_PROMPT.format(question=question, count=len(rows), rows=rows_text)
 
     try:
         summary = await complete(
