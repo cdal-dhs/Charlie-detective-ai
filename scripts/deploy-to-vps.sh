@@ -77,8 +77,14 @@ echo ">>> Pulling latest code on VPS ..."
 ssh "${VPS_USER}@${VPS_HOST}" "cd ${VPS_DIR} && git pull origin main"
 
 # --- 3. Sync data/ (DB SQLite + agent_state) ---
-echo ">>> Syncing data/ ..."
-rsync -avz --delete ./data/ "${VPS_USER}@${VPS_HOST}:${VPS_DIR}/data/"
+# ⚠️ agent_state.db NE DOIT PAS être écrasée — elle contient les catégories,
+# priorités et statuts modifiés via le cockpit. Backup automatique + exclusion.
+echo ">>> Backup agent_state.db on VPS ..."
+ssh "${VPS_USER}@${VPS_HOST}" \
+    "cd ${VPS_DIR}/data && test -f agent_state.db && cp agent_state.db agent_state.db.backup-\$(date +%Y%m%d-%H%M%S) || true"
+
+echo ">>> Syncing data/ (agent_state.db exclue) ..."
+rsync -avz --delete --exclude='agent_state.db' ./data/ "${VPS_USER}@${VPS_HOST}:${VPS_DIR}/data/"
 
 # --- 4. Sync .env as .env.production ---
 echo ">>> Syncing .env as .env.production ..."
