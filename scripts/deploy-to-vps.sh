@@ -63,7 +63,8 @@ if ! docker compose build --no-cache; then
 fi
 
 # Vérifier que l'image contient bien le dossier static (INC-001)
-if ! docker run --rm detective-detective ls app/web/static/ >/dev/null 2>&1; then
+IMAGE_NAME=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep 'detective' | head -1)
+if ! docker run --rm "${IMAGE_NAME}" ls app/web/static/ >/dev/null 2>&1; then
     echo "❌ ERREUR : le dossier app/web/static n'est pas présent dans l'image Docker."
     echo "   Vérifie que le dossier n'est pas exclu par .dockerignore. Voir docs/RUNBOOK.md#INC-001."
     exit 1
