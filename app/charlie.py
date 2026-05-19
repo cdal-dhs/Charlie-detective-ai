@@ -107,6 +107,61 @@ BOX_ABBR = {
     "dpdh_investigations": "D_PD",
 }
 
+# Lexique métier exhaustif — enrichissement automatique de la question
+# pour garantir que Charlie trouve les emails même quand Daniel utilise
+# un terme familier ou un euphémisme.
+_ENQUETE_SYNONYMES: dict[str, list[str]] = {
+    "adulte": [
+        "infidelite", "adultere", "tromperie", "concubinage",
+        "soupcon", "jaloux", "jalouse", "ma femme", "mon mari",
+        "mon conjoint", "ma compagne", "mon compagnon",
+        "tromper", "trahir", "mentir", "amant", "maitresse",
+        "liaison", "aventure", "escapade", "malaise", "couple",
+    ],
+    "surveillance": [
+        "surveillance", "filature", "observation", "terrain",
+        "pister", "suivre", "espionner", "filmer", "photographier",
+        "detective", "enqueteur", "shadowing", "stakeout",
+    ],
+    "disparition": [
+        "disparition", "recherche_personne", "retrouver",
+        "localiser", "fugue", "kidnappe", "perdu", "retrouve",
+        "missing", "trace", "disparu", "disparue",
+    ],
+    "residence": [
+        "controle_residence", "residence", "domicile",
+        "logement", "adresse", "habitation", "cooperative",
+        "proprietaire", "locataire", "colocation",
+    ],
+    "famille": [
+        "enquete_famille", "garde", "pension", "famille",
+        "enfant", "mineur", "adolescent", "bebe", "nourrisson",
+        "divorce", "separation", "rupture", "couple", "concubin",
+        "droit de visite", "hebergement", "custodie", "tutelle",
+    ],
+    "harcelement": [
+        "harcelement", "intimidation", "stalking", "menace",
+        "persecution", "chantage", "blackmail", "cyberharcelement",
+        "insulte", "agression", "violence",
+    ],
+    "entreprise": [
+        "investigation_entreprise", "entreprise", "societe",
+        "patron", "salarie", "licenciement", "fraude",
+        "detournement", "vol", "abus", "conflit", "concurrence",
+        "espionnage industriel", "contrefacon",
+    ],
+    "materiel": [
+        "test_materiel", "materiel", "detecteur", "camera",
+        "micro", "gps", "traceur", "bug", "ecoute",
+        "matos", "gadget", "technique",
+    ],
+    "collaboration": [
+        "collaboration", "sous_traitance", "partenaire",
+        "associe", "confrere", "collegue", "partenariat",
+        "mandat", "sous_traitant", "prestataire",
+    ],
+}
+
 
 @dataclass
 class CharlieResult:
@@ -154,6 +209,33 @@ async def run_sql(db_path: Path, sql: str) -> list[dict]:
             return []
         keys = [d[0] for d in desc]
         return [dict(zip(keys, row, strict=True)) for row in rows]
+
+
+def _enrichir_question(question: str) -> str:
+    """Détecte le type d'enquête et enrichit la question avec des synonymes.
+
+    Cela garantit que le LLM génère un SQL qui cherche dans tous les
+    termes connus du métier, même quand Daniel utilise un euphémisme.
+    """
+    q_norm = _normalize(question)
+    extra_terms: list[str] = []
+    for type_enquete, synonymes in _ENQUETE_SYNONYMES.items():
+        if type_enquete in q_norm:
+            for syn in synonymes:
+                if syn not in q_norm:
+                    extra_terms.append(syn)
+            break
+        # Sinon : un synonyme est-il présent dans la question ?
+        for syn in synonymes:
+            if syn in q_norm:
+                extra_terms.extend([s for s in synonymes if s not in q_norm])
+                break
+        if extra_terms:
+            break
+    if extra_terms:
+        enrichie = question + " (synonymes: " + ", ".join(extra_terms[:10]) + ")"
+        return enrichie
+    return question
 
 
 _SUMMARY_PROMPT = """Tu es Charlie, l'assistant IA personnel de Daniel Hurchon,
@@ -235,12 +317,15 @@ async def ask_charlie(
         )
         system_prompt += extra
 
+    enriched_question = _enrichir_question(question)
+    log.info("charlie.question_enriched", original=question[:60], enriched=enriched_question[:80])
+
     messages = [
         {"role": "system", "content": system_prompt},
     ]
     if history:
         messages.extend(history)
-    messages.append({"role": "user", "content": question})
+    messages.append({"role": "user", "content": enriched_question})
 
     try:
         raw = await complete(model=model, messages=messages, max_tokens=800, temperature=0.1)
