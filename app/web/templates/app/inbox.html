@@ -266,6 +266,7 @@
     return {
       open: false,
       loading: false,
+      history: [],
       width: Math.min(window.innerWidth - 64, 1024),
       height: Math.round(window.innerHeight * 0.8),
       ask() {
@@ -281,15 +282,19 @@
         );
         messages.scrollTop = messages.scrollHeight;
         const formData = new FormData(document.getElementById('charlie-form'));
+        formData.append('history', JSON.stringify(this.history));
         input.value = '';
         input.focus();
         fetch('/api/charlie/ask', { method: 'POST', body: formData })
         .then(r => {
           if (!r.ok) throw new Error('HTTP ' + r.status);
-          return r.text();
+          return r.json();
         })
-        .then(html => {
-          messages.insertAdjacentHTML('beforeend', html);
+        .then(data => {
+          messages.insertAdjacentHTML('beforeend', data.html);
+          this.history.push({role: 'user', content: question});
+          this.history.push({role: 'assistant', content: data.response_text});
+          if (this.history.length > 20) this.history = this.history.slice(-20);
           messages.scrollTop = messages.scrollHeight;
         })
         .catch(err => {

@@ -61,12 +61,17 @@ RÉPONSE: <ta réponse>
 6. Quand tu listes des emails, inclus TOUJOURS les colonnes `id` et `subject`
    dans ton SELECT (ainsi que les autres colonnes utiles).
    Cela permet de créer des liens cliquables vers la conversation.
-7. Quand Daniel demande le contenu, le détail ou un résumé d'un dossier,
+   7. Quand Daniel demande le contenu, le détail ou un résumé d'un dossier,
    utilise la colonne `body` (contenu complet) dans ton SELECT, pas `body_preview`.
    Inclus aussi `ai_draft` si pertinent.
-8. Quand Daniel demande un résumé ou une synthèse, ta RÉPONSE doit
+8. Quand Daniel cherche des emails par mot-clé (lieu, nom, sujet, référence, etc.),
+   cherche dans `subject`, `body_preview`, `body` ET `ai_draft` via des clauses LIKE OR.
+   Inclus `id` et `subject` dans le SELECT pour permettre des liens cliquables.
+9. Quand Daniel demande un résumé ou une synthèse, ta RÉPONSE doit
    contenir le résumé en langage naturel — pas juste une liste de champs.
    Analyse le contenu des mails et rédige une synthèse claire et utile.
+10. Si la requête SQL retourne 0 ligne, ta RÉPONSE doit dire explicitement
+    qu'aucun email n'a été trouvé, sans inventer de résultats.
 """
 
 _DANGEROUS_SQL = (
@@ -177,7 +182,12 @@ Rédige une réponse en français, **conversationnelle et directe** :
 """
 
 
-async def ask_charlie(question: str, db_path: Path, model: str | None = None) -> CharlieResult:
+async def ask_charlie(
+    question: str,
+    db_path: Path,
+    model: str | None = None,
+    history: list[dict] | None = None,
+) -> CharlieResult:
     """Pipeline Charlie AI complet : question → LLM → SQL → vault → synthèse."""
     settings = get_settings()
     model = model or settings.llm_model_default
@@ -197,8 +207,10 @@ async def ask_charlie(question: str, db_path: Path, model: str | None = None) ->
 
     messages = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": question},
     ]
+    if history:
+        messages.extend(history)
+    messages.append({"role": "user", "content": question})
 
     try:
         raw = await complete(model=model, messages=messages, max_tokens=800, temperature=0.1)
@@ -244,6 +256,13 @@ async def ask_charlie(question: str, db_path: Path, model: str | None = None) ->
     # --- Phase 3 : summary intelligent avec les deux sources ---
     has_sql_data = result.rows and len(result.rows) > 0
     has_vault_data = vault_notes and len(vault_notes) > 0
+    # Garde : 0 résultats partout → réponse directe sans hallucination
+    if sql and not has_sql_data and not has_vault_data:
+        if result.sql_error is None:
+            result.response_text = "Aucun email trouvé pour cette recherche."
+        else:
+            result.response_text = f"Erreur SQL : {result.sql_error}"
+        return result
     # Si le vault a des données mais SQL est vide → forcer synthèse conversationnelle
     force_summary = has_vault_data and not has_sql_data
     if sql and (has_sql_data or has_vault_data) and (_needs_summary(question) or force_summary):

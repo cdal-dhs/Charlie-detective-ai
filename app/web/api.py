@@ -1,10 +1,12 @@
 # ruff: noqa: E501
 from __future__ import annotations
 
+import json
+
 import aiosqlite
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
 from app import __version__
@@ -527,14 +529,24 @@ async def charlie_ask(
     request: Request,
     db: aiosqlite.Connection = Depends(get_db),  # noqa: B008
     user: dict = Depends(require_operator),  # noqa: B008
-) -> HTMLResponse:
+) -> JSONResponse:
     form = await request.form()
     question = str(form.get("question", "")).strip()
     if not question:
         raise HTTPException(status_code=400, detail="Question vide")
 
+    history_raw = str(form.get("history", "")).strip()
+    history = None
+    if history_raw:
+        try:
+            history = json.loads(history_raw)
+            if len(history) > 20:
+                history = history[-20:]
+        except Exception:
+            history = None
+
     settings = get_settings()
-    result = await ask_charlie(question, db_path=settings.db_agent_state)
+    result = await ask_charlie(question, db_path=settings.db_agent_state, history=history)
 
     results_html = ""
     if result.sql and not result.sql_safe:
@@ -607,4 +619,4 @@ async def charlie_ask(
         f'</div>'
     )
 
-    return HTMLResponse(user_bubble + ai_bubble)
+    return JSONResponse({"html": user_bubble + ai_bubble, "response_text": result.response_text})
