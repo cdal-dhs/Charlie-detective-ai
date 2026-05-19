@@ -20,7 +20,7 @@ Daniel répond personnellement à tous les mails entrants. Pas de collaborateurs
 
 ## L'intégrateur
 
-**Cyril Dal** (`cdal@digitalhs.biz`, société Digital HS) — consultant/intégrateur IA, livre cette solution à Daniel. C'est lui que tu (Claude Code) assistes. Cyril valide les brouillons générés avant de les transférer à Daniel pendant toute la phase MVP.
+**CDAL** (`cdal@digitalhs.biz`, société Digital HS) — consultant/intégrateur IA, livre cette solution à Daniel. C'est lui que tu (Claude Code) assistes. CDAL valide les brouillons générés avant de les transférer à Daniel pendant toute la phase MVP.
 
 ---
 
@@ -71,7 +71,7 @@ Règle absolue : **l'agent répond TOUJOURS dans la langue du mail entrant**, ja
 
 ## Données disponibles
 
-Cyril a déjà fait le travail d'**anonymisation** des mails historiques de Daniel :
+CDAL a déjà fait le travail d'**anonymisation** des mails historiques de Daniel :
 
 - 3 fichiers SQLite (un par boîte mail)
 - ~1200 paires `[mail entrant] → [réponse de Daniel]` au total
@@ -85,7 +85,7 @@ Cyril a déjà fait le travail d'**anonymisation** des mails historiques de Dani
 ## Prod : VPS Hostinger KVM8
 
 - 8 vCPU, 32 Go RAM, 400 Go NVMe — largement sous-utilisé
-- Cyril l'exploite pour héberger plusieurs projets clients
+- CDAL l'exploite pour héberger plusieurs projets clients
 - L'agent y vivra dans `/opt/detective-agent/` sous user dédié `detective-agent`
 - systemd unit, auto-restart, healthcheck local, alertes Telegram
 
@@ -97,7 +97,7 @@ Outre le pipeline email, **Charlie** (l'agent IA) dispose d'un **canal Telegram 
 
 - **Usage** : Daniel peut interroger Charlie en direct, demander un résumé de dossier, ou valider/rejeter un brouillon sans passer par l'email
 - **Identité** : Daniel = le Boss, Charlie = l'assistant IA (persona distinct, ton professionnel mais accessible)
-- **Phase test** : connecté au compte Telegram de **Cyril** pour itérer sans déranger Daniel
+- **Phase test** : connecté au compte Telegram de **CDAL** pour itérer sans déranger Daniel
 - **Phase prod** : migré sur le VPS Hostinger avec le bot dédié à Daniel
 - **Alertes système** (agent down, IMAP timeout, etc.) utilisent le **même bot** mais dans un canal/thread séparé pour ne pas polluer la conversation métier
 
@@ -105,7 +105,7 @@ Outre le pipeline email, **Charlie** (l'agent IA) dispose d'un **canal Telegram 
 
 À mesure que le MVP se stabilise, on étend :
 
-1. **Bascule en V2** : brouillons directement dans Drafts IMAP de Daniel (Outlook/Apple Mail), plus de validation Cyril
+1. **Bascule en V2** : brouillons directement dans Drafts IMAP de Daniel (Outlook/Apple Mail), plus de validation CDAL
 2. **Extension factures** : extraction structurée + transfert comptable
 3. **Dashboard web** : supervision unifiée, métriques qualité (taux d'acceptation, latence, etc.)
 4. **Bot WhatsApp** : les clients posent leurs questions via WhatsApp, l'agent répond avec la même intelligence (RAG + style Daniel)
@@ -116,6 +116,6 @@ Outre le pipeline email, **Charlie** (l'agent IA) dispose d'un **canal Telegram 
 ## Contraintes implicites
 
 - **Solide 24/7** : Daniel doit pouvoir compter sur l'agent sans maintenance permanente
-- **Coût plafonné** : Cyril privilégie les abonnements à coût fixe (Ollama Pro 20€/mois) plutôt que le pay-per-token incontrôlé
+- **Coût plafonné** : CDAL privilégie les abonnements à coût fixe (Ollama Pro 20€/mois) plutôt que le pay-per-token incontrôlé
 - **Pas d'over-engineering** : MVP simple d'abord, V2 quand qualité prouvée. Pas de Docker, Kubernetes, microservices au MVP.
 - **RGPD** : données anonymisées en stockage long terme (chantier V3 : suppression mails > 28 jours)

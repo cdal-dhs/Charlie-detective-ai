@@ -2,7 +2,7 @@
 
 > **Document de transfert** : état complet du projet, accès, conventions et pièges pour un nouvel agent.
 > **Dernière mise à jour** : 2026-05-19 (v1.9.6)
-> **Auteur** : Cyril Dal (`cdal@digitalhs.biz`) — Digital Highway Solutions
+> **Auteur** : CDAL (`cdal@digitalhs.biz`) — Digital Highway Solutions
 
 > **Récapitulatif v1.9.6** : pipeline Charlie AI stabilisé après 5 hotfixes consécutifs le 19/05. Les principaux bugs résolus : garde archives débloquée (vault ne bloque plus la recherche historique), faux dossier_id corrigé (regex stricte), fuite de données bouchée (données anonymisées avant envoi au LLM), tri chronologique RFC 2822, parallélisation SQL+vault+mémoire, timeout vault réduit, filtre archives par année, garde anti-faux-positif SQL (Mode A category exacte vs Mode B LIKE OR), suppression du dump technique Slack. Le système est maintenant fonctionnel pour les requêtes de Daniel mais reste dépendant de la qualité du LLM local (Gemma4:31b via Ollama Pro).
 
@@ -15,7 +15,7 @@
 - `detective_belgium` (D_NL) — Detective Belgium NL/multi
 - `dpdh_investigations` (D_PD) — DPDH Investigations
 
-**But** : agent IA Python qui poll les 3 boîtes mail Infomaniak toutes les 5 min, classifie les mails entrants en 8 catégories, et **uniquement pour les `demande_client`** génère un brouillon de réponse "à la Daniel" via RAG sur 1200 paires Q/R historiques anonymisées. Les brouillons sont envoyés par email à Cyril via Resend (validation humaine avant transfert à Daniel).
+**But** : agent IA Python qui poll les 3 boîtes mail Infomaniak toutes les 5 min, classifie les mails entrants en 8 catégories, et **uniquement pour les `demande_client`** génère un brouillon de réponse "à la Daniel" via RAG sur 1200 paires Q/R historiques anonymisées. Les brouillons sont envoyés par email à CDAL via Resend (validation humaine avant transfert à Daniel).
 
 **Canaux** :
 - **Pipeline email** : IMAP → classification → priorité → RAG → brouillon
@@ -33,7 +33,7 @@
 | Concurrence | `asyncio` |
 | IMAP | `aioimaplib` |
 | LLM router | **LiteLLM** (proxy OpenAI-compat) |
-| LLM principal | **Kimi K2 via Ollama Pro** (abonnement 20€/mois de Cyril) |
+| LLM principal | **Kimi K2 via Ollama Pro** (abonnement 20€/mois de CDAL) |
 | LLM fallback | **OpenRouter** (Claude / GPT-4o à la demande) |
 | Embeddings | `intfloat/multilingual-e5-large` (sentence-transformers, local CPU) |
 | Vector store | `sqlite-vec` (extension SQLite) |
@@ -130,10 +130,10 @@ DETECTIVE_BE/
 ### Production
 - **Cockpit** : `https://detective.digitalhs.biz`
 - **VPS** : `root@69.62.110.165` (Hostinger KVM8)
-- **Déploiement** : `bash scripts/deploy-to-vps.sh` (depuis le Mac de Cyril)
+- **Déploiement** : `bash scripts/deploy-to-vps.sh` (depuis le Mac de CDAL)
 - **Docker** : `cd /opt/DETECTIVE && docker compose ps && docker compose logs -f`
 
-### Local (Mac de Cyril)
+### Local (Mac de CDAL)
 ```bash
 source venv/bin/activate
 python -m app.main
@@ -226,7 +226,7 @@ ruff format .
 
 ## 10. Contact et escalade
 
-- **Cyril Dal** (`cdal@digitalhs.biz`) — intégrateur, propriétaire du VPS
+- **CDAL** (`cdal@digitalhs.biz`) — intégrateur, propriétaire du VPS
 - **Daniel Hurchon** — client final, détective privé
 - Problème de prod critique : SSH sur le VPS + `docker compose logs -f`
 - Problème de modèle LLM : vérifier `OLLAMA_PRO_API_KEY` et fallback OpenRouter

@@ -1,6 +1,6 @@
 # ROADMAP — Detective.be Agent
 
-> Tenir cet état à jour. Cocher les cases au fur et à mesure. Quand une phase est complète, proposer à Cyril de passer à la suivante.
+> Tenir cet état à jour. Cocher les cases au fur et à mesure. Quand une phase est complète, proposer à CDAL de passer à la suivante.
 
 ---
 
@@ -18,14 +18,14 @@
 
 **Objectif** : environnement local opérationnel + 1200 paires indexées + guide de style Daniel généré.
 
-### Pré-requis bloquants (côté Cyril)
+### Pré-requis bloquants (côté CDAL)
 - [x] Déposer `boite1.sqlite`, `boite2.sqlite`, `boite3.sqlite` dans `data/`
 - [x] Partager le schéma de chaque DB (`sqlite3 data/boiteX.sqlite ".schema"`)
 - [x] Remplir `.env` :
   - [x] 3 `MAILBOX_*_APP_PASSWORD` (Infomaniak)
   - [x] `OLLAMA_PRO_API_KEY` (optionnel — fallback OpenRouter actif)
   - [x] `RESEND_API_KEY` + domaine `noreply@resend.digitalhs.biz` vérifié
-  - [x] `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` (test : compte Cyril ; prod : compte Daniel)
+  - [x] `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` (test : compte CDAL ; prod : compte Daniel)
 
 ### Tâches code
 - [x] Créer le venv et installer les deps (fasttext en attente, fallback lang detect)
@@ -69,7 +69,7 @@ Les 3 DB indexées avec embeddings, le guide de style validé, l'environnement l
 
 ## 🚧 S3 — Cœur intelligent : RAG + génération (EN COURS — MVP fonctionnel)
 
-**Objectif** : pour chaque `demande_client` détecté, générer un brouillon de qualité et l'envoyer à Cyril via Resend.
+**Objectif** : pour chaque `demande_client` détecté, générer un brouillon de qualité et l'envoyer à CDAL via Resend.
 
 ### Tâches
 - [x] Brancher `pipeline.language.detect_language` sur les mails entrants
@@ -90,7 +90,7 @@ Les 3 DB indexées avec embeddings, le guide de style validé, l'environnement l
 - [ ] Approbation/rejet depuis Slack *(V2 — nécessite Slack App interactive avec Block Kit buttons)*
 
 ### Livrable S3
-Cyril reçoit un email Resend formaté + une notification Slack pour chaque demande client. L'agent tourne en local sur 3 boîtes. Qualité à valider avec Daniel sur vrais cas.
+CDAL reçoit un email Resend formaté + une notification Slack pour chaque demande client. L'agent tourne en local sur 3 boîtes. Qualité à valider avec Daniel sur vrais cas.
 
 ---
 
@@ -112,13 +112,13 @@ Cyril reçoit un email Resend formaté + une notification Slack pour chaque dema
 - [ ] Lancement officiel + monitoring 1 semaine
 
 ### Livrable S4
-MVP en production, monitoring actif, Cyril reçoit les brouillons à mesure que les vrais mails arrivent. Daniel peut interagir avec Charlie via Slack en direct.
+MVP en production, monitoring actif, CDAL reçoit les brouillons à mesure que les vrais mails arrivent. Daniel peut interagir avec Charlie via Slack en direct.
 
 ---
 
 ## ⬜ V2 — Bascule Drafts IMAP + feedback loop
 
-**Pré-requis** : MVP stable depuis ≥ 2 semaines avec qualité validée par Cyril/Daniel.
+**Pré-requis** : MVP stable depuis ≥ 2 semaines avec qualité validée par CDAL/Daniel.
 
 - [ ] Module `delivery/imap_drafts.py` : `IMAP APPEND` du brouillon dans `Drafts` de la boîte d'origine
 - [ ] Switch config `DELIVERY_MODE=resend|imap_drafts`

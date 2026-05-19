@@ -8,11 +8,11 @@
 
 **Client** : Daniel Hurchon, détective privé belge — cabinet **Detective.be** avec 3 marques (Detective Belgique FR, Detective Belgium EN/multi, DPDH Investigations).
 
-**Intégrateur** : Cyril Dal (`cdal@digitalhs.biz`) — c'est l'utilisateur que tu assistes.
+**Intégrateur** : CDAL (`cdal@digitalhs.biz`) — c'est l'utilisateur que tu assistes.
 
-**But du projet** : agent IA Python qui poll les 3 boîtes mail Infomaniak toutes les 5 min, classifie les mails entrants en 6 catégories, et **uniquement pour les `demande_client`** génère un brouillon de réponse "à la Daniel" via RAG sur 1200 paires Q/R historiques anonymisées (3 DB SQLite). **Au MVP, les brouillons sont envoyés par email à Cyril via Resend** (validation humaine avant transfert à Daniel). Bascule en Drafts IMAP natifs en V2.
+**But du projet** : agent IA Python qui poll les 3 boîtes mail Infomaniak toutes les 5 min, classifie les mails entrants en 6 catégories, et **uniquement pour les `demande_client`** génère un brouillon de réponse "à la Daniel" via RAG sur 1200 paires Q/R historiques anonymisées (3 DB SQLite). **Au MVP, les brouillons sont envoyés par email à CDAL via Resend** (validation humaine avant transfert à Daniel). Bascule en Drafts IMAP natifs en V2.
 
-**Canal Telegram Boss ↔ Charlie** : en parallèle du pipeline email, Charlie (l'agent IA) dispose d'un bot Telegram direct avec Daniel (le Boss) pour notifications push, résumés, validations et questions conversationnelles. En test, connecté au Telegram de Cyril ; en prod, migré sur le VPS Hostinger avec le compte de Daniel.
+**Canal Telegram Boss ↔ Charlie** : en parallèle du pipeline email, Charlie (l'agent IA) dispose d'un bot Telegram direct avec Daniel (le Boss) pour notifications push, résumés, validations et questions conversationnelles. En test, connecté au Telegram de CDAL ; en prod, migré sur le VPS Hostinger avec le compte de Daniel.
 
 **Vision long terme (post-MVP)** : module factures, dashboard supervision, bot WhatsApp client, architecture multi-sub-agents avec LLM différencié par tâche.
 
@@ -24,7 +24,7 @@
 - **Roadmap par semaine** : `docs/ROADMAP.md` (l'état courant y est tenu à jour — coche les items au fur et à mesure)
 - **Contexte business** : `docs/CONTEXT.md` (Daniel, marques, langues, sensibilités client)
 
-> Si tu hésites sur un choix d'archi, c'est la spec qui tranche. Si la spec ne couvre pas le cas, demande à Cyril avant d'inventer.
+> Si tu hésites sur un choix d'archi, c'est la spec qui tranche. Si la spec ne couvre pas le cas, demande à CDAL avant d'inventer.
 
 ---
 
@@ -32,11 +32,11 @@
 
 | Couche | Choix |
 |---|---|
-| Runtime | Python ≥ 3.11 (le Mac de Cyril a Python 3.14) |
+| Runtime | Python ≥ 3.11 (le Mac de CDAL a Python 3.14) |
 | Concurrence | `asyncio` |
 | IMAP | `aioimaplib` |
 | LLM router | **LiteLLM** (proxy OpenAI-compat) |
-| LLM principal | **Kimi K2 via Ollama Pro** (abonnement 20€/mois de Cyril) |
+| LLM principal | **Kimi K2 via Ollama Pro** (abonnement 20€/mois de CDAL) |
 | LLM fallback | **OpenRouter** (Claude / GPT-4o à la demande) |
 | Embeddings | `intfloat/multilingual-e5-large` (sentence-transformers, local CPU) |
 | Vector store | **`sqlite-vec`** (extension SQLite, vit dans les DB existantes) |
@@ -44,7 +44,7 @@
 | Email outbound MVP | **Resend API** |
 | Canal Boss ↔ Charlie | **Telegram Bot** (aiogram / python-telegram-bot) |
 | Healthcheck | FastAPI sur `127.0.0.1:8765` |
-| Service prod | systemd (le VPS Hostinger KVM8 de Cyril) |
+| Service prod | systemd (le VPS Hostinger KVM8 de CDAL) |
 | Logs | `structlog` (JSON structuré) |
 | Config | `pydantic-settings` depuis `.env` |
 
@@ -98,7 +98,7 @@ ruff format .
 
 ⚠️ **Ne JAMAIS commit le `.env`** (le `.gitignore` le bloque, mais double-check si tu touches au gitignore).
 
-⚠️ **Ne JAMAIS écrire dans les vraies boîtes Infomaniak en dev**. Les modules IMAP doivent supporter un mode `--dry-run` ou un compte mail de test. La première vraie connexion en prod sera surveillée par Cyril.
+⚠️ **Ne JAMAIS écrire dans les vraies boîtes Infomaniak en dev**. Les modules IMAP doivent supporter un mode `--dry-run` ou un compte mail de test. La première vraie connexion en prod sera surveillée par CDAL.
 
 ⚠️ **Ne JAMAIS envoyer de mail réel via Resend pendant les tests automatisés** — utiliser un mock ou `RESEND_API_KEY` vide (le module skip alors avec un warning).
 
@@ -136,27 +136,27 @@ Voir `docs/ROADMAP.md` pour l'état détaillé. À l'instant T (v1.6.1) :
 ## 8. Workflow de collaboration
 
 1. **Avant d'écrire du code**, lis `docs/SPEC.md` et `docs/ROADMAP.md`. Identifie la phase en cours (S1/S2/S3/S4).
-2. **Si une décision n'est pas dans la spec**, demande à Cyril. N'invente pas d'archi parallèle.
+2. **Si une décision n'est pas dans la spec**, demande à CDAL. N'invente pas d'archi parallèle.
 3. **Avant de toucher à un module existant**, lis-le en entier. La plupart sont des stubs avec des TODO clairs marqués par phase.
 4. **Tests d'abord** quand c'est un module pur (RAG retrieve, prefilter, language detect, prompt assembly). IMAP/LLM peuvent rester en intégration manuelle au début.
-5. **Quand tu termines une étape de la roadmap**, coche la case correspondante dans `docs/ROADMAP.md` et propose à Cyril de passer à la suivante.
+5. **Quand tu termines une étape de la roadmap**, coche la case correspondante dans `docs/ROADMAP.md` et propose à CDAL de passer à la suivante.
 
 ---
 
-## 9. Pré-requis bloquants attendus de Cyril
+## 9. Pré-requis bloquants attendus de CDAL
 
 Pour avancer sur S1, j'ai besoin de :
 - [ ] Les 3 fichiers `.sqlite` anonymisés déposés dans `data/`
 - [ ] Le schéma de chaque DB (`sqlite3 data/boiteX.sqlite ".schema"`)
 - [ ] `.env` rempli avec : 3 `MAILBOX_*_APP_PASSWORD` Infomaniak, `OLLAMA_PRO_API_KEY`, `RESEND_API_KEY`
 - [ ] Domaine Resend `agent@digitalhs.biz` vérifié (sinon adapter `RESEND_FROM`)
-- [ ] Token Telegram bot créé via @BotFather + `TELEGRAM_CHAT_ID` du compte de test (Cyril) pour la phase S1-S3
+- [ ] Token Telegram bot créé via @BotFather + `TELEGRAM_CHAT_ID` du compte de test (CDAL) pour la phase S1-S3
 
 ---
 
 ## 10. Mémoire et préférences user
 
-L'utilisateur (Cyril) :
+L'utilisateur (CDAL) :
 - Communique en français, écrit court, parfois fautes de frappe rapides — décoder l'intention.
 - Préfère brainstormer avant d'implémenter.
 - N'aime pas l'over-engineering : MVP simple d'abord, V2 quand qualité prouvée.

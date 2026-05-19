@@ -119,7 +119,7 @@ class BibleDoc(BaseDocTemplate):
     def __init__(self, filename: str, **kw) -> None:
         super().__init__(filename, pagesize=A4, leftMargin=2 * cm,
                          rightMargin=2 * cm, topMargin=2 * cm, bottomMargin=2 * cm,
-                         title="Bible Detective.be Agent", author="Cyril Dal — Digital HS",
+                         title="Bible Detective.be Agent", author="CDAL — Digital HS",
                          **kw)
         cover_frame = Frame(self.leftMargin, self.bottomMargin,
                             self.width, self.height, id="cover")
@@ -145,7 +145,7 @@ def _draw_footer(canvas, doc):
     canvas.saveState()
     canvas.setFont("Helvetica", 8)
     canvas.setFillColor(MUTED)
-    canvas.drawString(2 * cm, 1.2 * cm, "Bible Detective.be Agent — Cyril Dal / Digital HS")
+    canvas.drawString(2 * cm, 1.2 * cm, "Bible Detective.be Agent — CDAL / Digital HS")
     canvas.drawRightString(A4[0] - 2 * cm, 1.2 * cm, f"page {doc.page - 1}")
     canvas.restoreState()
 
@@ -222,7 +222,7 @@ def build_story() -> list:
     cover_table = Table([
         ["Client", "Daniel Hurchon — Detective.be"],
         ["Marques", "Detective Belgique · Detective Belgium · DPDH Investigations"],
-        ["Intégrateur", "Cyril Dal — Digital HS (cdal@digitalhs.biz)"],
+        ["Intégrateur", "CDAL — Digital HS (cdal@digitalhs.biz)"],
         ["Hébergement", "VPS Hostinger KVM8 (production) / Mac local (développement)"],
         ["LLM principal", "Kimi K2 via Ollama Pro · LiteLLM · OpenRouter (fallback)"],
         ["Date d'édition", date.today().strftime("%d %B %Y")],
@@ -265,7 +265,7 @@ def build_story() -> list:
         "anonymisées (RAG sur sqlite-vec)."
     ))
     s.append(p(
-        "Au MVP, les brouillons sont envoyés par email à Cyril Dal (intégrateur) via Resend pour "
+        "Au MVP, les brouillons sont envoyés par email à CDAL (intégrateur) via Resend pour "
         "validation qualité avant transfert à Daniel. La bascule vers dépôt direct dans le dossier "
         "Drafts IMAP de Daniel est planifiée en V2, après deux à quatre semaines de calibration."
     ))
@@ -348,7 +348,7 @@ def build_story() -> list:
         "[IMAP STORE] flag $AgentProcessed sur le mail entrant\n"
         "         |\n"
         "         v\n"
-        "[Cyril valide -> forward à Daniel pour envoi]"
+        "[CDAL valide -> forward à Daniel pour envoi]"
     ))
     s.append(p("3.2 Sous-systèmes (briques modulaires)", H2))
     s.append(table_header([
@@ -359,7 +359,7 @@ def build_story() -> list:
         ["4", "Détection langue", "fasttext FR/NL/EN, défaut = langue de la boîte"],
         ["5", "RAG retrieval", "Top-K paires Q/R similaires depuis sqlite-vec"],
         ["6", "Generator", "Assemblage prompt système + few-shot + appel LLM"],
-        ["7", "Delivery (Resend)", "Email HTML formaté → Cyril (MVP)"],
+        ["7", "Delivery (Resend)", "Email HTML formaté → CDAL (MVP)"],
         ["8", "Healthcheck + alertes", "FastAPI /health + bot Telegram"],
     ], col_widths=(0.8 * cm, 4 * cm, 11.2 * cm)))
     s.append(PageBreak())
@@ -651,7 +651,7 @@ def build_story() -> list:
         "├── venv/\n"
         "└── logs/"
     ))
-    s.append(p("8.2 En développement local (Mac Cyril)", H2))
+    s.append(p("8.2 En développement local (Mac CDAL)", H2))
     s.append(p(
         "Identique, à la racine <font face='Courier'>/Users/cdal/DEV_APP_CLAUDE/DETECTIVE_BE/</font>."
     ))
@@ -677,7 +677,7 @@ def build_story() -> list:
         s[-1].bulletText = "–"
 
     s.append(p(
-        "Cyril relit, ajuste si besoin, transmet à Daniel via forward standard. Quand la qualité est "
+        "CDAL relit, ajuste si besoin, transmet à Daniel via forward standard. Quand la qualité est "
         "stabilisée (mesurée sur 2-4 semaines), bascule en V2 vers dépôt IMAP direct dans le dossier "
         "<font face='Courier'>Drafts</font> natif de Daniel."
     ))
@@ -745,7 +745,7 @@ def build_story() -> list:
     s.append(p("13. Roadmap (S1 → V3)", H1))
     s.append(p(
         "État courant : Phase 0 (brainstorm + scaffolding) terminée. S1 démarre dès que les "
-        "pré-requis bloquants côté Cyril sont fournis (DB SQLite, schéma, .env rempli)."
+        "pré-requis bloquants côté CDAL sont fournis (DB SQLite, schéma, .env rempli)."
     ))
 
     s.append(p("Phase 0 — Brainstorm & cadrage (terminée 2026-05-13)", H2))
@@ -871,7 +871,7 @@ def build_story() -> list:
 
     # ---------- 15. SETUP & DÉPLOIEMENT ----------
     s.append(p("15. Setup local & déploiement", H1))
-    s.append(p("15.1 Setup local (Mac Cyril)", H2))
+    s.append(p("15.1 Setup local (Mac CDAL)", H2))
     s.append(code(
         "cd /Users/cdal/DEV_APP_CLAUDE/DETECTIVE_BE\n"
         "python3 -m venv venv\n"

@@ -1,7 +1,7 @@
 # SPEC — Agent IA email Detective.be (MVP)
 
 > Document figé issu du brainstorm de cadrage 2026-05-13.
-> Toute déviation doit être discutée avec Cyril.
+> Toute déviation doit être discutée avec CDAL.
 
 ---
 
@@ -9,9 +9,9 @@
 
 Daniel Hurchon (Detective.be) gère seul 3 boîtes mail Infomaniak correspondant à 3 marques (Detective Belgique FR, Detective Belgium EN/multi, DPDH Investigations). Volume : ~50 mails/jour entrants, mélangeant demandes clients, factures, newsletters, spam et urgences. Daniel répond à tout lui-même depuis Outlook ou Apple Mail, en FR/NL/EN selon la langue du client. Il perd un temps considérable et la qualité varie selon sa charge.
 
-**Objectif MVP** : un agent qui poll les 3 boîtes toutes les 5 min, classifie les mails entrants, et **uniquement pour les demandes clients** génère un brouillon de réponse "à la Daniel" en exploitant un corpus de 1200 paires Q/R historiques déjà anonymisées dans 3 DB SQLite. **Au MVP, les brouillons sont livrés par email à `cdal@digitalhs.biz`** (Cyril, l'intégrateur) qui valide la qualité avant transfert à Daniel. La bascule vers dépôt direct dans Drafts IMAP de Daniel se fera en V2.
+**Objectif MVP** : un agent qui poll les 3 boîtes toutes les 5 min, classifie les mails entrants, et **uniquement pour les demandes clients** génère un brouillon de réponse "à la Daniel" en exploitant un corpus de 1200 paires Q/R historiques déjà anonymisées dans 3 DB SQLite. **Au MVP, les brouillons sont livrés par email à `cdal@digitalhs.biz`** (CDAL, l'intégrateur) qui valide la qualité avant transfert à Daniel. La bascule vers dépôt direct dans Drafts IMAP de Daniel se fera en V2.
 
-**Canal Telegram Boss ↔ Charlie** : en parallèle du pipeline email, Charlie (l'agent IA) dispose d'un canal Telegram direct avec Daniel. Daniel peut interagir avec Charlie en direct (résumés, validations, questions rapides). En phase test, le bot est connecté au compte Telegram de Cyril ; en prod, il sera migré sur le VPS Hostinger.
+**Canal Telegram Boss ↔ Charlie** : en parallèle du pipeline email, Charlie (l'agent IA) dispose d'un canal Telegram direct avec Daniel. Daniel peut interagir avec Charlie en direct (résumés, validations, questions rapides). En phase test, le bot est connecté au compte Telegram de CDAL ; en prod, il sera migré sur le VPS Hostinger.
 
 ---
 
@@ -67,14 +67,14 @@ Daniel Hurchon (Detective.be) gère seul 3 boîtes mail Infomaniak correspondant
          ↓
 [IMAP STORE] flag $AgentProcessed sur le mail entrant
          ↓
-[Cyril valide → forward à Daniel pour envoi]
+[CDAL valide → forward à Daniel pour envoi]
 
 [Canal parallèle : Telegram Boss ↔ Charlie]
 Bot Telegram (python-telegram-bot / aiogram)
   - Commandes : /status, /resume, /approve, /reject, /ask
   - Notifications push : nouveau brouillon généré (résumé + lien)
   - Réponses conversationnelles : RAG + style Daniel pour questions directes
-  - Phase test : compte Cyril  |  Phase prod : compte Daniel sur KVM8
+  - Phase test : compte CDAL  |  Phase prod : compte Daniel sur KVM8
 ```
 
 ---
@@ -139,7 +139,7 @@ Bot Telegram (python-telegram-bot / aiogram)
     └── detective-agent-healthcheck.timer
 ```
 
-En dev local (Mac Cyril), le code vit dans `/Users/cdal/DEV_APP_CLAUDE/DETECTIVE_BE/` avec la même structure relative.
+En dev local (Mac CDAL), le code vit dans `/Users/cdal/DEV_APP_CLAUDE/DETECTIVE_BE/` avec la même structure relative.
 
 ---
 
@@ -196,13 +196,13 @@ Le brouillon est envoyé par email à `cdal@digitalhs.biz` via Resend, formaté 
   - Mail original (intégral)
   - Top 3 cas RAG utilisés (extraits + scores similarité)
 
-Cyril relit, ajuste si besoin, transmet à Daniel via forward standard. Quand qualité stabilisée (mesurée sur 2-4 semaines), bascule en V2 vers dépôt IMAP direct dans le dossier `Drafts` natif de Daniel.
+CDAL relit, ajuste si besoin, transmet à Daniel via forward standard. Quand qualité stabilisée (mesurée sur 2-4 semaines), bascule en V2 vers dépôt IMAP direct dans le dossier `Drafts` natif de Daniel.
 
 ### Canal Telegram Boss ↔ Charlie (parallèle)
 
 Un bot Telegram notifie **Daniel** en direct pour les événements importants et lui permet d'interagir avec Charlie :
 
-- **Notifications push** : résumé du brouillon généré (pas le texte complet, juste un aperçu + lien vers l'email complet chez Cyril)
+- **Notifications push** : résumé du brouillon généré (pas le texte complet, juste un aperçu + lien vers l'email complet chez CDAL)
 - **Commandes disponibles** :
   - `/status` — état de l'agent, dernière classification, queue en attente
   - `/resume [n]` — résumé des `n` derniers mails traités
@@ -211,7 +211,7 @@ Un bot Telegram notifie **Daniel** en direct pour les événements importants et
   - `/ask <question>` — poser une question libre à Charlie (RAG + style Daniel)
 - **Ton** : Charlie est professionnel mais accessible, utilise le vouvoiement, signe parfois "— Charlie" pour les réponses conversationnelles
 - **Multilingue** : répond dans la langue de la question (FR/NL/EN)
-- **Phase test** : bot connecté au Telegram de Cyril pour itérer sans déranger Daniel
+- **Phase test** : bot connecté au Telegram de CDAL pour itérer sans déranger Daniel
 - **Phase prod** : migré sur KVM8, token reconfiguré pour le compte de Daniel
 
 ---
