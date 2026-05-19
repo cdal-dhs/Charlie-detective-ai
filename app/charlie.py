@@ -76,8 +76,15 @@ RÉPONSE: <ta réponse>
    7. Quand Daniel demande le contenu, le détail ou un résumé d'un dossier,
    utilise la colonne `body` (contenu complet) dans ton SELECT, pas `body_preview`.
    Inclus aussi `ai_draft` si pertinent.
-8. Quand Daniel cherche des emails par mot-clé (lieu, nom, sujet, référence, etc.),
-   cherche dans `subject`, `body_preview`, `body` ET `ai_draft` via des clauses LIKE OR.
+8. **DEUX modes de recherche — ne les confonds pas :**
+   - **Mode A : recherche par TYPE d'enquête** (filature, adultère, disparition,
+     garde d'enfant, contrôle de résidence, harcèlement, etc.) :
+     Utilise UNIQUEMENT `category = 'xxx'` exacte. Ne mets JAMAIS de LIKE OR
+     sur `subject`, `body` ou `ai_draft` dans ce mode — cela attrape des emails
+     non pertinents (factures, newsletters, spam).
+   - **Mode B : recherche par mot-clé spécifique** (nom de client, référence de
+     dossier, lieu, adresse, etc.) :
+     Tu peux utiliser des LIKE OR sur `subject`, `body_preview`, `body` et `ai_draft`.
    Inclus `id` et `subject` dans le SELECT pour permettre des liens cliquables.
 9. Quand Daniel demande un résumé ou une synthèse, ta RÉPONSE doit
    contenir le résumé en langage naturel — pas juste une liste de champs.
@@ -95,8 +102,9 @@ RÉPONSE: <ta réponse>
     - "contrôle de résidence" → cherche `controle_residence`, `residence`, `domicile`
     - "garde d'enfant" ou "pension" → cherche `enquete_famille`, `garde`, `pension`, `famille`
     - "harcèlement" → cherche `harcelement`, `intimidation`
-    Quand Daniel utilise un terme familier, élargis TOUJOURS ta recherche SQL
-    avec les synonymes métier via des clauses LIKE OR.
+    Quand Daniel utilise un terme familier pour un TYPE d'enquête, tu dois
+    chercher par `category` exacte correspondante (Mode A). Les synonymes
+    ne servent que pour toi, pas pour générer des LIKE OR dans le SQL.
 13. Quand tu présentes des résultats (emails, dossiers, archives), classe-les
     TOUJOURS du PLUS RÉCENT au PLUS ANCIEN (`ORDER BY received_at DESC`).
     Le dossier le plus récent doit apparaître en premier, sans exception.
@@ -541,25 +549,46 @@ async def ask_charlie(
     # Le vault et la mémoire Charlie ne bloquent PAS la recherche historique :
     # ce sont des sources de contexte, pas de données structurées. Si SQL
     # retourne 0, on cherche TOUJOURS dans les archives (boite1/2/3).
-    is_historical = False
+    #
+    # Garde anti-faux-positif : si le SQL a retourné des lignes mais qu'aucune
+    # n'a la catégorie attendue (ex: LIKE '%filature%' a attrapé une facture),
+    # on considère que SQL n'a pas de données pertinentes et on cherche archives.
     year_filter = _extract_year(question)
-    if sql and not has_sql_data:
-        # Dernier recours : archives historiques (boite1/2/3) par catégorie
-        histo_rows = []
-        # Utilise la question enrichie (synonymes injectés) pour matcher les catégories
-        q_norm = _normalize(enriched_question)
-        for type_key, cat in _ENQUETE_TO_CATEGORY.items():
-            if type_key in q_norm:
-                histo_rows = await _search_historical_by_category(
-                    db_path, cat, year=year_filter, limit=20,
-                )
-                if histo_rows:
-                    log.info("charlie.historical_found", category=cat, count=len(histo_rows), year=year_filter)
-                    result.rows = histo_rows
-                    is_historical = True
-                    has_sql_data = True
-                    break
-        if not has_sql_data:
+    matched_category: str | None = None
+    q_norm = _normalize(enriched_question)
+    for type_key, cat in _ENQUETE_TO_CATEGORY.items():
+        if type_key in q_norm:
+            matched_category = cat
+            break
+
+    # Vérifier la pertinence des résultats SQL pour les recherches par type
+    if sql and has_sql_data and matched_category and result.rows:
+        pertinent_rows = [
+            r for r in result.rows
+            if (r.get("category") or "").upper() == matched_category.upper()
+        ]
+        if not pertinent_rows:
+            log.warning(
+                "charlie.sql_faux_positif",
+                category=matched_category,
+                sql_rows=len(result.rows),
+                first_cat=str(result.rows[0].get("category")) if result.rows else None,
+            )
+            has_sql_data = False
+            # On garde les rows SQL en mémoire mais on va aussi chercher archives
+
+    # Recherche archives : déclenchée quand SQL vide OU faux-positif
+    is_historical = False
+    if sql and not has_sql_data and matched_category:
+        histo_rows = await _search_historical_by_category(
+            db_path, matched_category, year=year_filter, limit=20,
+        )
+        if histo_rows:
+            log.info("charlie.historical_found", category=matched_category, count=len(histo_rows), year=year_filter)
+            result.rows = histo_rows
+            is_historical = True
+            has_sql_data = True
+        else:
             if result.sql_error is None:
                 result.response_text = "Aucun email trouvé pour cette recherche."
             else:

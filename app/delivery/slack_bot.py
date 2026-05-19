@@ -91,9 +91,11 @@ def format_charlie_response(result: CharlieResult, base_url: str) -> list[dict]:
             "type": "section",
             "text": {"type": "mrkdwn", "text": f":x: _Erreur SQL : {result.sql_error}_"},
         })
-    elif result.rows is not None and len(result.rows) > 0:
-        blocks.append({"type": "divider"})
-        blocks.extend(_format_rows_blocks(result.rows, base_url))
+    # NOTE : on n'affiche PLUS les rows bruts ici. Le LLM a déjà reçu les
+    # données via _sanitize_rows_for_prompt() et a rédigé une réponse
+    # conversationnelle. Afficher un dump technique en dessous gâche
+    # l'expérience et peut fuiter des données sensibles.
+    # Les rows restent disponibles dans l'inbox web, pas dans Slack.
 
     if result.vault_notes:
         blocks.append({"type": "divider"})
