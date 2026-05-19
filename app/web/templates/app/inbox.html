@@ -176,6 +176,7 @@
     <!-- Fenêtre modale centrée -->
     <div
       x-show="open"
+      x-cloak
       x-transition:enter="transition ease-out duration-200"
       x-transition:enter-start="opacity-0 scale-95"
       x-transition:enter-end="opacity-100 scale-100"
@@ -283,13 +284,13 @@
         messages.scrollTop = messages.scrollHeight;
         const patienceId = 'patience-' + Date.now();
         const patienceMsgs = [
-          'OK, je vérifie...',
-          'Ça marche, je check...',
-          'Bien reçu, je regarde...',
-          'Je consulte ton second cerveau...',
-          'Un instant, je fouille...',
-          'C'est noté, je cherche...',
-          'Je branche mes neurones...',
+          "OK, je vérifie...",
+          "Ça marche, je check...",
+          "Bien reçu, je regarde...",
+          "Je consulte ton second cerveau...",
+          "Un instant, je fouille...",
+          "C'est noté, je cherche...",
+          "Je branche mes neurones...",
         ];
         const patienceMsg = patienceMsgs[Math.floor(Math.random() * patienceMsgs.length)];
         messages.insertAdjacentHTML('beforeend',
