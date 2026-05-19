@@ -320,20 +320,36 @@ _ENQUETE_TO_CATEGORY: dict[str, str] = {
 async def _search_historical_by_category(
     db_path: Path, category: str, limit: int = 5,
 ) -> list[dict]:
-    """Cherche dans les 3 DB historiques (boite1/2/3) par catégorie fine."""
+    """Cherche dans les 3 DB historiques (boite1/2/3) par catégorie fine.
+
+    Filtres appliqués :
+    - body_preview non vide et significatif (>30 caractères)
+    - subject ni générique ni spam ('Nouveau Message De Détective', 'Formulaire', etc.)
+    - sender ni noreply ni no-reply
+    """
     data_dir = db_path.parent
     results: list[dict] = []
+    generic_subjects = ("%Nouveau Message De Détective%", "%Formulaire%", "%Contact%")
     for db_name in ("boite1.sqlite", "boite2.sqlite", "boite3.sqlite"):
         db_file = data_dir / db_name
         if not db_file.exists():
             continue
         try:
             async with aiosqlite.connect(db_file) as db:
-                cursor = await db.execute(
+                sql = (
                     "SELECT id, subject, sender, date, body_preview, category "
-                    "FROM emails WHERE category = ? ORDER BY date DESC LIMIT ?",
-                    (category, limit),
+                    "FROM emails WHERE category = ? "
+                    "AND body_preview IS NOT NULL AND LENGTH(body_preview) > 30 "
+                    "AND sender NOT LIKE '%noreply%' "
+                    "AND sender NOT LIKE '%no-reply%' "
                 )
+                params: list = [category]
+                for gs in generic_subjects:
+                    sql += "AND subject NOT LIKE ? "
+                    params.append(gs)
+                sql += "ORDER BY date DESC LIMIT ?"
+                params.append(limit)
+                cursor = await db.execute(sql, tuple(params))
                 rows = await cursor.fetchall()
                 for row in rows:
                     results.append({

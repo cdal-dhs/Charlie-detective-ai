@@ -21,6 +21,7 @@
 
 ### Corrigé
 - **Fix JS Alpine.js** : apostrophe dans `'C'est noté...'` rompait la chaîne JS, plantant `charlieData()`. La modale restait visible et impossible à fermer. Remplacé par des double-quotes + ajout `x-cloak`.
+- **Filtre archives historiques** : `_search_historical_by_category()` exclut désormais les emails génériques (`subject NOT LIKE '%Nouveau Message De Détective%'`, `%Formulaire%`, `%Contact%`), les expéditeurs `noreply`, et exige un `body_preview` significatif (`LENGTH(body_preview) > 30`). Empêche Charlie de présenter du spam comme un dossier client.
 
 ---
 
