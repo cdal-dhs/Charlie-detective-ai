@@ -254,16 +254,15 @@ Question de Daniel : {question}
 Résultats SQL ({count} lignes) :
 {rows}
 
-Rédige une réponse en français, concise et directe :
-- Parle à Daniel comme à ton partenaire. Pas de langue de bois.
-- Si Daniel demande un résumé ou une synthèse, analyse le contenu des mails
-  et raconte l'histoire. Qui, quoi, quand, pourquoi.
-- Si Daniel demande un détail, présente l'info de façon lisible et vivante.
-- Si les résultats sont une simple liste, présente-les proprement.
-- **Liens cliquables** : quand tu cites un email spécifique, formate son sujet
-  comme un lien markdown vers l'inbox : `[Sujet de l'email](/inbox?q=mot-clef)`.
-  Utilise un mot-clef unique du sujet (ex: référence dossier, nom client).
-- Si aucun résultat, dis-le simplement avec une touche d'humour.
+RÈGLES ABSOLUES :
+1. **NE JAMAIS afficher les champs techniques bruts** (id, sender, body_preview, source_db, etc.).
+   Daniel ne veut PAS voir de dump de base de données.
+2. **NE JAMAIS afficher les expéditeurs réels** ou le contenu brut des emails.
+3. Si les résultats sont une simple liste, présente-les proprement sous forme de liste à puces.
+4. **Liens cliquables** : quand tu cites un email spécifique, formate son sujet
+   comme un lien markdown vers l'inbox : `[Sujet de l'email](/inbox?q=mot-clef)`.
+   Utilise un mot-clef unique du sujet (ex: référence dossier, nom client).
+5. Si aucun résultat, dis-le simplement avec une touche d'humour.
 """
 
 _SUMMARY_PROMPT_VAULT = """Tu es Charlie, l'assistant IA personnel de Daniel Hurchon,
@@ -285,18 +284,20 @@ Notes du second cerveau ({vault_count}) :
 Souvenirs de Charlie ({memory_count}) :
 {memory_notes}
 
-Rédige une réponse en français, **conversationnelle et directe** :
-- **Parle à Daniel comme à ton partenaire.** Pas de langue de bois.
-- **Ne liste pas brute** les champs techniques (type, direction, heure null, etc.).
-- **Raconte l'histoire** : qui est le client, de quoi parle ce dossier,
-  quelles sont les étapes clés, qui a écrit à qui et quand.
-- Synthétise les emails ET les notes du vault en un récit cohérent et fluide.
-- **Liens cliquables** : chaque fois que tu mentionnes un email spécifique,
-  formate son sujet comme un lien markdown vers l'inbox :
-  `[Sujet de l'email](/inbox?q=mot-clef)`.
-  Utilise un mot-clef unique du sujet (ex: référence dossier AS445, nom client).
-- Si les notes du vault apportent un contexte historique, intègre-le naturellement.
-- Si aucun résultat nulle part, dis-le simplement à Daniel avec une touche d'humour.
+RÈGLES ABSOLUES :
+1. **NE JAMAIS afficher les champs techniques bruts** (id, sender, body_preview, source_db, type, direction, heure null, etc.).
+   Daniel ne veut PAS voir de dump de base de données.
+2. **NE JAMAIS afficher les expéditeurs réels** ou le contenu brut des emails.
+3. **Ne liste pas brute** les champs techniques.
+4. **Raconte l'histoire** : qui est le client, de quoi parle ce dossier,
+   quelles sont les étapes clés, qui a écrit à qui et quand.
+5. Synthétise les emails ET les notes du vault en un récit cohérent et fluide.
+6. **Liens cliquables** : chaque fois que tu mentionnes un email spécifique,
+   formate son sujet comme un lien markdown vers l'inbox :
+   `[Sujet de l'email](/inbox?q=mot-clef)`.
+   Utilise un mot-clef unique du sujet (ex: référence dossier AS445, nom client).
+7. Si les notes du vault apportent un contexte historique, intègre-le naturellement.
+8. Si aucun résultat nulle part, dis-le simplement à Daniel avec une touche d'humour.
 """
 
 
@@ -529,6 +530,7 @@ async def ask_charlie(
     # Le vault et la mémoire Charlie ne bloquent PAS la recherche historique :
     # ce sont des sources de contexte, pas de données structurées. Si SQL
     # retourne 0, on cherche TOUJOURS dans les archives (boite1/2/3).
+    is_historical = False
     if sql and not has_sql_data:
         # Dernier recours : archives historiques (boite1/2/3) par catégorie
         histo_rows = []
@@ -540,7 +542,7 @@ async def ask_charlie(
                 if histo_rows:
                     log.info("charlie.historical_found", category=cat, count=len(histo_rows))
                     result.rows = histo_rows
-                    # Laisser le summary détailler les résultats historiques
+                    is_historical = True
                     has_sql_data = True
                     break
         if not has_sql_data:
@@ -549,6 +551,13 @@ async def ask_charlie(
             else:
                 result.response_text = f"Erreur SQL : {result.sql_error}"
             return result
+    # Si les résultats viennent des archives historiques : formater DIRECTEMENT
+    # sans passer par le LLM. Cela évite toute fuite de données dans le prompt
+    # ET accélère la réponse.
+    if is_historical and result.rows:
+        result.response_text = _format_historical_response(question, result.rows)
+        return result
+
     # Si le vault a des données mais SQL est vide → forcer synthèse conversationnelle
     force_summary = has_vault_data and not has_sql_data
     needs_summary = _needs_summary(question)
@@ -666,6 +675,57 @@ def _is_vault_relevant(question: str, sql: str) -> bool:
     return any(kw in q for kw in _VAULT_KEYWORDS)
 
 
+def _sanitize_rows_for_prompt(rows: list[dict]) -> str:
+    """Convertit les rows en texte anonymisé pour le prompt LLM.
+    Ne garde que les champs publics (subject, received_at, category).
+    Masque ABSOLUMENT : id, sender, body_preview, body, source_db.
+    """
+    lines: list[str] = []
+    for r in rows[:20]:
+        subject = r.get("subject") or "Sans sujet"
+        received = r.get("received_at") or r.get("date") or ""
+        cat = r.get("category") or ""
+        line = f"- Sujet: {subject}"
+        if cat:
+            line += f" | Catégorie: {cat}"
+        if received:
+            line += f" | Date: {received}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _format_historical_response(question: str, rows: list[dict]) -> str:
+    """Formate une réponse directe pour les résultats historiques (archives).
+    Ne passe PAS par le LLM — confidentialité + vitesse."""
+    if not rows:
+        return "Aucun dossier trouvé dans les archives."
+
+    count = len(rows)
+    # Détecter la catégorie pour le titre
+    cat_display = ""
+    if rows:
+        cat = rows[0].get("category", "").lower().replace("_", " ")
+        if cat:
+            cat_display = f" {cat}"
+
+    lines = [
+        f"J'ai trouvé **{count} dossier{'s' if count > 1 else ''}{cat_display}** dans les archives :",
+        "",
+    ]
+    for r in rows[:15]:
+        subject = r.get("subject") or "Sans sujet"
+        date = r.get("received_at") or r.get("date") or ""
+        # Lien cliquable vers l'inbox avec un mot-clef unique
+        q = subject.split()[0] if subject else ""
+        link = f"[{subject}](/inbox?q={q})" if q else subject
+        lines.append(f"- {link} ({date})")
+
+    if count > 15:
+        lines.append(f"\n… et {count - 15} autres.")
+
+    return "\n".join(lines)
+
+
 async def _summarize_results(
     question: str,
     rows: list[dict],
@@ -674,10 +734,12 @@ async def _summarize_results(
     model: str,
     settings,
 ) -> str | None:
-    """Appelle le LLM une seconde fois pour synthétiser les résultats SQL + vault."""
-    import json
+    """Appelle le LLM une seconde fois pour synthétiser les résultats SQL + vault.
 
-    rows_text = json.dumps(rows[:20], ensure_ascii=False, default=str)
+    ATTENTION : les rows sont pré-filtrés et anonymisés avant d'être envoyés au LLM.
+    Jamais de données brutes (sender, body_preview, id, source_db) dans le prompt.
+    """
+    rows_text = _sanitize_rows_for_prompt(rows)
 
     memory_text = ""
     if memory_notes:
