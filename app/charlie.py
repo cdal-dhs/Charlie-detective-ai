@@ -380,11 +380,18 @@ async def _search_historical_by_category(
         if not raw:
             return datetime.min
         try:
-            return parsedate_to_datetime(raw)
+            dt = parsedate_to_datetime(raw)
+            # Normaliser : toujours offset-naive pour comparaison homogène
+            if dt.tzinfo is not None:
+                return dt.replace(tzinfo=None)
+            return dt
         except Exception:
             pass
         try:
-            return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            if dt.tzinfo is not None:
+                return dt.replace(tzinfo=None)
+            return dt
         except Exception:
             pass
         return datetime.min
