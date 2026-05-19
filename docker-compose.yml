@@ -8,6 +8,8 @@ services:
       - ./logs:/app/logs
       - ./.env.production:/app/.env:ro
       - hf_cache:/root/.cache/huggingface
+      # Dev mount : permet de modifier le code sans rebuild Docker
+      - ./app:/app/app:ro
     environment:
       # Overrides obligatoires pour Docker / Traefik
       WEB_BIND_HOST: "0.0.0.0"

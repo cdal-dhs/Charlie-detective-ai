@@ -46,6 +46,9 @@ SQL: <ta requête SELECT sur une seule ligne, sans saut de ligne>
 ---
 RÉPONSE: <ta réponse à Daniel en français, courte et directe, en utilisant "tu">
 
+   IMPORTANT : ta RÉPONSE ne doit JAMAIS être un tableau markdown brut.
+   Rédige toujours en phrases, même pour une liste d'emails.
+
 3. Si la question ne nécessite pas de SQL (salutation, question générale),
    laisse SQL vide :
 
@@ -260,6 +263,8 @@ _NEEDS_SUMMARY_KEYWORDS = (
     "donne-moi le contenu", "de quoi parle",
     "sait", "connait", "connaitre", "quoi",
     "informations", "info", "dossier", "parle",
+    "contact", "qui", "personne", "nom", "client",
+    "email", "mail", "message", "a recu", "as recu",
 )
 
 _VAULT_KEYWORDS = (

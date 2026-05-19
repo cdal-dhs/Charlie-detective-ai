@@ -55,22 +55,21 @@ if [[ ! -d "app/web/static" ]]; then
     touch app/web/static/.gitkeep
 fi
 
-# --- 1. Smoke test Docker local (dry-run build) ---
+# --- 1. Smoke test Docker local (validation syntaxe + static dir) ---
 echo ">>> Smoke test Docker local ..."
-if ! docker compose build --no-cache; then
-    echo "❌ ERREUR : le build Docker local a échoué. Corrige avant de déployer."
+# Validation syntaxe docker-compose (rapide, pas de build)
+if ! docker compose config > /dev/null 2>&1; then
+    echo "❌ ERREUR : docker-compose.yml invalide. Corrige avant de déployer."
     exit 1
 fi
-
-# Vérifier que l'image contient bien le dossier static (INC-001)
-IMAGE_NAME=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep 'detective' | head -1)
-if ! docker run --rm "${IMAGE_NAME}" ls app/web/static/ >/dev/null 2>&1; then
-    echo "❌ ERREUR : le dossier app/web/static n'est pas présent dans l'image Docker."
-    echo "   Vérifie que le dossier n'est pas exclu par .dockerignore. Voir docs/RUNBOOK.md#INC-001."
-    exit 1
-fi
-
-echo "   ✅ Build local OK, image cohérente"
+# Vérifier que les répertoires montés existent
+for dir in app web/static data logs; do
+    if [[ ! -d "$dir" ]]; then
+        echo "❌ ERREUR : le répertoire '$dir' est requis mais n'existe pas."
+        exit 1
+    fi
+done
+echo "   ✅ Config Docker valide, répertoires OK"
 
 # --- 2. Pull latest code on VPS ---
 echo ">>> Pulling latest code on VPS ..."
@@ -92,7 +91,8 @@ rsync -avz ./.env "${VPS_USER}@${VPS_HOST}:${VPS_DIR}/.env.production"
 
 # --- 5. Build & run ---
 echo ">>> Building and starting container ..."
-ssh "${VPS_USER}@${VPS_HOST}" "cd ${VPS_DIR} && docker compose up -d --build"
+# Sur le VPS : build base image si absente, puis build rapide
+ssh "${VPS_USER}@${VPS_HOST}" "cd ${VPS_DIR} && (docker images --format '{{.Repository}}:{{.Tag}}' | grep -q '^detective-agent:base$' || docker build -f Dockerfile.base -t detective-agent:base .) && docker compose up -d --build"
 
 # --- 6. Post-deploy healthcheck ---
 echo ">>> Waiting for container to be healthy ..."

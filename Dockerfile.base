@@ -1,0 +1,21 @@
+# Image intermédiaire avec toutes les dépendances lourdes pré-installées
+# Build une seule fois : docker build -f Dockerfile.base -t detective-agent:base .
+# Puis le Dockerfile principal n'a plus qu'à copier le code (30s max)
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# System deps pour torch / sentence-transformers / build
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc g++ libffi-dev libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copier seulement pyproject.toml pour bénéficier du layer cache Docker
+COPY pyproject.toml .
+RUN pip install --no-cache-dir -e .
+
+EXPOSE 8080 8765
