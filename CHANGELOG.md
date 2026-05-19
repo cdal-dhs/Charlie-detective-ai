@@ -4,6 +4,26 @@
 
 ---
 
+## [1.9.5] — 2026-05-19
+
+### Ajouté
+- **Charlie devient bibliothécaire — mémoire persistante** :
+  - `app/charlie_memory.py` (nouveau) : table SQLite `charlie_memory` avec `save_memory()`, `query_memory()`, `is_save_request()`, `is_memory_query()`. Garde-fou de la grande bibliothèque de Daniel.
+  - `app/charlie.py` : Phase 2.5 (`query_memory()` si question de mémoire ou `dossier_id`). Phase 4 (`save_memory()` si Daniel demande de retenir/enregistrer/noter). Réponse confirmée : *"C'est noté dans ma mémoire, Daniel !"*
+  - `_summarize_results()` : injecte les souvenirs Charlie dans le prompt de synthèse via `_SUMMARY_PROMPT_VAULT` (placeholders `memory_count`, `memory_notes`).
+  - `app/main.py` : `init_memory_table()` au démarrage.
+- **Charlie détecte filature/surveillance** : mots-clés `filature`, `surveillance`, `observation`, `terrain` ajoutés aux déclencheurs vault et summary. Règle 11 du prompt : filature = surveillance, cherche catégorie DB ET interroge Cerveau2.
+- **Charlie la précieuse moitié** : prompts réécrits avec personnalité marquée ("prolongement de ton cerveau", ton direct/chaleureux, humour détective bienvenu).
+- **Date visible dans le tableau résultats** : colonne `received_at` en première position, formatée `2026-05-15 10:30`.
+- **Patience aléatoire** : message immédiat aléatoire avec spinner animé ("OK je vérifie", "Je consulte ton second cerveau", etc.) avant la réponse réelle.
+- **Mémoire conversationnelle** : `history[]` côté client (20 messages), envoyé à chaque requête. Charlie enchaîne les questions de suite avec contexte.
+- **Garde anti-hallucination** : si SQL retourne 0 ligne et vault vide, réponse forcée à *"Aucun email trouvé pour cette recherche."* sans appeler le LLM summary.
+
+### Corrigé
+- **Fix JS Alpine.js** : apostrophe dans `'C'est noté...'` rompait la chaîne JS, plantant `charlieData()`. La modale restait visible et impossible à fermer. Remplacé par des double-quotes + ajout `x-cloak`.
+
+---
+
 ## [1.9.4] — 2026-05-19
 
 ### Ajouté
