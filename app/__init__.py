@@ -1,6 +1,1 @@
-from importlib.metadata import PackageNotFoundError, version
-
-try:
-    __version__ = version("detective-agent")
-except PackageNotFoundError:
-    __version__ = "0.0.0"
+from app._version import VERSION as __version__  # noqa: F401
