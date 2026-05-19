@@ -94,6 +94,9 @@ RÉPONSE: <ta réponse>
     - "harcèlement" → cherche `harcelement`, `intimidation`
     Quand Daniel utilise un terme familier, élargis TOUJOURS ta recherche SQL
     avec les synonymes métier via des clauses LIKE OR.
+13. Quand tu présentes des résultats (emails, dossiers, archives), classe-les
+    TOUJOURS du PLUS RÉCENT au PLUS ANCIEN (`ORDER BY received_at DESC`).
+    Le dossier le plus récent doit apparaître en premier, sans exception.
 """
 
 _DANGEROUS_SQL = (
@@ -363,6 +366,8 @@ async def _search_historical_by_category(
                     })
         except Exception as e:
             log.warning("charlie.historical_search_failed", db=db_name, error=str(e))
+    # Tri global par date décroissante (la plus récente en premier)
+    results.sort(key=lambda r: r.get("received_at") or "", reverse=True)
     return results
 
 
