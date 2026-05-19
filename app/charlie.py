@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -440,38 +441,77 @@ async def ask_charlie(
             result.sql_safe = False
             return result
 
-        try:
-            rows = await run_sql(db_path, sql)
-            result.rows = rows
-        except Exception as e:
-            log.warning("charlie.sql_failed", sql=sql, error=str(e))
-            result.sql_error = str(e)
-            return result
-
-    # --- Phase 2 : appel vault (avant le summary pour qu'il en ait connaissance) ---
-    vault_notes = []
-    if _is_vault_relevant(question, sql) or dossier_id:
-        vault_notes = await query_vault(
-            question=question,
-            base_url=settings.cerveau2_base_url,
-            api_secret=settings.cerveau2_api_secret,
-            dossier_id=dossier_id,
-            limit=settings.cerveau2_limit,
+    # --- Phase 2 : SQL + vault + mémoire en parallèle ---
+    vault_notes: list[VaultNote] = []
+    memory_notes: list = []
+    if sql:
+        need_vault = not _is_count_query(sql) and (
+            _is_vault_relevant(question, sql) or dossier_id
         )
+        need_memory = is_memory_query(question) or dossier_id
+
+        async def _sql_task() -> list[dict]:
+            try:
+                return await run_sql(db_path, sql)
+            except Exception as e:
+                log.warning("charlie.sql_failed", sql=sql, error=str(e))
+                result.sql_error = str(e)
+                return []
+
+        async def _vault_task() -> list[VaultNote]:
+            if not need_vault:
+                return []
+            return await query_vault(
+                question=question,
+                base_url=settings.cerveau2_base_url,
+                api_secret=settings.cerveau2_api_secret,
+                dossier_id=dossier_id,
+                limit=settings.cerveau2_limit,
+            )
+
+        async def _memory_task() -> list:
+            if not need_memory:
+                return []
+            return await query_memory(
+                db_path=db_path,
+                question=question,
+                dossier_id=dossier_id,
+                limit=3,
+            )
+
+        rows, vault_notes, memory_notes = await asyncio.gather(
+            _sql_task(), _vault_task(), _memory_task(),
+        )
+        result.rows = rows
         result.vault_notes = vault_notes
-        log.info("charlie.vault_fetched", count=len(vault_notes), dossier_id=dossier_id)
-
-    # --- Phase 2.5 : mémoire Charlie (grand bibliothécaire) ---
-    memory_notes = []
-    if is_memory_query(question) or dossier_id:
-        memory_notes = await query_memory(
-            db_path=db_path,
-            question=question,
+        log.info(
+            "charlie.parallel_fetch",
+            sql_rows=len(rows),
+            vault=len(vault_notes),
+            memory=len(memory_notes),
             dossier_id=dossier_id,
-            limit=3,
         )
-        if memory_notes:
-            log.info("charlie.memory_fetched", count=len(memory_notes), dossier_id=dossier_id)
+    else:
+        # Pas de SQL généré : vault et mémoire restent disponibles seuls
+        if _is_vault_relevant(question, sql) or dossier_id:
+            vault_notes = await query_vault(
+                question=question,
+                base_url=settings.cerveau2_base_url,
+                api_secret=settings.cerveau2_api_secret,
+                dossier_id=dossier_id,
+                limit=settings.cerveau2_limit,
+            )
+            result.vault_notes = vault_notes
+            log.info("charlie.vault_fetched", count=len(vault_notes), dossier_id=dossier_id)
+        if is_memory_query(question) or dossier_id:
+            memory_notes = await query_memory(
+                db_path=db_path,
+                question=question,
+                dossier_id=dossier_id,
+                limit=3,
+            )
+            if memory_notes:
+                log.info("charlie.memory_fetched", count=len(memory_notes), dossier_id=dossier_id)
 
     # --- Phase 3 : summary intelligent avec les deux sources ---
     has_sql_data = result.rows and len(result.rows) > 0
@@ -612,6 +652,11 @@ def _normalize(text: str) -> str:
 def _needs_summary(question: str) -> bool:
     q = _normalize(question)
     return any(kw in q for kw in _NEEDS_SUMMARY_KEYWORDS)
+
+
+def _is_count_query(sql: str) -> bool:
+    """Détecte les requêtes COUNT(*) — inutile d'interroger le vault pour un simple comptage."""
+    return "count(" in sql.lower()
 
 
 def _is_vault_relevant(question: str, sql: str) -> bool:
