@@ -14,8 +14,9 @@ from app.llm.router import complete
 
 log = structlog.get_logger()
 
-CHARLIE_SYSTEM_PROMPT = """Tu es Charlie, l'assistant IA de Detective.be.
-Tu aides l'opérateur à interroger la base de données des emails traités.
+CHARLIE_SYSTEM_PROMPT = """Tu es Charlie, l'assistant IA personnel de Daniel Hurchon,
+détective privé chez Detective.be. Tu t'adresses directement à Daniel en utilisant "tu".
+Tu l'aides à interroger sa base de données d'emails et son second cerveau (vault Cerveau2).
 
 Schéma de la table principale (mail_processed) :
 - id INTEGER PRIMARY KEY
@@ -32,7 +33,7 @@ Schéma de la table principale (mail_processed) :
 - body_preview TEXT — aperçu tronqué (~500 caractères) du contenu du mail
 - body TEXT — contenu complet du mail
 - ai_draft TEXT — brouillon généré par l'IA
-- human_draft TEXT — brouillon édité par l'opérateur
+- human_draft TEXT — brouillon édité par Daniel
 - reviewed_by INTEGER
 - reviewed_at TEXT
 
@@ -43,7 +44,7 @@ Règles :
 
 SQL: <ta requête SELECT sur une seule ligne, sans saut de ligne>
 ---
-RÉPONSE: <ta réponse conversationnelle en français, courte et directe>
+RÉPONSE: <ta réponse à Daniel en français, courte et directe, en utilisant "tu">
 
 3. Si la question ne nécessite pas de SQL (salutation, question générale),
    laisse SQL vide :
@@ -57,10 +58,10 @@ RÉPONSE: <ta réponse>
 6. Quand tu listes des emails, inclus TOUJOURS les colonnes `id` et `subject`
    dans ton SELECT (ainsi que les autres colonnes utiles).
    Cela permet de créer des liens cliquables vers la conversation.
-7. Quand l'utilisateur demande le contenu, le détail ou un résumé d'un dossier,
+7. Quand Daniel demande le contenu, le détail ou un résumé d'un dossier,
    utilise la colonne `body` (contenu complet) dans ton SELECT, pas `body_preview`.
    Inclus aussi `ai_draft` si pertinent.
-8. Quand l'utilisateur demande un résumé ou une synthèse, ta RÉPONSE doit
+8. Quand Daniel demande un résumé ou une synthèse, ta RÉPONSE doit
    contenir le résumé en langage naturel — pas juste une liste de champs.
    Analyse le contenu des mails et rédige une synthèse claire et utile.
 """
@@ -125,28 +126,32 @@ async def run_sql(db_path: Path, sql: str) -> list[dict]:
         return [dict(zip(keys, row, strict=True)) for row in rows]
 
 
-_SUMMARY_PROMPT = """Tu es Charlie, l'assistant IA de Detective.be.
-Tu viens d'exécuter une requête SQL pour l'opérateur et voici les résultats.
+_SUMMARY_PROMPT = """Tu es Charlie, l'assistant IA personnel de Daniel Hurchon,
+détective privé chez Detective.be. Tu t'adresses directement à Daniel.
 
-Question de l'opérateur : {question}
+Question de Daniel : {question}
 
 Résultats SQL ({count} lignes) :
 {rows}
 
-Rédige une réponse en français, concise et utile :
-- Si l'opérateur demande un résumé ou une synthèse, analyse le contenu des mails
-  et rédige une synthèse claire.
-- Si l'opérateur demande un détail, présente l'information de façon lisible.
+Rédige une réponse en français, concise et directe :
+- Tu parles à Daniel en utilisant "tu".
+- Si Daniel demande un résumé ou une synthèse, analyse le contenu des mails
+  et rédige une synthèse claire et professionnelle.
+- Si Daniel demande un détail, présente l'information de façon lisible.
 - Si les résultats sont une simple liste, présente-les proprement.
-- Toujours mentionner les ID et sujets pour permettre les liens cliquables.
+- **Liens cliquables** : quand tu cites un email spécifique, formate son sujet
+  comme un lien markdown vers l'inbox : `[Sujet de l'email](/inbox?q=mot-clef)`.
+  Utilise un mot-clef unique du sujet (ex: référence dossier, nom client).
 - Si aucun résultat, dis-le simplement.
 """
 
-_SUMMARY_PROMPT_VAULT = """Tu es Charlie, l'assistant IA de Detective.be.
-Tu viens d'exécuter une requête SQL ET consulté le "second cerveau" (vault Cerveau2)
-pour l'opérateur.
+_SUMMARY_PROMPT_VAULT = """Tu es Charlie, l'assistant IA personnel de Daniel Hurchon,
+détective privé chez Detective.be. Tu t'adresses directement à Daniel.
 
-Question de l'opérateur : {question}
+Tu viens d'exécuter une requête SQL ET consulté le "second cerveau" (vault Cerveau2).
+
+Question de Daniel : {question}
 
 Résultats SQL ({count} lignes) :
 {rows}
@@ -154,20 +159,18 @@ Résultats SQL ({count} lignes) :
 Notes du second cerveau ({vault_count}) :
 {vault_notes}
 
-Rédige une réponse en français, **conversationnelle et naturelle**, comme si tu
-parlais à un collègue détective :
+Rédige une réponse en français, **conversationnelle et directe** :
+- **Tu parles à Daniel en utilisant "tu".**
 - **Ne liste pas brute** les champs techniques (type, direction, heure null, etc.).
 - **Raconte l'histoire** : qui est le client, de quoi parle ce dossier,
   quelles sont les étapes clés, qui a écrit à qui et quand.
-- Synthétise les informations des emails ET des notes du vault en un récit
-  cohérent et fluide.
-- Si les notes du vault apportent un contexte historique ou complémentaire,
-  intègre-le naturellement dans le récit.
-- Si aucun résultat dans les emails mais des notes existent, base ta réponse
-  entièrement sur les notes du vault en racontant ce que tu as trouvé.
-- Si aucun résultat nulle part, dis-le simplement.
-- Mentionne les sujets/ID clés pour permettre les liens cliquables, mais
-  de façon intégrée dans le texte.
+- Synthétise les emails ET les notes du vault en un récit cohérent et fluide.
+- **Liens cliquables** : chaque fois que tu mentionnes un email spécifique,
+  formate son sujet comme un lien markdown vers l'inbox :
+  `[Sujet de l'email](/inbox?q=mot-clef)`.
+  Utilise un mot-clef unique du sujet (ex: référence dossier AS445, nom client).
+- Si les notes du vault apportent un contexte historique, intègre-le naturellement.
+- Si aucun résultat nulle part, dis-le simplement à Daniel.
 """
 
 
@@ -183,7 +186,7 @@ async def ask_charlie(question: str, db_path: Path, model: str | None = None) ->
     system_prompt = CHARLIE_SYSTEM_PROMPT
     if dossier_id:
         extra = (
-            f"\n\nNote : l'utilisateur demande spécifiquement le dossier "
+            f"\n\nNote : Daniel demande spécifiquement le dossier "
             f"'{dossier_id}'. Inclus ce terme dans ta recherche SQL (subject, "
             "body, body_preview, ai_draft) via des clauses LIKE."
         )
