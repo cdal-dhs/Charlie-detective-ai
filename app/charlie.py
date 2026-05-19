@@ -238,7 +238,9 @@ async def ask_charlie(question: str, db_path: Path, model: str | None = None) ->
     # --- Phase 3 : summary intelligent avec les deux sources ---
     has_sql_data = result.rows and len(result.rows) > 0
     has_vault_data = vault_notes and len(vault_notes) > 0
-    if sql and _needs_summary(question) and (has_sql_data or has_vault_data):
+    # Si le vault a des données mais SQL est vide → forcer synthèse conversationnelle
+    force_summary = has_vault_data and not has_sql_data
+    if sql and (has_sql_data or has_vault_data) and (_needs_summary(question) or force_summary):
         summary = await _summarize_results(
             question, result.rows or [], vault_notes, model, settings,
         )
@@ -253,6 +255,8 @@ _NEEDS_SUMMARY_KEYWORDS = (
     "analyser", "analyse", "detail",
     "contenu", "explique", "expliquer", "que dit",
     "donne-moi le contenu", "de quoi parle",
+    "sait", "connait", "connaitre", "quoi",
+    "informations", "info", "dossier", "parle",
 )
 
 _VAULT_KEYWORDS = (
