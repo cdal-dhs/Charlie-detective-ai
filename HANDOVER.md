@@ -98,7 +98,7 @@ DETECTIVE_BE/
 
 ---
 
-## 4. État des fonctionnalités (v1.9.3)
+## 4. État des fonctionnalités (v1.9.4)
 
 ### ✅ Opérationnel en production
 - Pipeline IMAP complet : polling 3 boîtes, classification 8 catégories, priorité intelligente
@@ -108,6 +108,7 @@ DETECTIVE_BE/
 - Slack Bot Charlie AI : @mention et DM sur #detective
 - **Charlie AI × Cerveau2 vault** : recherche dans le second cerveau depuis le chat web et Slack
 - **Recherche par dossier spécifique** : extraction auto `dossier_id` (ex: "ADF"), prompt enrichi SQL + vault forcé
+- **Pipeline Cerveau2 ingestion continue** : hook IMAP post-persist qui alimente Cerveau2 pour tout mail sauf newsletter/phishing. Migration historique one-shot via `scripts/bootstrap_cerveau2.py`.
 - Logs JSON structurés, rotation 7j
 - Newsletter digest quotidien Slack
 

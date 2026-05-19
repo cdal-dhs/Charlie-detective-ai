@@ -4,6 +4,18 @@
 
 ---
 
+## [1.9.4] — 2026-05-19
+
+### Ajouté
+- **Pipeline Cerveau2 — ingestion continue + migration historique** :
+  - `app/cerveau_dossier.py` (nouveau) : logique de dérivation `dossier_id` avec finesse maximale. Priorité : (1) référence de dossier extraite du sujet via regex (`ADF`, `PRJ2024`), (2) nom anonymisé du client, (3) partie locale de l'email. Helper `derive_dossier_id_from_state()` pour lire `agent_state.db`.
+  - `app/cerveau_client.py` : nouvelle fonction `feed_correspondance()` qui POST sur `/ingest-email` de Cerveau2. Retry 3× avec backoff exponentiel, gestion silencieuse des doublons (HTTP 409), dégradation silencieuse si Cerveau2 est down.
+  - `app/workers/imap_poller.py` : hook post-`persist()` qui alimente Cerveau2 en fire-and-forget pour **tout mail entrant sauf newsletter et phishing**. La langue détectée est réutilisée pour les `demande_client`.
+  - `scripts/bootstrap_cerveau2.py` (nouveau) : script one-shot d'import historique depuis les 3 DB SQLite. Mappe les 12 catégories DB historiques vers les catégories fines Cerveau2 (`infidelite`, `surveillance`, `enquete_famille`, `recherche_personne`, `controle_residence`, `investigation_entreprise`, `test_materiel`, `collaboration`, `harcelement`, etc.). Supporte `--dry-run`, `--limit`, `--batch-size`. Gère aussi la table `sent_emails` (direction `out`).
+  - `tests/test_cerveau_feed.py` (nouveau) : 8 tests anti-régression couvrant extraction de `dossier_id`, dérivation par référence/anonymisé/sender, et le hook poller (feed activé pour `demande_client`/`facture`, désactivé pour `newsletter`/`phishing`).
+
+---
+
 ## [1.9.3] — 2026-05-18
 
 ### Corrigé

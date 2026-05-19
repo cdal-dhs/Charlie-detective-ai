@@ -5,12 +5,14 @@ import sqlite3
 from datetime import datetime
 from email import header, message_from_bytes
 from email.message import Message
-from email.utils import parseaddr
+from email.utils import parseaddr, parsedate_to_datetime
 from pathlib import Path
 
 import structlog
 from aioimaplib import aioimaplib
 
+from app.cerveau_client import feed_correspondance
+from app.cerveau_dossier import derive_dossier_id
 from app.config import MailboxConfig, get_settings
 from app.delivery.resend_notifier import IncomingMail, notify_draft
 from app.delivery.slack_notifier import notify_new_draft as notify_slack_draft
@@ -20,6 +22,13 @@ from app.pipeline.generator import generate_draft
 from app.pipeline.language import detect_language
 from app.pipeline.prefilter import quick_classify
 from app.pipeline.priority import assign_priority
+
+# Mapping mailbox.name → marque Cerveau2
+_MARQUE_CERVEAU2 = {
+    "detective_belgique": "detectivebelgique",
+    "detective_belgium": "detectivebelgium",
+    "dpdh_investigations": "dpdhu",
+}
 
 log = structlog.get_logger()
 
@@ -304,6 +313,7 @@ async def _process_single_mail(
     mailbox: MailboxConfig,
 ) -> str:
     settings = get_settings()
+    language = mailbox.default_lang
     fetch_resp = await client.fetch(uid, "RFC822")
     if fetch_resp.result != "OK":
         raise RuntimeError(f"FETCH {uid} failed: {fetch_resp}")
@@ -388,6 +398,44 @@ async def _process_single_mail(
         priority,
         status,
     )
+
+    # --- Alimentation Cerveau2 (tout sauf newsletter / phishing) ---
+    if category not in ("newsletter", "phishing") and not settings.dry_run:
+        dossier_id = derive_dossier_id(
+            sender=sender,
+            subject=subject,
+            marque=mailbox.name,
+        )
+        date_str = ""
+        heure_str = ""
+        try:
+            dt = parsedate_to_datetime(received_at)
+            date_str = dt.strftime("%Y-%m-%d")
+            heure_str = dt.strftime("%H:%M")
+        except Exception:
+            date_str = received_at[:10] if received_at else ""
+            heure_str = ""
+
+        _task = asyncio.create_task(  # noqa: RUF006
+            feed_correspondance(
+                message_id=message_id or f"{mailbox.name}_{uid}",
+                direction="in",
+                date=date_str,
+                heure=heure_str,
+                expediteur=sender,
+                destinataire=mailbox.user,
+                objet=subject,
+                body=body,
+                marque=_MARQUE_CERVEAU2.get(mailbox.name, mailbox.name),
+                dossier_id=dossier_id,
+                categorie=category,
+                zone="jaune",
+                langue=language,
+                priorite=priority,
+                base_url=settings.cerveau2_base_url,
+                api_secret=settings.cerveau2_api_secret,
+            )
+        )
 
     if category == "demande_client" and is_new and not settings.dry_run:
         incoming = IncomingMail(
