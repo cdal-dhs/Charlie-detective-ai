@@ -451,17 +451,15 @@ async def ask_charlie(
                 if histo_rows:
                     log.info("charlie.historical_found", category=cat, count=len(histo_rows))
                     result.rows = histo_rows
-                    result.response_text = (
-                        f"J'ai trouvé {len(histo_rows)} email(s) historique(s) de type "
-                        f"**{cat}** dans les archives. Voici le(s) dernier(s) :"
-                    )
-                    return result
-                break
-        if result.sql_error is None:
-            result.response_text = "Aucun email trouvé pour cette recherche."
-        else:
-            result.response_text = f"Erreur SQL : {result.sql_error}"
-        return result
+                    # Laisser le summary détailler les résultats historiques
+                    has_sql_data = True
+                    break
+        if not has_sql_data:
+            if result.sql_error is None:
+                result.response_text = "Aucun email trouvé pour cette recherche."
+            else:
+                result.response_text = f"Erreur SQL : {result.sql_error}"
+            return result
     # Si le vault a des données mais SQL est vide → forcer synthèse conversationnelle
     force_summary = has_vault_data and not has_sql_data
     needs_summary = _needs_summary(question)
