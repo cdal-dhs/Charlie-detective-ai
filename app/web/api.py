@@ -488,23 +488,29 @@ async def mail_update_category(
 
 
 def _format_rows_html(rows: list[dict]) -> str:
-    """Formate les résultats SQL en tableau HTML avec liens cliquables."""
+    """Formate les résultats SQL en tableau HTML avec liens cliquables et date."""
     if not rows:
         return '<p class="text-xs text-gray-500 mt-1">Aucun résultat.</p>'
 
     headers = list(rows[0].keys())
     has_id = "id" in headers
+    # Reorder: date first, then id, subject, sender, others
+    priority = ["received_at", "id", "subject", "sender"]
+    ordered = [h for h in priority if h in headers] + [h for h in headers if h not in priority]
+
     header_html = "".join(
         f'<th class="px-4 py-2 text-left text-sm font-medium text-gray-400 border-b border-gray-600 bg-gray-900/50">{h}</th>'
-        for h in headers
+        for h in ordered
     )
     rows_html = ""
     for idx, r in enumerate(rows[:20]):
         bg = "bg-gray-900/30" if idx % 2 == 0 else "bg-transparent"
         cells = ""
-        for h in headers:
+        for h in ordered:
             v = r.get(h)
             val = str(v)[:80] if v is not None else "-"
+            if h == "received_at" and v:
+                val = str(v)[:16].replace("T", " ")  # 2026-05-15T10:30 → 2026-05-15 10:30
             if h == "id" and v is not None:
                 val = f'<a href="/app/conversation/{v}" target="_blank" class="text-blue-400 hover:underline font-medium">#{v}</a>'
             elif h == "subject" and has_id and r.get("id") is not None:

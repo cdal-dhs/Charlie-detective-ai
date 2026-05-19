@@ -281,6 +281,22 @@
           '<div class="flex gap-3 justify-end animate-in fade-in slide-in-from-bottom-2"><div class="bg-gray-700 rounded-xl px-5 py-3 max-w-[80%] text-base text-gray-100 leading-relaxed">' + safeQ + '</div></div>'
         );
         messages.scrollTop = messages.scrollHeight;
+        const patienceId = 'patience-' + Date.now();
+        const patienceMsgs = [
+          'OK, je vérifie...',
+          'Ça marche, je check...',
+          'Bien reçu, je regarde...',
+          'Je consulte ton second cerveau...',
+          'Un instant, je fouille...',
+          'C'est noté, je cherche...',
+          'Je branche mes neurones...',
+        ];
+        const patienceMsg = patienceMsgs[Math.floor(Math.random() * patienceMsgs.length)];
+        messages.insertAdjacentHTML('beforeend',
+          '<div id="' + patienceId + '" class="flex gap-3 animate-in fade-in slide-in-from-bottom-2"><div class="w-9 h-9 rounded-full bg-purple-600 flex items-center justify-center text-sm font-bold shrink-0 mt-1">AI</div><div class="flex-1 bg-gray-800 rounded-xl px-5 py-4 text-base text-gray-300 leading-relaxed">' + patienceMsg + ' <span class="inline-block w-1.5 h-1.5 bg-purple-400 rounded-full animate-pulse ml-1"></span><span class="inline-block w-1.5 h-1.5 bg-purple-400 rounded-full animate-pulse ml-0.5"></span><span class="inline-block w-1.5 h-1.5 bg-purple-400 rounded-full animate-pulse ml-0.5"></span></div></div>'
+        );
+        messages.scrollTop = messages.scrollHeight;
+
         const formData = new FormData(document.getElementById('charlie-form'));
         formData.append('history', JSON.stringify(this.history));
         input.value = '';
@@ -291,6 +307,8 @@
           return r.json();
         })
         .then(data => {
+          const patienceEl = document.getElementById(patienceId);
+          if (patienceEl) patienceEl.remove();
           messages.insertAdjacentHTML('beforeend', data.html);
           this.history.push({role: 'user', content: question});
           this.history.push({role: 'assistant', content: data.response_text});
