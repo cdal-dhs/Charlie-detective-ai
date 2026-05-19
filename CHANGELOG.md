@@ -20,6 +20,12 @@
 - **Garde anti-hallucination** : si SQL retourne 0 ligne et vault vide, réponse forcée à *"Aucun email trouvé pour cette recherche."* sans appeler le LLM summary.
 
 ### Corrigé
+- **Fix garde archives — vault ne bloque plus la recherche historique** : si SQL retourne 0 (même `COUNT(*)=0`), Charlie cherche TOUJOURS dans les archives boite1/2/3, indépendamment du vault ou de la mémoire. Ces sources sont du contexte, pas des données structurées. Règle de garde : `if sql and not has_sql_data`.
+- **Fix faux `dossier_id`** : `_DOSSIER_RE` utilise `(?i:dossier|affaire|...)` (case-insensitive uniquement sur le préfixe) avec un groupe de capture strict `[A-Z][a-zA-Z0-9]{2,}`. Empêche l'extraction de `"entreprise"` ou `"infidelite"` comme faux dossier_id.
+- **Fix tri chronologique archives** : `_search_historical_by_category()` parse les dates RFC 2822 via `email.utils.parsedate_to_datetime()` et trie globalement par date décroissante (`reverse=True`). Fini le tri lexicographique qui mettait mars 2026 avant janvier 2026.
+- **Parallélisation SQL + vault + mémoire** : `asyncio.gather()` exécute les trois appels en parallèle au lieu de séquentiellement. Gain de latence : ~30 s → ~5 s sur les requêtes COUNT.
+- **Timeout vault réduit 10 s → 4 s** : `app/cerveau_client.py` — le vault Cerveau2 ne bloque plus Charlie pendant 10 secondes si le réseau est lent.
+- **Skip vault sur COUNT(*)** : `app/charlie.py` `_is_count_query()` — inutile d'interroger le vault pour un simple comptage. Économise 4-5 s supplémentaires.
 - **Fix JS Alpine.js** : apostrophe dans `'C'est noté...'` rompait la chaîne JS, plantant `charlieData()`. La modale restait visible et impossible à fermer. Remplacé par des double-quotes + ajout `x-cloak`.
 - **Filtre archives historiques** : `_search_historical_by_category()` exclut désormais les emails génériques (`subject NOT LIKE '%Nouveau Message De Détective%'`, `%Formulaire%`, `%Contact%`), les expéditeurs `noreply`, et exige un `body_preview` significatif (`LENGTH(body_preview) > 30`). Empêche Charlie de présenter du spam comme un dossier client.
 
