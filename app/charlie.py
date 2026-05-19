@@ -477,10 +477,11 @@ async def ask_charlie(
     has_sql_data = result.rows and len(result.rows) > 0
     has_vault_data = vault_notes and len(vault_notes) > 0
     has_memory_data = bool(memory_notes)
-    # Détecter le cas COUNT(*)=0 (LLM parfois génère ça) comme 0 résultats réels
+    # Détecter le cas COUNT(*)=0 ou COUNT(*) as total=0 comme 0 résultats réels
     if has_sql_data and len(result.rows) == 1:
         first = result.rows[0]
-        if any(k.lower().startswith("count") for k in first):
+        # Si c'est un COUNT (colonne nommée count(*) ou total, etc.) avec valeur 0
+        if len(first) == 1:
             val = next(iter(first.values()))
             if val == 0 or val == "0":
                 has_sql_data = False
