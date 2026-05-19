@@ -154,14 +154,20 @@ Résultats SQL ({count} lignes) :
 Notes du second cerveau ({vault_count}) :
 {vault_notes}
 
-Rédige une réponse en français, concise et utile :
-- Synthétise les informations des emails ET des notes du vault.
+Rédige une réponse en français, **conversationnelle et naturelle**, comme si tu
+parlais à un collègue détective :
+- **Ne liste pas brute** les champs techniques (type, direction, heure null, etc.).
+- **Raconte l'histoire** : qui est le client, de quoi parle ce dossier,
+  quelles sont les étapes clés, qui a écrit à qui et quand.
+- Synthétise les informations des emails ET des notes du vault en un récit
+  cohérent et fluide.
 - Si les notes du vault apportent un contexte historique ou complémentaire,
-  mentionne-le explicitement.
+  intègre-le naturellement dans le récit.
 - Si aucun résultat dans les emails mais des notes existent, base ta réponse
-  sur les notes du vault.
+  entièrement sur les notes du vault en racontant ce que tu as trouvé.
 - Si aucun résultat nulle part, dis-le simplement.
-- Toujours mentionner les ID et sujets pour permettre les liens cliquables.
+- Mentionne les sujets/ID clés pour permettre les liens cliquables, mais
+  de façon intégrée dans le texte.
 """
 
 
@@ -230,9 +236,11 @@ async def ask_charlie(question: str, db_path: Path, model: str | None = None) ->
         log.info("charlie.vault_fetched", count=len(vault_notes), dossier_id=dossier_id)
 
     # --- Phase 3 : summary intelligent avec les deux sources ---
-    if sql and result.rows and _needs_summary(question):
+    has_sql_data = result.rows and len(result.rows) > 0
+    has_vault_data = vault_notes and len(vault_notes) > 0
+    if sql and _needs_summary(question) and (has_sql_data or has_vault_data):
         summary = await _summarize_results(
-            question, result.rows, vault_notes, model, settings,
+            question, result.rows or [], vault_notes, model, settings,
         )
         if summary:
             result.response_text = summary
