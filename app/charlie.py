@@ -325,7 +325,7 @@ _ENQUETE_TO_CATEGORY: dict[str, str] = {
 
 
 async def _search_historical_by_category(
-    db_path: Path, category: str, limit: int = 5,
+    db_path: Path, category: str, year: str | None = None, limit: int = 5,
 ) -> list[dict]:
     """Cherche dans les 3 DB historiques (boite1/2/3) par catégorie fine.
 
@@ -333,6 +333,7 @@ async def _search_historical_by_category(
     - body_preview non vide et significatif (>30 caractères)
     - subject ni générique ni spam ('Nouveau Message De Détective', 'Formulaire', etc.)
     - sender ni noreply ni no-reply
+    - Si `year` est fourni, filtre sur la date (format RFC 2822 ou ISO)
     """
     data_dir = db_path.parent
     results: list[dict] = []
@@ -354,6 +355,9 @@ async def _search_historical_by_category(
                 for gs in generic_subjects:
                     sql += "AND subject NOT LIKE ? "
                     params.append(gs)
+                if year:
+                    sql += "AND date LIKE ? "
+                    params.append(f"%{year}%")
                 sql += "ORDER BY date DESC LIMIT ?"
                 params.append(limit)
                 cursor = await db.execute(sql, tuple(params))
@@ -531,6 +535,7 @@ async def ask_charlie(
     # ce sont des sources de contexte, pas de données structurées. Si SQL
     # retourne 0, on cherche TOUJOURS dans les archives (boite1/2/3).
     is_historical = False
+    year_filter = _extract_year(question)
     if sql and not has_sql_data:
         # Dernier recours : archives historiques (boite1/2/3) par catégorie
         histo_rows = []
@@ -538,9 +543,11 @@ async def ask_charlie(
         q_norm = _normalize(enriched_question)
         for type_key, cat in _ENQUETE_TO_CATEGORY.items():
             if type_key in q_norm:
-                histo_rows = await _search_historical_by_category(db_path, cat)
+                histo_rows = await _search_historical_by_category(
+                    db_path, cat, year=year_filter, limit=20,
+                )
                 if histo_rows:
-                    log.info("charlie.historical_found", category=cat, count=len(histo_rows))
+                    log.info("charlie.historical_found", category=cat, count=len(histo_rows), year=year_filter)
                     result.rows = histo_rows
                     is_historical = True
                     has_sql_data = True
@@ -551,12 +558,6 @@ async def ask_charlie(
             else:
                 result.response_text = f"Erreur SQL : {result.sql_error}"
             return result
-    # Si les résultats viennent des archives historiques : formater DIRECTEMENT
-    # sans passer par le LLM. Cela évite toute fuite de données dans le prompt
-    # ET accélère la réponse.
-    if is_historical and result.rows:
-        result.response_text = _format_historical_response(question, result.rows)
-        return result
 
     # Si le vault a des données mais SQL est vide → forcer synthèse conversationnelle
     force_summary = has_vault_data and not has_sql_data
@@ -652,6 +653,15 @@ def _extract_dossier_id(question: str) -> str | None:
     if m:
         return m.group(1)
     return None
+
+
+_YEAR_RE = re.compile(r"\b(20\d{2})\b")
+
+
+def _extract_year(question: str) -> str | None:
+    """Extrait une année (20xx) de la question."""
+    m = _YEAR_RE.search(question)
+    return m.group(1) if m else None
 
 
 def _normalize(text: str) -> str:
