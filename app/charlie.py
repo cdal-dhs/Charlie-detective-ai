@@ -9,6 +9,12 @@ import aiosqlite
 import structlog
 
 from app.cerveau_client import VaultNote, query_vault
+from app.charlie_memory import (
+    is_memory_query,
+    is_save_request,
+    query_memory,
+    save_memory,
+)
 from app.config import get_settings
 from app.llm.router import complete
 
@@ -179,6 +185,9 @@ Résultats SQL ({count} lignes) :
 Notes du second cerveau ({vault_count}) :
 {vault_notes}
 
+Souvenirs de Charlie ({memory_count}) :
+{memory_notes}
+
 Rédige une réponse en français, **conversationnelle et directe** :
 - **Parle à Daniel comme à ton partenaire.** Pas de langue de bois.
 - **Ne liste pas brute** les champs techniques (type, direction, heure null, etc.).
@@ -265,11 +274,24 @@ async def ask_charlie(
         result.vault_notes = vault_notes
         log.info("charlie.vault_fetched", count=len(vault_notes), dossier_id=dossier_id)
 
+    # --- Phase 2.5 : mémoire Charlie (grand bibliothécaire) ---
+    memory_notes = []
+    if is_memory_query(question) or dossier_id:
+        memory_notes = await query_memory(
+            db_path=db_path,
+            question=question,
+            dossier_id=dossier_id,
+            limit=3,
+        )
+        if memory_notes:
+            log.info("charlie.memory_fetched", count=len(memory_notes), dossier_id=dossier_id)
+
     # --- Phase 3 : summary intelligent avec les deux sources ---
     has_sql_data = result.rows and len(result.rows) > 0
     has_vault_data = vault_notes and len(vault_notes) > 0
+    has_memory_data = bool(memory_notes)
     # Garde : 0 résultats partout → réponse directe sans hallucination
-    if sql and not has_sql_data and not has_vault_data:
+    if sql and not has_sql_data and not has_vault_data and not has_memory_data:
         if result.sql_error is None:
             result.response_text = "Aucun email trouvé pour cette recherche."
         else:
@@ -277,12 +299,30 @@ async def ask_charlie(
         return result
     # Si le vault a des données mais SQL est vide → forcer synthèse conversationnelle
     force_summary = has_vault_data and not has_sql_data
-    if sql and (has_sql_data or has_vault_data) and (_needs_summary(question) or force_summary):
+    needs_summary = _needs_summary(question)
+    if (
+        sql
+        and (has_sql_data or has_vault_data or has_memory_data)
+        and (needs_summary or force_summary)
+    ):
         summary = await _summarize_results(
-            question, result.rows or [], vault_notes, model, settings,
+            question, result.rows or [], vault_notes, memory_notes, model, settings,
         )
         if summary:
             result.response_text = summary
+
+    # --- Phase 4 : enregistrement si Daniel demande de retenir ---
+    if is_save_request(question):
+        await save_memory(
+            db_path=db_path,
+            question=question,
+            response=result.response_text,
+            dossier_id=dossier_id,
+        )
+        result.response_text = (
+            f"C'est noté dans ma mémoire, Daniel ! "
+            f"{result.response_text[:200]}..."
+        )
 
     return result
 
@@ -344,6 +384,7 @@ async def _summarize_results(
     question: str,
     rows: list[dict],
     vault_notes: list[VaultNote],
+    memory_notes: list,
     model: str,
     settings,
 ) -> str | None:
@@ -352,7 +393,14 @@ async def _summarize_results(
 
     rows_text = json.dumps(rows[:20], ensure_ascii=False, default=str)
 
-    if vault_notes:
+    memory_text = ""
+    if memory_notes:
+        memory_lines = []
+        for mem in memory_notes:
+            memory_lines.append(f"- [{mem.created_at}] {mem.question}: {mem.response[:300]}")
+        memory_text = "\n".join(memory_lines)
+
+    if vault_notes or memory_notes:
         vault_lines = []
         for note in vault_notes:
             fname = note.path.split("/")[-1].replace(".md", "")
@@ -364,6 +412,8 @@ async def _summarize_results(
             rows=rows_text,
             vault_count=len(vault_notes),
             vault_notes=vault_text,
+            memory_count=len(memory_notes),
+            memory_notes=memory_text,
         )
     else:
         prompt = _SUMMARY_PROMPT.format(question=question, count=len(rows), rows=rows_text)

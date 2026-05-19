@@ -3,6 +3,7 @@ import signal
 
 import structlog
 
+from app.charlie_memory import init_memory_table
 from app.config import get_settings
 from app.delivery.slack_bot import init_slack_bot
 from app.logging_config import cleanup_old_logs, setup_logging
@@ -17,6 +18,7 @@ async def main() -> None:
     cleanup_old_logs(settings.log_dir, keep_days=3)
 
     await migrate(settings.db_agent_state)
+    await init_memory_table(settings.db_agent_state)
 
     log = structlog.get_logger()
     log.info("agent.start", mailboxes=[m.name for m in settings.mailboxes()])
