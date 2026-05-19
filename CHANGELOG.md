@@ -22,7 +22,11 @@
 ### Corrigé
 - **Fix garde archives — vault ne bloque plus la recherche historique** : si SQL retourne 0 (même `COUNT(*)=0`), Charlie cherche TOUJOURS dans les archives boite1/2/3, indépendamment du vault ou de la mémoire. Ces sources sont du contexte, pas des données structurées. Règle de garde : `if sql and not has_sql_data`.
 - **Fix faux `dossier_id`** : `_DOSSIER_RE` utilise `(?i:dossier|affaire|...)` (case-insensitive uniquement sur le préfixe) avec un groupe de capture strict `[A-Z][a-zA-Z0-9]{2,}`. Empêche l'extraction de `"entreprise"` ou `"infidelite"` comme faux dossier_id.
+- **Fix fuite de données CRITIQUE** : `_sanitize_rows_for_prompt()` ne garde que `subject`, `received_at`, `category` avant d'envoyer au LLM. Masque ABSOLUMENT : `id`, `sender`, `body_preview`, `body`, `source_db`. Plus jamais d'expéditeurs réels ou de contenu brut dans les réponses Charlie.
+- **Fix format réponse archives** : `_format_historical_response()` formate une réponse propre et conversationnelle pour les résultats historiques. Liste à puces avec liens cliquables vers l'inbox, sans dump technique.
+- **Filtre archives par année** : `_extract_year()` extrait `20xx` de la question. `_search_historical_by_category()` filtre par `date LIKE '%2026%'` quand une année est détectée. Évite de lister 15 ans d'archives quand Daniel demande "pour 2026".
 - **Fix tri chronologique archives** : `_search_historical_by_category()` parse les dates RFC 2822 via `email.utils.parsedate_to_datetime()` et trie globalement par date décroissante (`reverse=True`). Fini le tri lexicographique qui mettait mars 2026 avant janvier 2026.
+- **Fix tri datetime offset-naive vs offset-aware** : `_parse_date()` normalise toutes les dates en offset-naive (`replace(tzinfo=None)`) avant comparaison. Résout le `TypeError` sur les dates RFC 2822 avec timezone.
 - **Parallélisation SQL + vault + mémoire** : `asyncio.gather()` exécute les trois appels en parallèle au lieu de séquentiellement. Gain de latence : ~30 s → ~5 s sur les requêtes COUNT.
 - **Timeout vault réduit 10 s → 4 s** : `app/cerveau_client.py` — le vault Cerveau2 ne bloque plus Charlie pendant 10 secondes si le réseau est lent.
 - **Skip vault sur COUNT(*)** : `app/charlie.py` `_is_count_query()` — inutile d'interroger le vault pour un simple comptage. Économise 4-5 s supplémentaires.
