@@ -485,8 +485,11 @@ async def ask_charlie(
             val = next(iter(first.values()))
             if val == 0 or val == "0":
                 has_sql_data = False
-    # Garde : 0 résultats partout → chercher dans les archives historiques
-    if sql and not has_sql_data and not has_vault_data and not has_memory_data:
+    # Garde : 0 résultats SQL/vault → chercher dans les archives historiques
+    # La mémoire Charlie ne bloque PAS la recherche historique : c'est du
+    # contexte, pas une source de données. Si SQL et vault sont vides,
+    # on cherche toujours dans les archives.
+    if sql and not has_sql_data and not has_vault_data:
         # Dernier recours : archives historiques (boite1/2/3) par catégorie
         histo_rows = []
         # Utilise la question enrichie (synonymes injectés) pour matcher les catégories
@@ -582,9 +585,12 @@ _VAULT_KEYWORDS = (
 )
 
 _DOSSIER_RE = re.compile(
-    r"(?:dossier|affaire|projet|enquete|investigation)"
-    r"[\s:]+([A-Z][A-Z0-9]{2,})",
-    re.IGNORECASE,
+    # (?i:...) rend case-insensitive UNIQUEMENT le préfixe (dossier/affaire/etc.)
+    # Le groupe de capture reste strictement case-sensitive sur la première lettre :
+    # un vrai dossier_id DOIT commencer par une majuscule (code, nom propre).
+    # Les lettres suivantes peuvent être mixtes (ex: Dutry, Gacaferi).
+    r"(?i:dossier|affaire|projet|enquete|investigation)"
+    r"[\s:]+([A-Z][a-zA-Z0-9]{2,})",
 )
 _HASH_DOSSIER_RE = re.compile(r"#([A-Z][A-Z0-9]{2,})")
 
