@@ -294,6 +294,62 @@ Rédige une réponse en français, **conversationnelle et directe** :
 """
 
 
+# Mapping type d'enquête → catégorie historique dans les 3 DB sources
+_ENQUETE_TO_CATEGORY: dict[str, str] = {
+    "adulte": "INFIDELITE",
+    "infidelite": "INFIDELITE",
+    "tromperie": "INFIDELITE",
+    "concubinage": "INFIDELITE",
+    "surveillance": "SURVEILLANCE",
+    "filature": "SURVEILLANCE",
+    "disparition": "RECHERCHE_PERSONNE",
+    "recherche_personne": "RECHERCHE_PERSONNE",
+    "garde": "ENQUETE_FAMILLE",
+    "pension": "ENQUETE_FAMILLE",
+    "famille": "ENQUETE_FAMILLE",
+    "residence": "CONTROLE_RESIDENCE",
+    "entreprise": "INVESTIGATION_ENTREPRISE",
+    "fraude": "INVESTIGATION_ENTREPRISE",
+    "materiel": "TEST_MATERIEL",
+    "detecteur": "TEST_MATERIEL",
+    "collaboration": "COLLABORATION",
+    "harcelement": "HARCELEMENT",
+}
+
+
+async def _search_historical_by_category(
+    db_path: Path, category: str, limit: int = 5,
+) -> list[dict]:
+    """Cherche dans les 3 DB historiques (boite1/2/3) par catégorie fine."""
+    data_dir = db_path.parent
+    results: list[dict] = []
+    for db_name in ("boite1.sqlite", "boite2.sqlite", "boite3.sqlite"):
+        db_file = data_dir / db_name
+        if not db_file.exists():
+            continue
+        try:
+            async with aiosqlite.connect(db_file) as db:
+                cursor = await db.execute(
+                    "SELECT id, subject, sender, date, body_preview, category "
+                    "FROM emails WHERE category = ? ORDER BY date DESC LIMIT ?",
+                    (category, limit),
+                )
+                rows = await cursor.fetchall()
+                for row in rows:
+                    results.append({
+                        "id": row[0],
+                        "subject": row[1],
+                        "sender": row[2],
+                        "received_at": row[3],
+                        "body_preview": row[4],
+                        "category": row[5],
+                        "source_db": db_name,
+                    })
+        except Exception as e:
+            log.warning("charlie.historical_search_failed", db=db_name, error=str(e))
+    return results
+
+
 async def ask_charlie(
     question: str,
     db_path: Path,
@@ -384,8 +440,23 @@ async def ask_charlie(
     has_sql_data = result.rows and len(result.rows) > 0
     has_vault_data = vault_notes and len(vault_notes) > 0
     has_memory_data = bool(memory_notes)
-    # Garde : 0 résultats partout → réponse directe sans hallucination
+    # Garde : 0 résultats partout → chercher dans les archives historiques
     if sql and not has_sql_data and not has_vault_data and not has_memory_data:
+        # Dernier recours : archives historiques (boite1/2/3) par catégorie
+        histo_rows = []
+        q_norm = _normalize(question)
+        for type_key, cat in _ENQUETE_TO_CATEGORY.items():
+            if type_key in q_norm:
+                histo_rows = await _search_historical_by_category(db_path, cat)
+                if histo_rows:
+                    log.info("charlie.historical_found", category=cat, count=len(histo_rows))
+                    result.rows = histo_rows
+                    result.response_text = (
+                        f"J'ai trouvé {len(histo_rows)} email(s) historique(s) de type "
+                        f"**{cat}** dans les archives. Voici le(s) dernier(s) :"
+                    )
+                    return result
+                break
         if result.sql_error is None:
             result.response_text = "Aucun email trouvé pour cette recherche."
         else:
