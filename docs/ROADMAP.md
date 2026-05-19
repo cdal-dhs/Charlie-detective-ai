@@ -99,20 +99,20 @@ Cyril reçoit un email Resend formaté + une notification Slack pour chaque dema
 **Objectif** : agent déployé sur le VPS, tournant 24/7 avec supervision et backups.
 
 ### Tâches
-- [ ] Setup KVM8 : user `detective-agent`, Python 3.11, structure `/opt/detective-agent/`
-- [ ] Copier le code et installer le venv
-- [ ] `.env` prod (chmod 600, propriétaire `detective-agent`)
-- [ ] Installer `deploy/detective-agent.service` dans systemd, `systemctl enable --now`
-- [ ] Bot Telegram — canal **alertes système** (thread/canal dédié) : brancher `healthcheck` + erreurs critiques
-- [ ] Bot Telegram — canal **conversation Boss ↔ Charlie** : migrer le bot test vers le compte Daniel, vérifier `TELEGRAM_CHAT_ID` prod
-- [ ] systemd timer qui sonde `/health` chaque minute
+- [x] Setup KVM8 : Docker + Docker Compose, structure `/opt/DETECTIVE/`
+- [x] Copier le code et build l'image
+- [x] `.env` prod synchronisé via `scripts/deploy-to-vps.sh`
+- [x] Healthcheck FastAPI sur `127.0.0.1:8765`
+- [x] Bot Slack Charlie AI interactif déployé et fonctionnel
+- [ ] Bot Telegram — canal **alertes système** : brancher `healthcheck` + erreurs critiques
+- [ ] Bot Telegram — canal **conversation Boss ↔ Charlie** : migrer le bot test vers le compte Daniel
 - [ ] Cron quotidien de backup → Backblaze B2 (les 4 SQLite, chiffrés via `age`)
 - [ ] Procédure de restore documentée et testée
-- [ ] Documentation opérationnelle (procédure restart, restore, ajout boîte mail, révoquer token Telegram)
+- [ ] Documentation opérationnelle (procédure restart, restore, ajout boîte mail)
 - [ ] Lancement officiel + monitoring 1 semaine
 
 ### Livrable S4
-MVP en production, monitoring actif, Cyril reçoit les brouillons à mesure que les vrais mails arrivent. Daniel peut interagir avec Charlie via Telegram en direct.
+MVP en production, monitoring actif, Cyril reçoit les brouillons à mesure que les vrais mails arrivent. Daniel peut interagir avec Charlie via Slack en direct.
 
 ---
 
@@ -134,3 +134,23 @@ MVP en production, monitoring actif, Cyril reçoit les brouillons à mesure que 
 - [ ] Dashboard web supervision (FastAPI + HTMX, accessible via SSH tunnel ou réseau privé)
 - [ ] Suppression mails > 28 jours (politique de rétention)
 - [ ] Architecture multi-sub-agents : router orchestrateur qui dispatch par tâche, chaque agent sa config LLM
+- [ ] **Pipeline Cerveau2 — ingestion continue** : alimenter Cerveau2 en temps réel depuis IMAP (v1.9.4 lancé, à stabiliser)
+- [ ] **Charlie AI temps réel** : court-circuiter le LLM pour 80% des requêtes (SQL programmatique) ou basculer vers Claude Sonnet 4 via OpenRouter pour fiabilité maximale
+
+---
+
+## 📝 Notes de session 2026-05-19 (v1.9.6)
+
+**Problèmes résolus** :
+- Charlie répondait "zéro" alors que des dossiers existaient dans les archives → garde archives débloquée
+- Faux dossier_id ("entreprise", "infidelite") → regex stricte
+- Fuite de données (sender, body_preview visibles) → `_sanitize_rows_for_prompt()`
+- Dump technique visible dans Slack → supprimé
+- SQL trop permissif (LIKE OR attrapait des factures) → Mode A (category exacte) vs Mode B (LIKE OR)
+- Latence ~35s → parallélisation + timeout réduit → ~5-13s
+
+**Décisions en attente** :
+- Basculer le LLM principal vers Claude Sonnet 4 via OpenRouter (coût ~0.003€/req, fiabilité 99%) ou rester sur Gemma4:31b local
+- Implémenter le SQL programmatique pour court-circuiter le LLM sur les requêtes standard
+
+**Prochaine session** : choix LLM + stabilisation Cerveau2 pipeline + tests terrain avec Daniel

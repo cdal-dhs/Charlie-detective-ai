@@ -4,6 +4,15 @@
 
 ---
 
+## [1.9.6] — 2026-05-19
+
+### Corrigé
+- **Fix dump technique Slack** : `slack_bot.py` n'affiche plus les rows bruts en dessous du texte LLM. Le LLM synthétise déjà la réponse — le dump technique gâchait l'expérience et fuitait des données sensibles.
+- **Fix SQL trop permissif — garde anti-faux-positif** : quand Daniel demande un type d'enquête (filature, adultère, disparition...), le LLM générait un SQL avec LIKE OR sur `subject`, `body`, `ai_draft` qui attrapait n'importe quoi (ex: facture Arval pour "filature"). Le prompt distingue désormais deux modes : **Mode A** (recherche par `category` exacte pour les types d'enquête) vs **Mode B** (LIKE OR pour les mots-clés spécifiques). Garde post-SQL : si les résultats n'ont pas la `category` attendue, ils sont considérés comme faux-positifs → recherche archives automatique.
+- **Version bump 1.9.6** : `_version.py`, CHANGELOG, HANDOVER synchronisés. Tolérance zéro respectée.
+
+---
+
 ## [1.9.5] — 2026-05-19
 
 ### Ajouté

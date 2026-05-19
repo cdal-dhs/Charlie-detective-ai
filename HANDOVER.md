@@ -1,8 +1,10 @@
 # HANDOVER.md — Detective.be Agent IA
 
 > **Document de transfert** : état complet du projet, accès, conventions et pièges pour un nouvel agent.
-> **Dernière mise à jour** : 2026-05-18 (v1.9.3)
+> **Dernière mise à jour** : 2026-05-19 (v1.9.6)
 > **Auteur** : Cyril Dal (`cdal@digitalhs.biz`) — Digital Highway Solutions
+
+> **Récapitulatif v1.9.6** : pipeline Charlie AI stabilisé après 5 hotfixes consécutifs le 19/05. Les principaux bugs résolus : garde archives débloquée (vault ne bloque plus la recherche historique), faux dossier_id corrigé (regex stricte), fuite de données bouchée (données anonymisées avant envoi au LLM), tri chronologique RFC 2822, parallélisation SQL+vault+mémoire, timeout vault réduit, filtre archives par année, garde anti-faux-positif SQL (Mode A category exacte vs Mode B LIKE OR), suppression du dump technique Slack. Le système est maintenant fonctionnel pour les requêtes de Daniel mais reste dépendant de la qualité du LLM local (Gemma4:31b via Ollama Pro).
 
 ---
 
