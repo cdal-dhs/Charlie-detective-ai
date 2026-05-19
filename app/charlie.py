@@ -85,6 +85,15 @@ RÉPONSE: <ta réponse>
     categorie `surveillance` de la base ET interroge le second cerveau (vault Cerveau2)
     qui contient les rapports de terrain, observations et notes d'enquete.
     "Filature" et "surveillance" sont synonymes dans ce contexte.
+12. Lexique métier — synonymes courants du cabinet :
+    - "adultère" ou "infidélité" → cherche `infidelite`, `adultere`, `tromperie`, `concubinage`
+    - "disparition" ou "recherche de personne" → cherche `recherche_personne`,
+      `disparition`, `localisation`, `retrouver`
+    - "contrôle de résidence" → cherche `controle_residence`, `residence`, `domicile`
+    - "garde d'enfant" ou "pension" → cherche `enquete_famille`, `garde`, `pension`, `famille`
+    - "harcèlement" → cherche `harcelement`, `intimidation`
+    Quand Daniel utilise un terme familier, élargis TOUJOURS ta recherche SQL
+    avec les synonymes métier via des clauses LIKE OR.
 """
 
 _DANGEROUS_SQL = (
@@ -337,6 +346,19 @@ _NEEDS_SUMMARY_KEYWORDS = (
     "contact", "qui", "personne", "nom", "client",
     "email", "mail", "message", "a recu", "as recu",
     "filature", "surveillance", "observation", "terrain",
+    "adulte", "infidelite", "tromperie", "concubinage",
+    "disparition", "recherche_personne", "localisation",
+    "harcelement", "intimidation", "stalking",
+    "garde", "pension", "famille", "enfant", "mineur",
+    "vol", "fraude", "delit", "crime", "prejudice",
+    "accident", "assurance", "compagnie", "indemnisation",
+    "testament", "heritage", "succession", "notaire",
+    "entreprise", "societe", "patron", "salarie", "licenciement",
+    "matos", "materiel", "detecteur", "camera",
+    "collaboration", "sous_traitance", "partenaire", "associe",
+    "divorce", "separation", "couple", "concubin",
+    "droit", "visite", "hebergement", "custodie",
+    "rapport", "constat", "photo", "video", "preuve",
 )
 
 _VAULT_KEYWORDS = (
@@ -344,6 +366,19 @@ _VAULT_KEYWORDS = (
     "anterieur", "archive", "contexte", "dossier",
     "affaire", "enquete", "investigation", "correspondance",
     "filature", "surveillance", "observation", "terrain",
+    "adulte", "infidelite", "tromperie", "concubinage",
+    "disparition", "recherche_personne", "localisation",
+    "harcelement", "intimidation", "stalking",
+    "garde", "pension", "famille", "enfant", "mineur",
+    "vol", "fraude", "delit", "crime", "prejudice",
+    "accident", "assurance", "compagnie", "indemnisation",
+    "testament", "heritage", "succession", "notaire",
+    "entreprise", "societe", "patron", "salarie", "licenciement",
+    "matos", "materiel", "detecteur", "camera",
+    "collaboration", "sous_traitance", "partenaire", "associe",
+    "divorce", "separation", "couple", "concubin",
+    "droit", "visite", "hebergement", "custodie",
+    "rapport", "constat", "photo", "video", "preuve",
 )
 
 _DOSSIER_RE = re.compile(
