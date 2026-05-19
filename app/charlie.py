@@ -477,11 +477,19 @@ async def ask_charlie(
     has_sql_data = result.rows and len(result.rows) > 0
     has_vault_data = vault_notes and len(vault_notes) > 0
     has_memory_data = bool(memory_notes)
+    # Détecter le cas COUNT(*)=0 (LLM parfois génère ça) comme 0 résultats réels
+    if has_sql_data and len(result.rows) == 1:
+        first = result.rows[0]
+        if any(k.lower().startswith("count") for k in first):
+            val = next(iter(first.values()))
+            if val == 0 or val == "0":
+                has_sql_data = False
     # Garde : 0 résultats partout → chercher dans les archives historiques
     if sql and not has_sql_data and not has_vault_data and not has_memory_data:
         # Dernier recours : archives historiques (boite1/2/3) par catégorie
         histo_rows = []
-        q_norm = _normalize(question)
+        # Utilise la question enrichie (synonymes injectés) pour matcher les catégories
+        q_norm = _normalize(enriched_question)
         for type_key, cat in _ENQUETE_TO_CATEGORY.items():
             if type_key in q_norm:
                 histo_rows = await _search_historical_by_category(db_path, cat)
