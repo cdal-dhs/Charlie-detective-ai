@@ -75,6 +75,10 @@ RÉPONSE: <ta réponse>
    Analyse le contenu des mails et rédige une synthèse claire et utile.
 10. Si la requête SQL retourne 0 ligne, ta RÉPONSE doit dire explicitement
     qu'aucun email n'a été trouvé, sans inventer de résultats.
+11. Quand Daniel parle de "filature" ou "surveillance", cherche dans la
+    categorie `surveillance` de la base ET interroge le second cerveau (vault Cerveau2)
+    qui contient les rapports de terrain, observations et notes d'enquete.
+    "Filature" et "surveillance" sont synonymes dans ce contexte.
 """
 
 _DANGEROUS_SQL = (
@@ -292,12 +296,14 @@ _NEEDS_SUMMARY_KEYWORDS = (
     "informations", "info", "dossier", "parle",
     "contact", "qui", "personne", "nom", "client",
     "email", "mail", "message", "a recu", "as recu",
+    "filature", "surveillance", "observation", "terrain",
 )
 
 _VAULT_KEYWORDS = (
     "similaire", "historique", "passe", "precedent",
     "anterieur", "archive", "contexte", "dossier",
     "affaire", "enquete", "investigation", "correspondance",
+    "filature", "surveillance", "observation", "terrain",
 )
 
 _DOSSIER_RE = re.compile(
