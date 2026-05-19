@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from datetime import datetime
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from unicodedata import normalize
 
@@ -366,8 +368,22 @@ async def _search_historical_by_category(
                     })
         except Exception as e:
             log.warning("charlie.historical_search_failed", db=db_name, error=str(e))
-    # Tri global par date décroissante (la plus récente en premier)
-    results.sort(key=lambda r: r.get("received_at") or "", reverse=True)
+    # Tri global par date décroissante — parsing robuste des formats RFC 2822 / ISO
+    def _parse_date(r: dict) -> datetime:
+        raw = r.get("received_at") or ""
+        if not raw:
+            return datetime.min
+        try:
+            return parsedate_to_datetime(raw)
+        except Exception:
+            pass
+        try:
+            return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except Exception:
+            pass
+        return datetime.min
+
+    results.sort(key=_parse_date, reverse=True)
     return results
 
 
