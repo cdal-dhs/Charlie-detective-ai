@@ -4,6 +4,20 @@
 
 ---
 
+## [1.11.0] — 2026-05-20
+
+### Ajouté
+- **UPLOAD Documents** : nouvelle section colorée dans la sidebar admin (`/admin/documents`) avec drag-and-drop pour ingérer des fichiers dans Cerveau2. Interface : sélection du dossier client, marque, et titre. Formats supportés : TXT, MD, CSV, JSON, XML, HTML, PDF, DOCX, JPG, PNG, TIFF (OCR via Tesseract). Architecture extensible pour MP3/MP4 en V2.
+- **Module `app/pipeline/document_extract.py`** : extracteur universel de texte. Une fonction par format (`_extract_pdf`, `_extract_docx`, `_extract_txt`, `_extract_image`). Chunking intelligent avec chevauchement de 10% pour les textes >4000 tokens. Détection de doublons via hash MD5.
+- **Endpoint Cerveau2 `POST /ingest-note`** : nouveau client `feed_document()` dans `app/cerveau_client.py`. Même pattern fire-and-forget que `feed_correspondance` (retry 3x, timeout 15s, 409 = doublon).
+- **Pièces jointes emails → Cerveau2** : dans `app/workers/imap_poller.py`, après l'ingestion de l'email, extraction automatique des PJ supportées (`_extract_attachments()`). Ignore les exécutables, les formats non supportés, et les mini-images <2KB (logos/signatures). Chaque PJ devient une note `type: "document"` dans Cerveau2, rattachée au même `dossier_id` que l'email parent.
+- **Table `document_scanned`** dans `agent_state.db` (migration auto) : tracking local des documents uploadés (doc_id, dossier_id, marque, format, taille, date, sync status).
+
+### Architecture
+- Principe : **Cerveau2 est le seul vault**. Charlie ne stocke aucun contenu documentaire en local (hors tracking minimal dans `document_scanned`). Tous les documents, qu'ils viennent d'un upload cockpit ou d'une pièce jointe email, sont indexés vectoriellement par Cerveau2.
+
+---
+
 ## [1.10.5] — 2026-05-20
 
 ### Corrigé

@@ -111,6 +111,23 @@ async def _create_tables(db: aiosqlite.Connection) -> None:
         )
         """
     )
+    await db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS document_scanned (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            doc_id TEXT UNIQUE NOT NULL,
+            dossier_id TEXT,
+            marque TEXT,
+            titre TEXT,
+            format TEXT,
+            type TEXT DEFAULT 'document',
+            date TEXT,
+            size_bytes INTEGER,
+            cerveau2_synced INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
 
 
 async def _add_mail_processed_columns(db: aiosqlite.Connection) -> None:

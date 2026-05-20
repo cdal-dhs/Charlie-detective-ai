@@ -24,6 +24,9 @@ dependencies = [
     "itsdangerous>=2.1.0",
     "email-validator>=2.0.0",
     "slack_bolt>=1.19.0",
+    "pypdf>=5.0.0",
+    "python-docx>=1.1.0",
+    "Pillow>=10.0.0",
 ]
 
 [project.optional-dependencies]

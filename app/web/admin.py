@@ -8,9 +8,14 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
+import asyncio
+from datetime import datetime
+
+from app.cerveau_client import feed_document
 from app.config import get_settings
 from app.delivery.slack_notifier import send_slack_message
 from app.healthcheck import health
+from app.pipeline.document_extract import extract_text_bytes, is_supported
 from app.web.deps import get_db, require_admin
 from app.web.utils import FernetManager, audit_log
 
@@ -330,6 +335,118 @@ async def soul_save(
         None, ip, request.headers.get("user-agent"),
     )
     return {"ok": True}
+
+
+@router.get("/documents")
+async def documents_page(
+    request: Request,
+    db: aiosqlite.Connection = Depends(get_db),  # noqa: B008
+    user: dict = Depends(require_admin),  # noqa: B008
+):
+    """Page upload et gestion des documents."""
+    # Historique local des uploads récents
+    async with db.execute(
+        "SELECT doc_id, dossier_id, marque, titre, format, type, date, created_at "
+        "FROM document_scanned ORDER BY created_at DESC LIMIT 50"
+    ) as cur:
+        rows = await cur.fetchall()
+    cols = ["doc_id", "dossier_id", "marque", "titre", "format", "type", "date", "created_at"]
+    documents = [dict(zip(cols, r, strict=True)) for r in rows]
+    return templates.TemplateResponse(
+        request,
+        "admin/documents.html",
+        {"documents": documents, "user": user},
+    )
+
+
+@router.post("/api/documents/upload")
+async def documents_upload(
+    request: Request,
+    db: aiosqlite.Connection = Depends(get_db),  # noqa: B008
+    user: dict = Depends(require_admin),  # noqa: B008
+):
+    """Reçoit un fichier, extrait le texte, et l'ingère dans Cerveau2."""
+    settings = get_settings()
+    form = await request.form()
+
+    file = form.get("file")
+    if not file or not getattr(file, "filename", None):
+        return HTMLResponse(
+            '<div class="p-3 bg-red-900/40 border border-red-800 rounded text-red-300 text-sm">'
+            "Aucun fichier sélectionné."
+            "</div>"
+        )
+
+    filename = str(file.filename)
+    if not is_supported(filename):
+        return HTMLResponse(
+            '<div class="p-3 bg-yellow-900/40 border border-yellow-800 rounded text-yellow-300 text-sm">'
+            f"Format non supporté : {filename}. "
+            "Extensions acceptées : txt, md, csv, json, xml, html, pdf, docx, jpg, png, tiff."
+            "</div>"
+        )
+
+    dossier_id = str(form.get("dossier_id", "")).strip().upper()
+    marque = str(form.get("marque", "detectivebelgique")).strip()
+    titre = str(form.get("titre", filename)).strip() or filename
+
+    try:
+        content = await file.read()
+        text = extract_text_bytes(content, filename)
+        if not text or not text.strip():
+            return HTMLResponse(
+                '<div class="p-3 bg-yellow-900/40 border border-yellow-800 rounded text-yellow-300 text-sm">'
+                f"Fichier vide ou texte non extractible : {filename}."
+                "</div>"
+            )
+    except Exception as e:
+        log.warning("admin.upload_extraction_failed", filename=filename, error=str(e))
+        return HTMLResponse(
+            '<div class="p-3 bg-red-900/40 border border-red-800 rounded text-red-300 text-sm">'
+            f"Erreur extraction : {filename}."
+            "</div>"
+        )
+
+    doc_id = f"doc-upload-{hash(filename + dossier_id + marque) % 100000000:08d}"
+    date_str = datetime.now().strftime("%Y-%m-%d")
+
+    # Persist local tracking
+    await db.execute(
+        "INSERT INTO document_scanned (doc_id, dossier_id, marque, titre, format, type, date, size_bytes) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(doc_id) DO UPDATE SET created_at=datetime('now')",
+        (doc_id, dossier_id, marque, titre, Path(filename).suffix.lower().lstrip("."), "document", date_str, len(content)),
+    )
+    await db.commit()
+
+    # Fire-and-forget Cerveau2
+    asyncio.create_task(  # noqa: RUF006
+        feed_document(
+            doc_id=doc_id,
+            type="document",
+            dossier_id=dossier_id,
+            marque=marque,
+            date=date_str,
+            titre=titre,
+            body=text,
+            metadata={"source": "cockpit_upload", "filename": filename, "size_bytes": len(content)},
+            base_url=settings.cerveau2_base_url,
+            api_secret=settings.cerveau2_api_secret,
+        )
+    )
+
+    ip = request.client.host if request.client else None
+    await audit_log(
+        db, user["id"], "document_upload", "document", doc_id,
+        f"{filename} -> {dossier_id}", ip, request.headers.get("user-agent"),
+    )
+
+    return HTMLResponse(
+        '<div class="p-3 bg-green-900/40 border border-green-800 rounded text-green-300 text-sm">'
+        f"<b>{filename}</b> ingéré avec succès dans Cerveau2 "
+        f"(dossier <b>{dossier_id}</b>, marque <b>{marque}</b>)."
+        "</div>"
+    )
 
 
 @router.get("/audit")

@@ -12,13 +12,14 @@ from pathlib import Path
 import structlog
 from aioimaplib import aioimaplib
 
-from app.cerveau_client import feed_correspondance
+from app.cerveau_client import feed_correspondance, feed_document
 from app.cerveau_dossier import derive_dossier_id
 from app.config import MailboxConfig, get_settings
 from app.delivery.resend_notifier import IncomingMail, notify_draft
 from app.delivery.slack_notifier import notify_new_draft as notify_slack_draft
 from app.healthcheck import health
 from app.pipeline.classifier import classify
+from app.pipeline.document_extract import extract_text_bytes, is_supported
 from app.pipeline.generator import generate_draft
 from app.pipeline.language import detect_language
 from app.pipeline.prefilter import quick_classify
@@ -209,6 +210,46 @@ async def _poll_once(mailbox: MailboxConfig) -> None:
                 error=str(e),
             )
             await asyncio.sleep(backoff)
+
+
+def _extract_attachments(msg: Message) -> list[tuple[str, bytes]]:
+    """Extrait les pièces jointes supportées d'un email multipart.
+
+    Retourne une liste de (filename, data_bytes) pour les formats
+    que document_extract sait parser. Ignore les exécutables, les
+    images signature/logo vides, et les formats non supportés.
+    """
+    if not msg.is_multipart():
+        return []
+
+    results: list[tuple[str, bytes]] = []
+    seen_names: set[str] = set()
+
+    for part in msg.walk():
+        filename = part.get_filename() or ""
+        if not filename or filename in seen_names:
+            continue
+        seen_names.add(filename)
+
+        # Ignorer les exécutables
+        if filename.lower().endswith((".exe", ".zip", ".js", ".vbs", ".scr", ".bat", ".cmd")):
+            continue
+
+        if not is_supported(filename):
+            continue
+
+        payload = part.get_payload(decode=True)
+        if not payload or len(payload) == 0:
+            continue
+
+        # Heuristique : ignorer les mini-images (probablement logo/signature)
+        if filename.lower().endswith((".jpg", ".jpeg", ".png", ".gif", ".webp")):
+            if len(payload) < 2048:
+                continue
+
+        results.append((filename, payload))
+
+    return results
 
 
 def _is_verified_demande_client(category: str, msg: Message) -> bool:
@@ -437,6 +478,43 @@ async def _process_single_mail(
                 api_secret=settings.cerveau2_api_secret,
             )
         )
+
+        # --- Pièces jointes -> Cerveau2 ---
+        attachments = _extract_attachments(msg)
+        for att_filename, att_data in attachments:
+            att_text = extract_text_bytes(att_data, att_filename)
+            if not att_text or not att_text.strip():
+                continue
+            att_id = f"att-{mail_id}-{hash(att_filename) % 100000000:08d}"
+            asyncio.create_task(  # noqa: RUF006
+                feed_document(
+                    doc_id=att_id,
+                    type="document",
+                    dossier_id=dossier_id,
+                    marque=_MARQUE_CERVEAU2.get(mailbox.name, mailbox.name),
+                    date=date_str,
+                    titre=f"[PJ] {att_filename}",
+                    body=att_text,
+                    metadata={
+                        "source": "piece_jointe_email",
+                        "parent_message_id": message_id or f"{mailbox.name}_{uid}",
+                        "filename": att_filename,
+                        "size_bytes": len(att_data),
+                    },
+                    zone="jaune",
+                    langue=language,
+                    base_url=settings.cerveau2_base_url,
+                    api_secret=settings.cerveau2_api_secret,
+                )
+            )
+            log.info(
+                "poller.attachment_ingested",
+                mailbox=mailbox.name,
+                uid=uid,
+                filename=att_filename,
+                dossier_id=dossier_id,
+                size=len(att_data),
+            )
 
     if category == "demande_client" and is_new and not settings.dry_run:
         incoming = IncomingMail(

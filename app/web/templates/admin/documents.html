@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+
+{% block title %}Documents — Admin{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <h1 class="text-2xl font-bold">UPLOAD Documents</h1>
+    <p class="text-gray-400 text-sm">Ingérer des fichiers dans Cerveau2 — PDF, Word, TXT, images (OCR), et plus.</p>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    {# Zone upload #}
+    <div class="bg-gray-900 border border-gray-800 rounded-lg p-6">
+        <h2 class="font-semibold mb-4 text-indigo-300">Nouveau document</h2>
+
+        <form hx-post="/admin/api/documents/upload"
+              hx-encoding="multipart/form-data"
+              hx-target="#upload-result"
+              class="space-y-4"
+              @submit="$el.reset()"
+              x-data="">
+            <div>
+                <label class="block text-sm mb-1 text-gray-400">Fichier</label>
+                <input type="file" name="file" required
+                       accept=".txt,.md,.csv,.json,.xml,.html,.pdf,.doc,.docx,.jpg,.jpeg,.png,.tiff,.tif,.bmp,.gif,.webp"
+                       class="w-full text-sm text-gray-300 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:bg-indigo-900 file:text-indigo-200 file:font-medium hover:file:bg-indigo-800 file:cursor-pointer bg-gray-800 border border-gray-700 rounded px-3 py-2">
+                <p class="text-xs text-gray-500 mt-1">
+                    Formats : TXT, MD, CSV, JSON, XML, HTML, PDF, DOCX, JPG, PNG, TIFF (OCR).<br>
+                    <span class="text-indigo-400">V2 : MP3, MP4 (transcription audio/vidéo).</span>
+                </p>
+            </div>
+
+            <div>
+                <label class="block text-sm mb-1 text-gray-400">Dossier client</label>
+                <input type="text" name="dossier_id" required placeholder="ex: ADF, PRJ2024..."
+                       class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-gray-200 text-sm">
+                <p class="text-xs text-gray-500 mt-1">
+                    Identifiant du dossier Cerveau2. Si inconnu, laisser vide — le système essaiera de le dériver.
+                </p>
+            </div>
+
+            <div>
+                <label class="block text-sm mb-1 text-gray-400">Marque</label>
+                <select name="marque" required
+                        class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-gray-200 text-sm">
+                    <option value="detectivebelgique">Detective Belgique</option>
+                    <option value="detectivebelgium">Detective Belgium</option>
+                    <option value="dpdhu">DPDH Investigations</option>
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-sm mb-1 text-gray-400">Titre / description</label>
+                <input type="text" name="titre" placeholder="Rapport surveillance Dupont"
+                       class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-gray-200 text-sm">
+            </div>
+
+            <button type="submit"
+                    class="w-full px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 rounded text-sm font-medium text-white">
+                Ingestionner dans Cerveau2
+            </button>
+        </form>
+
+        <div id="upload-result" class="mt-4"></div>
+    </div>
+
+    {# Historique récent #}
+    <div class="bg-gray-900 border border-gray-800 rounded-lg p-6">
+        <h2 class="font-semibold mb-4 text-indigo-300">Documents ingérés récemment</h2>
+
+        {% if documents %}
+        <div class="space-y-3 max-h-[500px] overflow-y-auto">
+            {% for doc in documents %}
+            <div class="flex items-start gap-3 p-3 bg-gray-800 rounded border border-gray-700">
+                <div class="text-lg">
+                    {% if doc.type == 'document' %}
+                        📄
+                    {% elif doc.type == 'correspondance' %}
+                        📧
+                    {% else %}
+                        📎
+                    {% endif %}
+                </div>
+                <div class="flex-1 min-w-0">
+                    <div class="text-sm font-medium truncate">{{ doc.titre }}</div>
+                    <div class="text-xs text-gray-400 mt-0.5">
+                        {{ doc.dossier_id }} — {{ doc.marque }} — {{ doc.date }}
+                    </div>
+                </div>
+                <span class="text-[10px] px-1.5 py-0.5 bg-gray-700 rounded text-gray-300 uppercase">{{ doc.format }}</span>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-sm text-gray-500 italic">Aucun document ingéré récemment.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

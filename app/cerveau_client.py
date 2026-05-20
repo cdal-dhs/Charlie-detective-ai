@@ -147,5 +147,82 @@ async def feed_correspondance(
         if attempt < max_retries:
             await asyncio.sleep(2 ** attempt)
 
-    log.error("cerveau.feed_gave_up", message_id=message_id, dossier_id=dossier_id)
+async def feed_document(
+    *,
+    doc_id: str,
+    type: str,
+    dossier_id: str,
+    marque: str,
+    date: str,
+    titre: str,
+    body: str,
+    metadata: dict | None = None,
+    zone: str = "jaune",
+    langue: str = "fr",
+    base_url: str,
+    api_secret: str,
+) -> bool:
+    """Envoie un document à Cerveau2 via POST /ingest-note.
+
+    Même pattern fire-and-forget que feed_correspondance.
+    Retourne True si l'ingestion a réussi, False sinon.
+    """
+    if not base_url or not api_secret:
+        return False
+
+    payload = {
+        "id": doc_id,
+        "type": type,
+        "dossier_id": dossier_id,
+        "marque": marque,
+        "date": date,
+        "titre": titre,
+        "body": body,
+        "metadata": metadata or {},
+        "zone": zone,
+        "langue": langue,
+    }
+
+    max_retries = 3
+    for attempt in range(1, max_retries + 1):
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(
+                    f"{base_url.rstrip('/')}/ingest-note",
+                    json=payload,
+                    headers={"Authorization": f"Bearer {api_secret}"},
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                log.info(
+                    "cerveau.document_feed_ok",
+                    doc_id=doc_id,
+                    dossier_id=dossier_id,
+                    created=data.get("created", False),
+                )
+                return True
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 409:
+                log.info("cerveau.document_duplicate", doc_id=doc_id, dossier_id=dossier_id)
+                return True
+            log.warning(
+                "cerveau.document_feed_failed",
+                attempt=attempt,
+                status=e.response.status_code,
+                doc_id=doc_id,
+                dossier_id=dossier_id,
+            )
+        except Exception as e:
+            log.warning(
+                "cerveau.document_feed_error",
+                attempt=attempt,
+                error=str(e),
+                doc_id=doc_id,
+                dossier_id=dossier_id,
+            )
+
+        if attempt < max_retries:
+            await asyncio.sleep(2 ** attempt)
+
+    log.error("cerveau.document_feed_gave_up", doc_id=doc_id, dossier_id=dossier_id)
     return False
