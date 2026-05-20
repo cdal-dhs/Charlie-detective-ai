@@ -12,6 +12,7 @@ from app.pipeline.rag import RetrievedPair, retrieve
 log = structlog.get_logger()
 
 PERSONALITY_PATH = Path(__file__).parent.parent / "prompts" / "personality_daniel.txt"
+SOUL_PATH = Path(__file__).parent.parent / "prompts" / "SOUL.md"
 
 
 @dataclass
@@ -26,6 +27,22 @@ class GenerationResult:
 
 def _load_personality() -> str:
     return PERSONALITY_PATH.read_text(encoding="utf-8")
+
+
+def _load_soul_for_brand(brand: str) -> str:
+    """Extrait du SOUL.md la section correspondant à la marque demandée."""
+    if not SOUL_PATH.exists():
+        return ""
+    text = SOUL_PATH.read_text(encoding="utf-8")
+    header = f"## {brand}"
+    idx = text.find(header)
+    if idx == -1:
+        return text  # fallback : tout le fichier
+    start = idx
+    end = text.find("\n## ", start + len(header))
+    if end == -1:
+        end = len(text)
+    return text[start:end].strip()
 
 
 def _format_rag_context(pairs: list[RetrievedPair]) -> str:
@@ -57,10 +74,12 @@ def _build_messages(
     pairs: list[RetrievedPair],
     vault_notes: list[VaultNote],
 ) -> list[dict]:
+    soul_section = _load_soul_for_brand(mailbox.brand)
     system = (
         _load_personality()
         + f"\n\nMarque/boîte source : {mailbox.brand}"
         + f"\nLangue de réponse OBLIGATOIRE : {language}"
+        + (f"\n\n{soul_section}" if soul_section else "")
     )
     vault_section = _format_vault_context(vault_notes)
     user = (

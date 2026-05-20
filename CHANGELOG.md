@@ -4,6 +4,19 @@
 
 ---
 
+## [1.10.0] — 2026-05-20
+
+### Ajouté
+- **SOUL.md — Guide de style Daniel par marque** : nouveau script `scripts/extract_soul.py` qui interroge Cerveau2 pour récupérer les emails sortants (`direction="out"`) de chaque marque, analyse le style d'écriture via LLM, et génère `app/prompts/SOUL.md` structuré par marque (Detective Belgique, Detective Belgium, DPDH Investigations). Couvre ton, registre, formules récurrentes, signature, règles absolues.
+- **Intégration SOUL.md dans le générateur** : `app/pipeline/generator.py` injecte désormais la section correspondant à `mailbox.brand` dans le prompt système, en complément de `personality_daniel.txt`. Permet à Charlie de calquer le style spécifique de Daniel selon la marque concernée.
+- **Documentation API Cerveau2** : `docs/CERVEAU2_API.md` référence complète des endpoints `/query` et `/ingest-email`, payloads, mapping marques, format des notes, pièges résolus et commandes de diagnostic.
+- **Ingestion batch des emails sortants** : nouveau script `scripts/ingest_sent_to_cerveau2.py` qui balaie les dossiers "Sent" des 3 boîtes IMAP et les injecte dans Cerveau2 (`direction="out"`) pour enrichir le corpus d'analyse de style.
+
+### Corrigé
+- **Contrainte `limit` Cerveau2** : le endpoint `/query` rejette `limit > 20` (422). `extract_soul.py` et `query_vault()` ont été ajustés pour respecter ce plafond.
+
+---
+
 ## [1.9.9] — 2026-05-20
 
 ### Corrigé
