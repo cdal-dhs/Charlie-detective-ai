@@ -276,13 +276,15 @@ def _save_attachments(
             except Exception:
                 pass
 
+            # Stocker un chemin relatif pour être portable Mac → VPS
+            rel_path = storage_path.relative_to(data_dir)
             conn.execute(
                 """
                 INSERT INTO email_attachment
                     (mail_processed_id, filename, storage_path, size_bytes, extracted_text_preview)
                 VALUES (?, ?, ?, ?, ?)
                 """,
-                (mail_id, filename, str(storage_path), len(data), text_preview),
+                (mail_id, filename, str(rel_path), len(data), text_preview),
             )
         conn.commit()
     finally:

@@ -284,7 +284,11 @@ async def download_attachment(
     if not row:
         raise HTTPException(status_code=404, detail="Attachment not found")
     storage_path, filename = row
+    settings = get_settings()
     path = Path(storage_path)
+    # Support anciens chemins absolus (pré-v1.12.5) + nouveaux relatifs
+    if not path.is_absolute():
+        path = settings.data_dir / path
     if not path.exists():
         raise HTTPException(status_code=404, detail="File not found on disk")
     return FileResponse(

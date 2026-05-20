@@ -4,6 +4,15 @@
 
 ---
 
+## [1.12.5] — 2026-05-20
+
+### Corrigé
+- **Fix téléchargement pièces jointes** : le endpoint `/app/attachments/{id}/download` retournait 404/Internal Server Error car `storage_path` était stocké en **chemin absolu du Mac de développement** (`/Users/cdal/...`) dans la DB. Sur le VPS, ce chemin n'existe pas.
+  - `_save_attachments()` : stocke désormais un chemin **relatif** à `data_dir` (`attachments/{mail_id}/{filename}`).
+  - `download_attachment()` : reconstruit le chemin absolu avec `settings.data_dir / path`, tout en supportant les anciens chemins absolus pour la rétrocompatibilité.
+
+---
+
 ## [1.12.4] — 2026-05-20
 
 ### Corrigé
