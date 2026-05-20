@@ -34,7 +34,7 @@ async def query_vault(
         payload["dossier_id"] = dossier_id
 
     try:
-        async with httpx.AsyncClient(timeout=4.0) as client:
+        async with httpx.AsyncClient(timeout=12.0) as client:
             resp = await client.post(
                 f"{base_url.rstrip('/')}/query",
                 json=payload,

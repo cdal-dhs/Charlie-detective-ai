@@ -4,6 +4,13 @@
 
 ---
 
+## [1.12.4] — 2026-05-20
+
+### Corrigé
+- **Timeout Cerveau2 passé de 4s à 12s** : Cerveau2 met ~5.5s à répondre sur des questions complexes (recherche globale + LLM). Le timeout de 4s dans `query_vault()` causait un timeout silencieux : Charlie recevait `vault: 0` alors que Cerveau2 avait bien trouvé le PDF. Fix : `timeout=12.0` dans `app/cerveau_client.py`.
+
+---
+
 ## [1.12.3] — 2026-05-20
 
 ### Corrigé
