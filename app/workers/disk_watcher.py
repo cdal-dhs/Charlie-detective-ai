@@ -10,7 +10,7 @@ from app.config import get_settings
 
 log = structlog.get_logger()
 
-THRESHOLD_PERCENT = 24
+THRESHOLD_PERCENT = 25
 CHECK_INTERVAL_MINUTES = 60
 RESEND_ENDPOINT = "https://api.resend.com/emails"
 

@@ -4,6 +4,14 @@
 
 ---
 
+## [1.10.4] — 2026-05-20
+
+### Modifié
+- **Seuil alerte disque** : `THRESHOLD_PERCENT` passé de 24% à **25%** dans `app/workers/disk_watcher.py`.
+- **Nettoyage VPS** : `docker system prune -af` sur le VPS Hostinger → libération de **~120 GB** (images inutilisées 27 GB + build cache 90 GB). Espace libre passé de 19.5% à ~81%.
+
+---
+
 ## [1.10.3] — 2026-05-20
 
 ### Ajouté
