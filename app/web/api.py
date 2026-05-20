@@ -494,6 +494,9 @@ def _format_rows_html(rows: list[dict]) -> str:
 
     headers = list(rows[0].keys())
     has_id = "id" in headers
+    # Les résultats historiques (archives boite1/2/3) ont une colonne source_db —
+    # leur id n'est PAS un mail_id de mail_processed, on ne crée pas de liens.
+    is_historical = "source_db" in headers
     # Reorder: date first, then id, subject, sender, others
     priority = ["received_at", "id", "subject", "sender"]
     ordered = [h for h in priority if h in headers] + [h for h in headers if h not in priority]
@@ -512,8 +515,11 @@ def _format_rows_html(rows: list[dict]) -> str:
             if h == "received_at" and v:
                 val = str(v)[:16].replace("T", " ")  # 2026-05-15T10:30 → 2026-05-15 10:30
             if h == "id" and v is not None:
-                val = f'<a href="/app/conversation/{v}" target="_blank" class="text-blue-400 hover:underline font-medium">#{v}</a>'
-            elif h == "subject" and has_id and r.get("id") is not None:
+                if is_historical:
+                    val = f'<span class="text-gray-500 font-medium">#{v}</span>'
+                else:
+                    val = f'<a href="/app/conversation/{v}" target="_blank" class="text-blue-400 hover:underline font-medium">#{v}</a>'
+            elif h == "subject" and has_id and r.get("id") is not None and not is_historical:
                 val = f'<a href="/app/conversation/{r["id"]}" target="_blank" class="text-blue-400 hover:underline">{val}</a>'
             elif h == "mailbox_name" and v in BOX_ABBR:
                 val = BOX_ABBR[v]

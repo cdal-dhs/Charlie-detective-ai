@@ -4,6 +4,14 @@
 
 ---
 
+## [1.9.7] — 2026-05-20
+
+### Corrigé
+- **Fix liens conversation 404 sur résultats archives** : `_format_rows_html()` dans `app/web/api.py` créait systématiquement des liens `/app/conversation/{id}` pour toute colonne `id`, même quand les résultats venaient des archives historiques (`boite1/2/3.sqlite`). Les IDs des archives ne correspondent pas à la table `mail_processed` → 404. Désormais, la présence de la colonne `source_db` (exclusives aux résultats historiques) désactive les liens : `id` et `subject` sont affichés comme texte simple sans lien.
+- **Version bump 1.9.7** : `_version.py`, CHANGELOG synchronisés.
+
+---
+
 ## [1.9.6] — 2026-05-19
 
 ### Corrigé
