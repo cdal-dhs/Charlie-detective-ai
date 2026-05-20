@@ -4,6 +4,15 @@
 
 ---
 
+## [1.12.1] — 2026-05-20
+
+### Corrigé
+- **Fix SQL cleanup attachments** : correction du paramètre bind SQLite dans `cleanup_old_attachments()`.  
+  `datetime('now', '-? days')` ne fonctionne pas avec `?` à l'intérieur d'une string SQLite → remplacé par `datetime('now', '-' || ? || ' days')`.  
+  Empêche l'erreur `Incorrect number of bindings supplied` qui bloquait la purge quotidienne des pièces jointes.
+
+---
+
 ## [1.12.0] — 2026-05-20
 
 ### Ajouté

@@ -294,7 +294,7 @@ def cleanup_old_attachments(db_path: Path, data_dir: Path, retention_days: int =
     conn = sqlite3.connect(db_path)
     try:
         cursor = conn.execute(
-            "SELECT id, storage_path FROM email_attachment WHERE created_at < datetime('now', '-? days')",
+            "SELECT id, storage_path FROM email_attachment WHERE created_at < datetime('now', '-' || ? || ' days')",
             (retention_days,),
         )
         rows = cursor.fetchall()
