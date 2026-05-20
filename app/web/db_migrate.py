@@ -128,6 +128,23 @@ async def _create_tables(db: aiosqlite.Connection) -> None:
         )
         """
     )
+    await db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS email_attachment (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            mail_processed_id INTEGER NOT NULL,
+            filename TEXT NOT NULL,
+            storage_path TEXT NOT NULL,
+            size_bytes INTEGER DEFAULT 0,
+            extracted_text_preview TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (mail_processed_id) REFERENCES mail_processed(id) ON DELETE CASCADE
+        )
+        """
+    )
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_email_attachment_mail_id ON email_attachment(mail_processed_id)"
+    )
 
 
 async def _add_mail_processed_columns(db: aiosqlite.Connection) -> None:

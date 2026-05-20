@@ -4,6 +4,22 @@
 
 ---
 
+## [1.12.0] — 2026-05-20
+
+### Ajouté
+- **Dashboard Pièces Jointes** : les PJ extraites des emails sont maintenant visibles dans le cockpit.
+  - **Badge 📎 dans l'inbox** : colonne "PJ" indiquant le nombre de pièces jointes par email (HTMX filter/sort compatible).
+  - **Bloc "Pièces jointes" dans la conversation** : liste des fichiers avec nom, taille, bouton **Télécharger**, et aperçu texte extractible (collapsible).
+  - **Endpoint `/app/attachments/{id}/download`** : serve les fichiers bruts via `FileResponse` avec auth operator.
+- **Stockage local des PJ** : `_save_attachments()` dans `app/workers/imap_poller.py` écrit les fichiers sur disque (`data/attachments/{mail_id}/{filename}`) et insère une ligne par PJ dans la nouvelle table `email_attachment` (preview texte inclus).
+- **Cleanup automatique 30 jours** : tâche de fond `run_attachment_cleanup()` dans `app/main.py` qui purge quotidiennement les PJ de plus de 30 jours (disque + DB), conformément au principe que Cerveau2 conserve l'index vectoriel à long terme.
+
+### Architecture
+- Table `email_attachment` : `id`, `mail_processed_id`, `filename`, `storage_path`, `size_bytes`, `extracted_text_preview`, `created_at`. Index sur `mail_processed_id`. Clé étrangère `ON DELETE CASCADE`.
+- Les PJ continuent d'être ingérées dans **Cerveau2** (unchanged) ; le stockage local sert uniquement au dashboard visuel et au téléchargement immédiat.
+
+---
+
 ## [1.11.0] — 2026-05-20
 
 ### Ajouté

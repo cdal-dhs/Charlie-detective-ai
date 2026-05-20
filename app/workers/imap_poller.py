@@ -252,6 +252,69 @@ def _extract_attachments(msg: Message) -> list[tuple[str, bytes]]:
     return results
 
 
+def _save_attachments(
+    db_path: Path,
+    mail_id: int,
+    attachments: list[tuple[str, bytes]],
+    data_dir: Path,
+) -> None:
+    """Write attachments to disk and track them in email_attachment table."""
+    att_dir = data_dir / "attachments" / str(mail_id)
+    att_dir.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path)
+    try:
+        for filename, data in attachments:
+            safe_name = filename.replace("/", "_").replace("\\", "_")
+            storage_path = att_dir / safe_name
+            storage_path.write_bytes(data)
+
+            text_preview = ""
+            try:
+                txt = extract_text_bytes(data, filename)
+                if txt:
+                    text_preview = txt[:3000]
+            except Exception:
+                pass
+
+            conn.execute(
+                """
+                INSERT INTO email_attachment
+                    (mail_processed_id, filename, storage_path, size_bytes, extracted_text_preview)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (mail_id, filename, str(storage_path), len(data), text_preview),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def cleanup_old_attachments(db_path: Path, data_dir: Path, retention_days: int = 30) -> None:
+    """Purge attachments older than retention_days from disk and DB."""
+    conn = sqlite3.connect(db_path)
+    try:
+        cursor = conn.execute(
+            "SELECT id, storage_path FROM email_attachment WHERE created_at < datetime('now', '-? days')",
+            (retention_days,),
+        )
+        rows = cursor.fetchall()
+        for _id, storage_path in rows:
+            try:
+                Path(storage_path).unlink(missing_ok=True)
+                # Also try to remove empty parent dir
+                parent = Path(storage_path).parent
+                if parent.exists() and not any(parent.iterdir()):
+                    parent.rmdir()
+            except Exception:
+                pass
+            conn.execute("DELETE FROM email_attachment WHERE id = ?", (_id,))
+        conn.commit()
+        if rows:
+            log.info("attachments.purged", count=len(rows), retention_days=retention_days)
+    finally:
+        conn.close()
+
+
 def _is_verified_demande_client(category: str, msg: Message) -> bool:
     """Garde-fou final : même si le LLM dit 'demande_client', on bloque les
     emails automatiques évidents avant de notifier Slack."""
@@ -441,6 +504,24 @@ async def _process_single_mail(
         status,
     )
 
+    # --- Sauvegarde locale des pièces jointes (tous les emails) ---
+    attachments = _extract_attachments(msg)
+    if attachments:
+        await asyncio.to_thread(
+            _save_attachments,
+            settings.db_agent_state,
+            mail_id,
+            attachments,
+            settings.data_dir,
+        )
+        log.info(
+            "poller.attachments_saved",
+            mailbox=mailbox.name,
+            uid=uid,
+            count=len(attachments),
+            mail_id=mail_id,
+        )
+
     # --- Alimentation Cerveau2 (tout sauf newsletter / phishing) ---
     if category not in ("newsletter", "phishing") and not settings.dry_run:
         dossier_id = derive_dossier_id(
@@ -480,7 +561,6 @@ async def _process_single_mail(
         )
 
         # --- Pièces jointes -> Cerveau2 ---
-        attachments = _extract_attachments(msg)
         for att_filename, att_data in attachments:
             att_text = extract_text_bytes(att_data, att_filename)
             if not att_text or not att_text.strip():

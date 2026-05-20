@@ -138,6 +138,7 @@
               @click="if (sort === 'subject') { order = (order === 'asc') ? 'desc' : 'asc'; } else { sort = 'subject'; order = 'asc'; } htmx.trigger('#filter-form', 'submit');"
             >Sujet{% if sort == 'subject' %}<span class="text-blue-400 ml-1">{{ '▲' if order == 'asc' else '▼' }}</span>{% else %}<span class="text-gray-600 ml-1">↕</span>{% endif %}</button>
           </th>
+          <th class="px-1 py-3 w-8 text-center">PJ</th>
           <th class="px-2 py-3 max-w-[140px]">
             <button class="flex items-center gap-1 hover:text-white cursor-pointer uppercase text-xs"
               @click="if (sort === 'sender') { order = (order === 'asc') ? 'desc' : 'asc'; } else { sort = 'sender'; order = 'asc'; } htmx.trigger('#filter-form', 'submit');"

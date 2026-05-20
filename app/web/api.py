@@ -75,10 +75,11 @@ async def _fetch_mails_partial(
 
     # Tri par défaut intelligent : pending first, high priority first, puis date
     sql = (
-        "SELECT id, mailbox_name, subject, sender, received_at, category, "
-        "status, priority, processed_at, body_preview "
-        "FROM mail_processed WHERE " + " AND ".join(where) + " "
-        f"ORDER BY (status = 'pending') DESC, (priority = 'high') DESC, {col} {order} LIMIT ?"
+        "SELECT m.id, m.mailbox_name, m.subject, m.sender, m.received_at, m.category, "
+        "m.status, m.priority, m.processed_at, m.body_preview, "
+        "(SELECT COUNT(*) FROM email_attachment WHERE mail_processed_id = m.id) AS attachment_count "
+        "FROM mail_processed m WHERE " + " AND ".join(where) + " "
+        f"ORDER BY (m.status = 'pending') DESC, (m.priority = 'high') DESC, {col} {order} LIMIT ?"
     )
     params.append(limit)
 
@@ -87,7 +88,7 @@ async def _fetch_mails_partial(
 
     cols = [
         "id", "mailbox_name", "subject", "sender", "received_at",
-        "category", "status", "priority", "processed_at", "body_preview",
+        "category", "status", "priority", "processed_at", "body_preview", "attachment_count",
     ]
     return [dict(zip(cols, row, strict=True)) for row in rows]
 

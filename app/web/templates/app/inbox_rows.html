@@ -1,6 +1,6 @@
 {% set box_short = {'detective_belgique': 'D_FR', 'detective_belgium': 'D_NL', 'dpdh_investigations': 'D_PD'} %}
 {% if not mails %}
-<tr><td colspan="7" class="px-4 py-8 text-center text-gray-500">Aucun message</td></tr>
+<tr><td colspan="8" class="px-4 py-8 text-center text-gray-500">Aucun message</td></tr>
 {% else %}
 {% for m in mails %}
 {% set effective_status = m.status or 'pending' %}
@@ -14,6 +14,11 @@
   <td class="px-2 py-3 whitespace-nowrap w-12 text-center text-xs font-medium text-gray-400 {% if is_hot %}border-l-4 border-l-green-500{% elif is_danger %}border-l-4 border-l-red-500{% endif %}">{{ box_short.get(m.mailbox_name, m.mailbox_name or '-') }}</td>
   <td class="px-3 py-3 max-w-md">
     <a href="/app/conversation/{{ m.id }}" class="text-blue-400 hover:underline truncate block">{{ m.subject or '(sans sujet)' }}</a>
+  </td>
+  <td class="px-1 py-3 w-8 text-center">
+    {% if m.attachment_count %}
+    <span class="text-gray-400" title="{{ m.attachment_count }} pièce(s) jointe(s)">📎</span>
+    {% endif %}
   </td>
   <td class="px-2 py-3 max-w-[140px] truncate text-gray-400">{{ m.sender or '-' }}</td>
   <td class="px-2 py-3 w-32">

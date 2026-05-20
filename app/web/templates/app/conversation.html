@@ -57,6 +57,36 @@
         </div>
       </div>
 
+      <!-- Attachments -->
+      {% if attachments %}
+      <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+        <div class="flex items-center gap-2 mb-3">
+          <span class="w-2 h-2 rounded-full bg-yellow-400"></span>
+          <h2 class="font-semibold">Pièces jointes ({{ attachments|length }})</h2>
+        </div>
+        <div class="space-y-2">
+          {% for att in attachments %}
+          <div class="border border-gray-800 rounded p-3 text-sm">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="text-gray-400">📎</span>
+                <span class="font-medium text-gray-200">{{ att.filename }}</span>
+                <span class="text-xs text-gray-500">({{ (att.size_bytes // 1024) or 1 }} KB)</span>
+              </div>
+              <a href="/app/attachments/{{ att.id }}/download" class="px-3 py-1 bg-gray-800 hover:bg-gray-700 rounded text-xs text-blue-400">Télécharger</a>
+            </div>
+            {% if att.extracted_text_preview %}
+            <details class="mt-2">
+              <summary class="text-xs text-gray-500 cursor-pointer hover:text-gray-300">Afficher l'aperçu texte</summary>
+              <div class="mt-2 bg-gray-950 border border-gray-800 rounded p-2 text-xs text-gray-400 whitespace-pre-wrap max-h-40 overflow-y-auto">{{ att.extracted_text_preview }}</div>
+            </details>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
       <!-- AI draft response -->
       <div id="ai-draft-section">
         {% if mail.ai_draft %}

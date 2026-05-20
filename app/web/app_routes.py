@@ -3,7 +3,7 @@ from __future__ import annotations
 import aiosqlite
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from app import __version__
@@ -125,10 +125,11 @@ async def _fetch_mails(
 
     # Tri par défaut intelligent : pending first, high priority first, puis date
     sql = (
-        "SELECT id, mailbox_name, subject, sender, received_at, category, "
-        "status, priority, processed_at, body_preview "
-        "FROM mail_processed WHERE " + " AND ".join(where) + " "
-        f"ORDER BY (status = 'pending') DESC, (priority = 'high') DESC, {col} {order} LIMIT ?"
+        "SELECT m.id, m.mailbox_name, m.subject, m.sender, m.received_at, m.category, "
+        "m.status, m.priority, m.processed_at, m.body_preview, "
+        "(SELECT COUNT(*) FROM email_attachment WHERE mail_processed_id = m.id) AS attachment_count "
+        "FROM mail_processed m WHERE " + " AND ".join(where) + " "
+        f"ORDER BY (m.status = 'pending') DESC, (m.priority = 'high') DESC, {col} {order} LIMIT ?"
     )
     params.append(limit)
 
@@ -137,7 +138,7 @@ async def _fetch_mails(
 
     cols = [
         "id", "mailbox_name", "subject", "sender", "received_at",
-        "category", "status", "priority", "processed_at", "body_preview",
+        "category", "status", "priority", "processed_at", "body_preview", "attachment_count",
     ]
     return [dict(zip(cols, row, strict=True)) for row in rows]
 
@@ -165,6 +166,17 @@ async def _fetch_mail(db: aiosqlite.Connection, mail_id: int) -> dict | None:
         "reviewed_at", "sent_at", "sent_by", "body_preview", "body",
     ]
     return dict(zip(cols, row, strict=True))
+
+
+async def _fetch_attachments(db: aiosqlite.Connection, mail_id: int) -> list[dict]:
+    async with db.execute(
+        "SELECT id, filename, storage_path, size_bytes, extracted_text_preview, created_at "
+        "FROM email_attachment WHERE mail_processed_id = ? ORDER BY id",
+        (mail_id,),
+    ) as cursor:
+        rows = await cursor.fetchall()
+    cols = ["id", "filename", "storage_path", "size_bytes", "extracted_text_preview", "created_at"]
+    return [dict(zip(cols, row, strict=True)) for row in rows]
 
 
 async def _fetch_draft_versions(db: aiosqlite.Connection, mail_id: int) -> list[dict]:
@@ -243,13 +255,40 @@ async def conversation_page(
         raise HTTPException(status_code=404, detail="Mail not found")
 
     versions = await _fetch_draft_versions(db, mail_id)
+    attachments = await _fetch_attachments(db, mail_id)
     return templates.TemplateResponse(
         request,
         "app/conversation.html",
         {
             "mail": mail,
             "versions": versions,
+            "attachments": attachments,
             "user": user,
             "version": __version__,
         },
+    )
+
+
+@router.get("/attachments/{attachment_id}/download")
+async def download_attachment(
+    request: Request,
+    attachment_id: int,
+    db: aiosqlite.Connection = Depends(get_db),
+    user: dict = Depends(require_operator),
+):
+    async with db.execute(
+        "SELECT storage_path, filename FROM email_attachment WHERE id = ?",
+        (attachment_id,),
+    ) as cursor:
+        row = await cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    storage_path, filename = row
+    path = Path(storage_path)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="File not found on disk")
+    return FileResponse(
+        path,
+        media_type="application/octet-stream",
+        filename=filename,
     )

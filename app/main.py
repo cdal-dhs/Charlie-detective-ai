@@ -12,7 +12,7 @@ from app.logging_config import cleanup_old_logs, setup_logging
 from app.web.app import run_web_server
 from app.web.db_migrate import migrate
 from app.workers.disk_watcher import watch_disk
-from app.workers.imap_poller import poll_mailbox
+from app.workers.imap_poller import cleanup_old_attachments, poll_mailbox
 
 SOUL_EVOLVE_INTERVAL_HOURS = 72  # 3 jours
 
@@ -50,13 +50,14 @@ async def main() -> None:
     web_task = asyncio.create_task(run_web_server(stop_event), name="web")
     soul_task = asyncio.create_task(run_soul_evolver(stop_event), name="soul-evolver")
     disk_task = asyncio.create_task(watch_disk(stop_event), name="disk-watcher")
+    att_task = asyncio.create_task(run_attachment_cleanup(stop_event), name="attachment-cleanup")
 
     await stop_event.wait()
     log.info("agent.stop_requested")
 
-    for task in [*poller_tasks, web_task, soul_task, disk_task]:
+    for task in [*poller_tasks, web_task, soul_task, disk_task, att_task]:
         task.cancel()
-    await asyncio.gather(*poller_tasks, web_task, soul_task, disk_task, return_exceptions=True)
+    await asyncio.gather(*poller_tasks, web_task, soul_task, disk_task, att_task, return_exceptions=True)
     log.info("agent.stopped")
 
 
@@ -90,6 +91,35 @@ async def run_soul_evolver(stop_event: asyncio.Event) -> None:
                 log.warning("soul_evolver.failed", error=err)
         except Exception as e:
             log.warning("soul_evolver.error", error=str(e))
+
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=interval)
+        except asyncio.TimeoutError:
+            pass
+
+
+async def run_attachment_cleanup(stop_event: asyncio.Event) -> None:
+    """Purge les pièces jointes locales de plus de 30 jours (toutes les 24h)."""
+    log = structlog.get_logger()
+    settings = get_settings()
+    interval = 24 * 3600  # 24h
+
+    # Attendre 10 min au démarrage
+    try:
+        await asyncio.wait_for(stop_event.wait(), timeout=600)
+        return
+    except asyncio.TimeoutError:
+        pass
+
+    while not stop_event.is_set():
+        try:
+            cleanup_old_attachments(
+                settings.db_agent_state,
+                settings.data_dir,
+                retention_days=30,
+            )
+        except Exception as e:
+            log.warning("attachment_cleanup.error", error=str(e))
 
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=interval)
