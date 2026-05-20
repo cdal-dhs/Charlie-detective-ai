@@ -4,6 +4,15 @@
 
 ---
 
+## [1.12.2] — 2026-05-20
+
+### Corrigé
+- **Charlie interroge Cerveau2 pour les questions d'identité** : résout le cas "Comment se nomme l'épouse de CDAL ?" où Charlie répondait "Aucun résultat" alors que le PDF était bien dans Cerveau2.
+  - Ajout de mots-clés d'identité dans `_VAULT_KEYWORDS` (`qui`, `personne`, `nom`, `prenom`, `client`, `epouse`, `mari`, `conjoint`, `contact`, `sappelle`) pour déclencher `query_vault` quand la question porte sur une personne.
+  - Ajout d'un fallback `vault_fallback` : si SQL retourne 0 résultat, pas de catégorie d'enquête détectée, mais la question est une requête d'identité → Charlie interroge Cerveau2 a posteriori et synthétise la réponse.
+
+---
+
 ## [1.12.1] — 2026-05-20
 
 ### Corrigé

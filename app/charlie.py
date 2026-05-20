@@ -595,6 +595,19 @@ async def ask_charlie(
                 result.response_text = f"Erreur SQL : {result.sql_error}"
             return result
 
+    # Fallback vault : si SQL vide + pas de catégorie connue + question identité
+    if sql and not has_sql_data and not matched_category and not has_vault_data:
+        if _is_identity_query(enriched_question):
+            vault_notes = await query_vault(
+                question=enriched_question,
+                base_url=settings.cerveau2_base_url,
+                api_secret=settings.cerveau2_api_secret,
+                limit=settings.cerveau2_limit,
+            )
+            has_vault_data = vault_notes and len(vault_notes) > 0
+            result.vault_notes = vault_notes
+            log.info("charlie.vault_fallback", count=len(vault_notes), question=question[:60])
+
     # Si le vault a des données mais SQL est vide → forcer synthèse conversationnelle
     force_summary = has_vault_data and not has_sql_data
     needs_summary = _needs_summary(question)
@@ -668,6 +681,9 @@ _VAULT_KEYWORDS = (
     "divorce", "separation", "couple", "concubin",
     "droit", "visite", "hebergement", "custodie",
     "rapport", "constat", "photo", "video", "preuve",
+    # Identité / connaissance factuelle (docs Cerveau2)
+    "qui", "personne", "nom", "prenom", "client",
+    "epouse", "mari", "conjoint", "contact",
 )
 
 _DOSSIER_RE = re.compile(
@@ -719,6 +735,17 @@ def _is_vault_relevant(question: str, sql: str) -> bool:
         return True
     q = _normalize(question)
     return any(kw in q for kw in _VAULT_KEYWORDS)
+
+
+_IDENTITY_KEYWORDS = (
+    "qui", "personne", "nom", "prenom", "client",
+    "epouse", "mari", "conjoint", "contact", "sappelle",
+)
+
+
+def _is_identity_query(question: str) -> bool:
+    q = _normalize(question)
+    return any(kw in q for kw in _IDENTITY_KEYWORDS)
 
 
 def _sanitize_rows_for_prompt(rows: list[dict]) -> str:
