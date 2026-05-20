@@ -3,6 +3,7 @@ from __future__ import annotations
 import aiosqlite
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pathlib import Path
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
