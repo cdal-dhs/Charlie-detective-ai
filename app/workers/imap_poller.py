@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import html
 import re
 import sqlite3
 from datetime import datetime
@@ -70,14 +71,14 @@ def _get_body_text(msg: Message) -> str:
             if part.get_content_type() == "text/html":
                 payload = part.get_payload(decode=True)
                 if payload:
-                    html = payload.decode("utf-8", errors="replace")
-                    return re.sub(r"<[^>]+>", "", html)
+                    raw_html = payload.decode("utf-8", errors="replace")
+                    return html.unescape(re.sub(r"<[^>]+>", "", raw_html))
     else:
         payload = msg.get_payload(decode=True)
         if payload:
             text = payload.decode("utf-8", errors="replace")
             if msg.get_content_type() == "text/html":
-                return re.sub(r"<[^>]+>", "", text)
+                return html.unescape(re.sub(r"<[^>]+>", "", text))
             return text
     return ""
 

@@ -4,6 +4,14 @@
 
 ---
 
+## [1.9.8] — 2026-05-20
+
+### Corrigé
+- **Fix décodage entités HTML dans les emails** : `_get_body_text()` dans `app/workers/imap_poller.py` retirait les balises HTML (`re.sub(r"<[^>]+>", "", html)`) mais ne décodait pas les entités HTML (`&#039;`, `&eacute;`, etc.). Résultat : les newsletters et emails HTML étaient illisibles (`l&#039;équipe` au lieu de `l'équipe`). Ajout de `html.unescape()` après le détaggage pour les cas multipart et non-multipart.
+- **Version bump 1.9.8** : `_version.py`, CHANGELOG synchronisés.
+
+---
+
 ## [1.9.7] — 2026-05-20
 
 ### Corrigé
