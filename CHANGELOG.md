@@ -4,6 +4,15 @@
 
 ---
 
+## [1.12.3] — 2026-05-20
+
+### Corrigé
+- **Synthèse vault quand SQL est vide** : résout le cas où Charlie fetchait les notes Cerveau2 mais ne les synthétisait jamais.
+  - La condition `_summarize_results` exigeait `sql and ...` ce qui bloquait la synthèse conversationnelle quand le LLM ne générait pas de requête SQL.
+  - Fix : la synthèse est maintenant déclenchée dès qu'il y a des données (SQL, vault, ou mémoire), indépendamment de la présence d'une requête SQL.
+
+---
+
 ## [1.12.2] — 2026-05-20
 
 ### Corrigé

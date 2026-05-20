@@ -612,8 +612,7 @@ async def ask_charlie(
     force_summary = has_vault_data and not has_sql_data
     needs_summary = _needs_summary(question)
     if (
-        sql
-        and (has_sql_data or has_vault_data or has_memory_data)
+        (has_sql_data or has_vault_data or has_memory_data)
         and (needs_summary or force_summary)
     ):
         summary = await _summarize_results(
