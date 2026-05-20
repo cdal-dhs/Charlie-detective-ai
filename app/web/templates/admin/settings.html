@@ -28,6 +28,9 @@
         <button @click="tab = 'resend'" :class="tab === 'resend' ? 'border-b-2 border-blue-500 text-white' : 'text-gray-400 hover:text-white'" class="px-4 py-3 text-sm font-medium">
             Resend
         </button>
+        <button @click="tab = 'soul'" :class="tab === 'soul' ? 'border-b-2 border-blue-500 text-white' : 'text-gray-400 hover:text-white'" class="px-4 py-3 text-sm font-medium">
+            SOUL.md
+        </button>
     </div>
 
     <div class="p-6">
@@ -160,6 +163,42 @@
                 <p class="text-sm text-yellow-400">
                     La modification des clés API se fait via le fichier <code class="bg-gray-800 px-1 rounded">.env</code> pour le moment.
                 </p>
+            </div>
+        </div>
+
+        {# SOUL.md #}
+        <div x-show="tab === 'soul'" x-cloak
+             x-init="fetch('/admin/api/soul').then(r=>r.json()).then(d=>{ $refs.soulTextarea.value = d.content })"
+             class="space-y-4">
+            <div class="flex items-center justify-between">
+                <h2 class="font-semibold">SOUL.md — Guide de style Daniel Hurchon</h2>
+                <span class="text-xs text-gray-400">{{ user.role }}</span>
+            </div>
+            <p class="text-sm text-gray-400">
+                Ce fichier guide le style d'écriture de Charlie IA pour chaque marque.
+                Modification réservée aux super-admins.
+            </p>
+            <textarea x-ref="soulTextarea"
+                      class="w-full h-[60vh] bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm font-mono text-gray-200 leading-relaxed resize-y"
+                      spellcheck="false"></textarea>
+            <div class="flex items-center gap-3">
+                <button @click="
+                    fetch('/admin/api/soul', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({content: $refs.soulTextarea.value})
+                    }).then(r=>r.json()).then(d=>{
+                        $refs.soulMsg.innerText = 'Sauvegardé !';
+                        $refs.soulMsg.className = 'text-sm text-green-400';
+                        setTimeout(()=>{ $refs.soulMsg.innerText = '' }, 3000);
+                    }).catch(e=>{
+                        $refs.soulMsg.innerText = 'Erreur sauvegarde';
+                        $refs.soulMsg.className = 'text-sm text-red-400';
+                    })
+                " class="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded text-sm font-medium">
+                    Sauvegarder
+                </button>
+                <span x-ref="soulMsg"></span>
             </div>
         </div>
     </div>

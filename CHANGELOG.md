@@ -4,6 +4,13 @@
 
 ---
 
+## [1.10.1] — 2026-05-20
+
+### Ajouté
+- **Onglet SOUL.md dans le panel admin** : nouvel onglet "SOUL.md" dans `/admin/settings`, accessible uniquement aux super-admins. Affiche le contenu de `app/prompts/SOUL.md` dans un textarea éditable (hauteur 60vh, monospace). Bouton "Sauvegarder" qui persiste le fichier sur disque et logue l'action en audit. Chargement asynchrone du contenu via `fetch()` + Alpine.js.
+
+---
+
 ## [1.10.0] — 2026-05-20
 
 ### Ajouté
