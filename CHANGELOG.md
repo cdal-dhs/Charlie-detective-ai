@@ -4,6 +4,13 @@
 
 ---
 
+## [1.10.3] — 2026-05-20
+
+### Ajouté
+- **Surveillance espace disque VPS** : nouveau module `app/workers/disk_watcher.py` qui vérifie l'espace libre du filesystem racine toutes les 60 minutes. Si l'espace libre passe sous **24%**, envoie automatiquement un email d'alerte URGENT via Resend à `draft_recipient` (cdal@digitalhs.biz) avec les détails (total, utilisé, libre en GB et %). One-shot : une seule alerte par crise jusqu'à retour au dessus du seuil. Log structuré à chaque check.
+
+---
+
 ## [1.10.2] — 2026-05-20
 
 ### Ajouté

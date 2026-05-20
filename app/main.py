@@ -11,6 +11,7 @@ from app.delivery.slack_bot import init_slack_bot
 from app.logging_config import cleanup_old_logs, setup_logging
 from app.web.app import run_web_server
 from app.web.db_migrate import migrate
+from app.workers.disk_watcher import watch_disk
 from app.workers.imap_poller import poll_mailbox
 
 SOUL_EVOLVE_INTERVAL_HOURS = 72  # 3 jours
@@ -48,13 +49,14 @@ async def main() -> None:
     ]
     web_task = asyncio.create_task(run_web_server(stop_event), name="web")
     soul_task = asyncio.create_task(run_soul_evolver(stop_event), name="soul-evolver")
+    disk_task = asyncio.create_task(watch_disk(stop_event), name="disk-watcher")
 
     await stop_event.wait()
     log.info("agent.stop_requested")
 
-    for task in [*poller_tasks, web_task, soul_task]:
+    for task in [*poller_tasks, web_task, soul_task, disk_task]:
         task.cancel()
-    await asyncio.gather(*poller_tasks, web_task, soul_task, return_exceptions=True)
+    await asyncio.gather(*poller_tasks, web_task, soul_task, disk_task, return_exceptions=True)
     log.info("agent.stopped")
 
 
