@@ -9,9 +9,10 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# System deps pour torch / sentence-transformers / build
+# System deps pour torch / sentence-transformers / build / OCR
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc g++ libffi-dev libssl-dev \
+    tesseract-ocr libtesseract-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Copier seulement pyproject.toml pour bénéficier du layer cache Docker
