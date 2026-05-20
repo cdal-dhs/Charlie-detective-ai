@@ -20,20 +20,25 @@ L'agent surveille 3 boîtes Infomaniak (3 marques : Detective Belgique, Detectiv
   Pré-filtre règles    → newsletter / facture / phishing / rappel / demande_client évidents → tag & skip
   Classification LLM   → 8 catégories avec few-shots
   Priorité intelligente → demande client chaude = HIGH
+  Extraction pièces jointes → stockage local + ingestion Cerveau2 (100%, zéro tolérance)
   Si demande_client :
     Détection langue (FR/NL/EN)
     RAG sur 1200 paires Q/R historiques (sqlite-vec + multilingual-e5-large)
     Génération brouillon (Kimi K2 via LiteLLM, style "Daniel")
          ↓
 [Flag IMAP AgentProcessed]       → idempotence
-[DB SQLite mail_processed]      → stockage + cockpit web
+[DB SQLite mail_processed]      → stockage + cockpit web + table email_attachment
 [Cockpit web FastAPI]           → detective.digitalhs.biz
   - Auth magic link
-  - Inbox filtrable (tabs, checkboxes boîtes, recherche texte, tri)
+  - Inbox filtrable (tabs, checkboxes boîtes, recherche texte, tri) + badge PJ
   - Édition inline catégorie/statut/priorité (HTMX)
-  - Conversation détaillée avec génération brouillon inline
-  - Chat AI Charlie (SQL read-only natural language)
+  - Conversation détaillée avec viewer pièces jointes (preview texte, download)
+  - Chat AI Charlie (SQL + Cerveau2 vault + mémoire courte)
   - Dashboard admin (stats, settings LLM, audit logs)
+[Cerveau2 vault FastAPI]        → cerveau2-det.digitalhs.biz
+  - Ingestion continue emails + pièces jointes
+  - Recherche globale insensible aux accents, sans troncation
+  - Blindé path-traversal + audit log
 ```
 
 Spec complète : [`docs/SPEC.md`](docs/SPEC.md). Roadmap : [`docs/ROADMAP.md`](docs/ROADMAP.md).
@@ -172,23 +177,24 @@ DETECTIVE_BE/
 
 ## Statut
 
-✅ **MVP opérationnel en production** — `detective.digitalhs.biz`
-- Backend IMAP + génération IA : Docker sur VPS Hostinger
-- Cockpit web : FastAPI via Traefik + HTTPS
-- Classification enrichie : 8 catégories (phishing, rappel, demande_client, facture, newsletter, spam, urgent, autre)
-- Priorité intelligente : demande client chaude = HIGH
-- Chat AI Charlie : SQL read-only, liens cliquables, resizeable
-- Slack Bot Charlie AI : @mention et DM sur #detective
-- **Charlie AI × Cerveau2 vault** (v1.9.x) : recherche dans le second cerveau depuis le chat web et Slack
-- **Recherche par dossier spécifique** (v1.9.3) : extraction auto `dossier_id` (ex: ADF), prompt enrichi SQL + vault forcé
-- Voir `docs/ROADMAP.md` pour les phases restantes (S4 supervision, V2 Drafts IMAP, V3 WhatsApp).
+✅ **Production active** — `detective.digitalhs.biz` — v1.12.7
+
+- **Pipeline IMAP** : polling 3 boîtes, classification 8 catégories, priorité intelligente
+- **Génération brouillon** : style Daniel, multilingue FR/NL/EN, fallback OpenRouter
+- **Cockpit web** : inbox filtrable, conversation avec viewer pièces jointes (badge, liste, preview, download)
+- **Chat AI Charlie** : SQL + Cerveau2 vault, mémoire courte, résumé automatique
+- **Slack Bot Charlie AI** : @mention + DM sur #detective
+- **Cerveau2 vault** (v1.12.x) : ingestion 100% emails + pièces jointes, recherche sans troncation, insensible aux accents, blindé injection
+- **Dashboard admin** : stats, settings LLM, audit logs
+
+Voir `docs/ROADMAP.md` pour la roadmap V2 (auto-amélioration, mémoire long terme, semantic search).
 
 ---
 
 ## Versions
 
-Version source de vérité : **`pyproject.toml`** (`version = "1.9.4"`).
+Version source de vérité : **`app/_version.py`** (`VERSION = "1.12.7"`).
 
-Le badge affiché dans le cockpit (`v1.9.4`) est lu dynamiquement depuis `pyproject.toml` via `importlib.metadata`. Ne modifier la version que dans `pyproject.toml`.
+Le badge affiché dans le cockpit est lu dynamiquement depuis `app/_version.py`. **Tolérance zéro** sur la désynchronisation.
 
 Voir [`CHANGELOG.md`](CHANGELOG.md) pour l'historique détaillé.

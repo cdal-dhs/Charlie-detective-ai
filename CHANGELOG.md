@@ -4,6 +4,22 @@
 
 ---
 
+## [1.12.7] — 2026-05-20
+
+### Corrigé
+- **Ingestion pièces jointes dans Cerveau2 : zéro tolérance**
+  - Bug : si `extract_text_bytes()` retournait vide (PDF illisible, image sans OCR), le code faisait `continue` → la PJ n'allait jamais dans Cerveau2.
+  - Fix : fallback body avec métadonnées pour **toutes** les PJ, même non extractables.
+  - `doc_id` déterministe : `hash()` non reproductible entre redémarrages remplacé par `hashlib.md5`.
+
+### Modifié
+- **Cerveau2 blindé** (repo séparé `Cerveau2-DEtective`) :
+  - Recherche sans troncation (`_extract_keywords()` remplace `split()[:8]`).
+  - Recherche insensible aux accents (`_normalize()` via `unicodedata.normalize("NFKD")`).
+  - Path-traversal guards : `dossier_id` validé `^[A-Za-z0-9_-]+$` dans `query.py`, `vault_reader.py`, `vault_writer.py`, `email_ingester.py`, `note_ingester.py`.
+
+---
+
 ## [1.12.5] — 2026-05-20
 
 ### Corrigé

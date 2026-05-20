@@ -1,10 +1,10 @@
 # HANDOVER.md — Detective.be Agent IA
 
 > **Document de transfert** : état complet du projet, accès, conventions et pièges pour un nouvel agent.
-> **Dernière mise à jour** : 2026-05-19 (v1.9.6)
+> **Dernière mise à jour** : 2026-05-20 (v1.12.7)
 > **Auteur** : CDAL (`cdal@digitalhs.biz`) — Digital Highway Solutions
 
-> **Récapitulatif v1.9.6** : pipeline Charlie AI stabilisé après 5 hotfixes consécutifs le 19/05. Les principaux bugs résolus : garde archives débloquée (vault ne bloque plus la recherche historique), faux dossier_id corrigé (regex stricte), fuite de données bouchée (données anonymisées avant envoi au LLM), tri chronologique RFC 2822, parallélisation SQL+vault+mémoire, timeout vault réduit, filtre archives par année, garde anti-faux-positif SQL (Mode A category exacte vs Mode B LIKE OR), suppression du dump technique Slack. Le système est maintenant fonctionnel pour les requêtes de Daniel mais reste dépendant de la qualité du LLM local (Gemma4:31b via Ollama Pro).
+> **Récapitulatif v1.12.7** : système stabilisé et sécurisé. Corrections critiques : recherche Cerveau2 fiable (pas de troncation à 8 mots, insensible aux accents), blindage path-traversal (`dossier_id` validé partout), ingestion pièces jointes à 100% dans Cerveau2 (zéro tolérance — même non extractables avec fallback), viewer PJ dans le cockpit (badge inbox, liste conversation, preview texte, téléchargement). Dashboard opérationnel 24/7 sur VPS Hostinger.
 
 ---
 
@@ -100,28 +100,33 @@ DETECTIVE_BE/
 
 ---
 
-## 4. État des fonctionnalités (v1.9.4)
+## 4. État des fonctionnalités (v1.12.7)
 
 ### ✅ Opérationnel en production
-- Pipeline IMAP complet : polling 3 boîtes, classification 8 catégories, priorité intelligente
-- Génération brouillon "style Daniel" via RAG + LLM (Kimi K2 / OpenRouter fallback)
-- Cockpit web : inbox filtrable, conversation détaillée, édition inline catégorie/statut/priorité
-- Chat AI Charlie : SQL read-only natural language, liens cliquables, resizeable
-- Slack Bot Charlie AI : @mention et DM sur #detective
-- **Charlie AI × Cerveau2 vault** : recherche dans le second cerveau depuis le chat web et Slack
-- **Recherche par dossier spécifique** : extraction auto `dossier_id` (ex: "ADF"), prompt enrichi SQL + vault forcé
-- **Pipeline Cerveau2 ingestion continue** : hook IMAP post-persist qui alimente Cerveau2 pour tout mail sauf newsletter/phishing. Migration historique one-shot via `scripts/bootstrap_cerveau2.py`.
-- Logs JSON structurés, rotation 7j
-- Newsletter digest quotidien Slack
+- **Pipeline IMAP** : polling 3 boîtes, classification 8 catégories, priorité intelligente
+- **Génération brouillon** : style Daniel, multilingue FR/NL/EN, fallback OpenRouter
+- **Cockpit web** : inbox filtrable (tabs, boîtes, recherche, tri), conversation avec viewer pièces jointes
+- **Pièces jointes** : stockage local `data/attachments/`, table `email_attachment`, endpoint `/app/attachments/{id}/download`, preview texte extrait
+- **Chat AI Charlie** : SQL read-only + Cerveau2 vault + mémoire courte, résumé automatique
+- **Slack Bot Charlie AI** : @mention et DM sur #detective
+- **Cerveau2 vault** : ingestion 100% emails + pièces jointes (zéro tolérance), recherche sans troncation, insensible aux accents, blindé path-traversal
+- **Dashboard admin** : stats, settings LLM, audit logs
+- **Logs JSON structurés**, rotation 7j
+- **Newsletter digest** quotidien Slack
 
 ### ⏳ En cours / à calibrer
-- Calibration qualité : affiner prompt Daniel avec retours terrain
-- Qualité des réponses vault : dépend du contenu indexé dans Cerveau2-Det
+- **Calibration qualité** : affiner prompt Daniel avec retours terrain
+- **Temps de réponse Charlie** : 6-8s actuellement (appels Cerveau2 + LLM fallback)
 
-### ⬜ À venir (roadmap)
-- V2 — Drafts IMAP natifs : basculer livraison Resend → Drafts boîte mail
-- V3 — Bot WhatsApp client : canal client direct
-- S4 — Dashboard supervision avancé
+### ⬜ Roadmap V2 — Système fluide, puissant et auto-améliorant
+> Objectif : Charlie devient un assistant bionique qui "sait tout, n'oublie rien, s'améliore avec le temps".
+
+1. **S1 — Semantic Search Cerveau2** (`sqlite-vec` + embeddings `e5-large`) : comprendre le sens, pas juste les mots-clés. "femme de CDAL" = "épouse de Cyril".
+2. **S2 — Mémoire long terme Charlie** : module `memory.py` qui persiste chaque interaction, correction, préférence. Sarah = épouse est retenu forever.
+3. **S3 — Feedback loop** : bouton ✅/❌ dans le chat, stockage auto des paires (question, bonne réponse) dans Cerveau2 comme FAQ interne.
+4. **S4 — LLM local rapide** : modèle 7B quantifié sur le VPS pour réponses < 2s sur 80% des questions simples. Garder Claude/OpenRouter pour les 20% complexes.
+5. **V2** — Drafts IMAP natifs : basculer livraison Resend → Drafts boîte mail
+6. **V3** — Bot WhatsApp client : canal client direct
 
 ---
 
@@ -202,9 +207,22 @@ Tous les secrets vivent dans `.env` (gitignored) :
 - Dans `app/charlie.py`, le `_summarize_results()` était appelé **avant** l'appel au vault. Le summary ne savait donc pas qu'il y avait des notes vault.
 - **Fix** : vault interrogé **avant** le summary. Prompt `_SUMMARY_PROMPT_VAULT` intègre explicitement les notes du vault quand elles existent.
 
-### Délai LLM (~30s)
-- Le modèle `gemma4:31b` via Ollama Pro met ~30s pour répondre. C'est lié au modèle, pas au code.
-- Si le délai est problématique, envisager un modèle plus rapide (Claude Haiku via OpenRouter) pour les requêtes simples.
+### Recherche Cerveau2 tronquée (fix v1.12.x)
+- `api/routes/query.py` coupait la question à 8 mots (`req.question.split()[:8]`). Un mot-clé en fin de phrase (ex: "CDAL") était supprimé.
+- **Fix** : `_extract_keywords()` garde tous les mots significatifs, sans limite arbitraire.
+
+### Recherche Cerveau2 accent-sensible (fix v1.12.x)
+- `search_global()` comparait "epouse" (sans accent) contre "épouse" (avec accent) → aucun match.
+- **Fix** : `_normalize()` via `unicodedata.normalize("NFKD")` rend la recherche insensible aux accents.
+
+### Pièces jointes non ingérées dans Cerveau2 (fix v1.12.7)
+- Si `extract_text_bytes()` retournait vide (PDF illisible, image sans OCR), le code faisait `continue` → la PJ n'allait jamais dans Cerveau2.
+- **Fix** : fallback body avec métadonnées pour TOUTES les PJ, même non extractables. Hash déterministe MD5 pour `doc_id` stable.
+
+### Délai LLM (~6-8s)
+- Charlie appelle Cerveau2 (~5s) puis le LLM fallback OpenRouter (~3s) en série. Total ~8s.
+- **Mitigation actuelle** : timeout Cerveau2 passé à 12s, parallélisation SQL+vault+mémoire.
+- **Solution future S4** : modèle local 7B quantifié sur le VPS pour réponses < 2s.
 
 ---
 
