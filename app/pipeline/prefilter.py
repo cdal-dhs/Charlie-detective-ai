@@ -224,6 +224,10 @@ def is_phishing(msg: Message) -> bool:
 
 def is_service_email(msg: Message) -> bool:
     """Email automatique d'un service/fournisseur : renouvellement, confirmation, alerte..."""
+    # Garde : si c'est une newsletter (headers évidents), ne PAS classer comme service
+    if is_newsletter(msg):
+        return False
+
     sender = (msg.get("From", "") or "").lower()
     subject = (msg.get("Subject", "") or "").lower()
     body_snippet = _get_body_snippet(msg)
@@ -290,14 +294,16 @@ def quick_classify(msg: Message) -> str | None:
     (→ on délègue au LLM classifier qui a un vrai cerveau).
 
     ORDRE : du plus spécifique/dangereux au plus général.
+    Newsletter AVANT service_email car les newsletters (SendGrid, etc.)
+    peuvent matcher des mots-clés service dans leur corps.
     demande_client est EXCLU du pré-filtre rapide (trop de faux positifs).
     """
-    if is_service_email(msg):
-        return "autre"
     if is_phishing(msg):
         return "phishing"
     if is_newsletter(msg):
         return "newsletter"
+    if is_service_email(msg):
+        return "autre"
     if is_facture(msg):
         return "facture"
     if is_rappel(msg):

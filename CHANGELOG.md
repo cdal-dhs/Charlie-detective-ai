@@ -4,6 +4,14 @@
 
 ---
 
+## [1.9.9] — 2026-05-20
+
+### Corrigé
+- **Fix newsletters classées comme "autre"** : `quick_classify()` testait `is_service_email()` **avant** `is_newsletter()`. Les newsletters envoyées via SendGrid (Cercle Wallonie, etc.) contenaient des mots-clés dans leur corps qui matchaient `AUTRE_KEYWORDS` → classées "autre" au lieu de "newsletter". Deux corrections : (1) `is_newsletter` est désormais testé **avant** `is_service_email` dans `quick_classify()`, (2) `is_service_email()` a une garde `if is_newsletter(msg): return False` pour éviter les faux positifs.
+- **Version bump 1.9.9** : `_version.py`, CHANGELOG synchronisés.
+
+---
+
 ## [1.9.8] — 2026-05-20
 
 ### Corrigé
