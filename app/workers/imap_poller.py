@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import hashlib
 import html
 import re
 import sqlite3
@@ -562,12 +563,32 @@ async def _process_single_mail(
             )
         )
 
-        # --- Pièces jointes -> Cerveau2 ---
+        # --- Pièces jointes -> Cerveau2 (ZERO tolérance : TOUTES ingérées) ---
         for att_filename, att_data in attachments:
             att_text = extract_text_bytes(att_data, att_filename)
             if not att_text or not att_text.strip():
-                continue
-            att_id = f"att-{mail_id}-{hash(att_filename) % 100000000:08d}"
+                # Fallback : même non extractable, on ingère avec métadonnées pour référence
+                att_text = (
+                    f"[Pièce jointe non extractable automatiquement]\n"
+                    f"Fichier : {att_filename}\n"
+                    f"Taille : {len(att_data)} octets\n"
+                    f"Type : {Path(att_filename).suffix.lower() or 'inconnu'}"
+                )
+                log.info(
+                    "poller.attachment_unextractable",
+                    mailbox=mailbox.name,
+                    uid=uid,
+                    filename=att_filename,
+                    dossier_id=dossier_id,
+                    size=len(att_data),
+                )
+
+            # Hash déterministe (MD5) pour doc_id stable entre les redémarrages
+            att_hash = hashlib.md5(
+                f"{mail_id}:{att_filename}".encode(), usedforsecurity=False
+            ).hexdigest()[:12]
+            att_id = f"att-{mail_id}-{att_hash}"
+
             asyncio.create_task(  # noqa: RUF006
                 feed_document(
                     doc_id=att_id,
@@ -596,6 +617,7 @@ async def _process_single_mail(
                 filename=att_filename,
                 dossier_id=dossier_id,
                 size=len(att_data),
+                doc_id=att_id,
             )
 
     if category == "demande_client" and is_new and not settings.dry_run:
