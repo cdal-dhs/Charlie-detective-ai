@@ -52,7 +52,49 @@ Interroge le vault vectoriel de Cerveau2 et retourne les notes les plus pertinen
 
 ---
 
-### 2. `POST /ingest-email` — Ingestion d'un email
+### 2. `POST /ingest-note` — Ingestion d'un document
+
+Ajoute un document (PDF, DOCX, image OCR, TXT, etc.) au vault Cerveau2. Appel **fire-and-forget** depuis l'agent Charlie.
+
+#### Requête
+
+```json
+{
+  "id": "string",               // obligatoire — identifiant unique stable
+  "type": "document",           // "document" | "note" | "correspondance"
+  "dossier_id": "string",       // obligatoire — dossier client (ex: ADF)
+  "marque": "string",           // obligatoire — slug Cerveau2
+  "date": "YYYY-MM-DD",         // obligatoire
+  "titre": "string",            // titre/description du document
+  "body": "string",             // obligatoire — texte extrait du document
+  "metadata": {},               // optionnel — {filename, source, size_bytes...}
+  "zone": "jaune|rouge",        // défaut "jaune"
+  "langue": "fr|nl|en"          // défaut "fr"
+}
+```
+
+#### Réponse 200
+
+```json
+{
+  "status": "created",
+  "path": "02_dossiers/ADF/documents/2026-05-20_document_rapport.md",
+  "doc_id": "doc-upload-12345678",
+  "duplicate": false
+}
+```
+
+- **duplicate: true** → le `id` existait déjà dans le vault (considéré comme succès).
+
+#### Garde-fous côté client (`app/cerveau_client.py` → `feed_document()`)
+
+- Timeout : **15 secondes**.
+- Retry : **3 tentatives** avec backoff exponentiel.
+- Stockage vault : `02_dossiers/{dossier_id}/documents/{date}_{type}_{slug}.md`
+
+---
+
+### 3. `POST /ingest-email` — Ingestion d'un email
 
 Ajoute un email au vault Cerveau2. Appel **fire-and-forget** depuis l'agent.
 
@@ -111,8 +153,9 @@ Cerveau2 attend des **slugs spécifiques** dans le champ `marque`. Ne PAS utilis
 
 ## Notes Cerveau2 (format interne)
 
-Les emails ingérés sont stockés sous forme de notes Markdown avec frontmatter :
+Les emails et documents sont stockés sous forme de notes Markdown avec frontmatter :
 
+### Correspondance (email)
 ```markdown
 ---
 type: "correspondance"
@@ -132,8 +175,32 @@ categorie: "demande_client"
 Corps du message ici...
 ```
 
-- Le champ `type` est toujours `"correspondance"`.
+### Document (PDF, DOCX, image OCR, upload cockpit, pièce jointe)
+```markdown
+---
+type: "document"
+date: "2026-05-20"
+titre: "Rapport surveillance Dupont.pdf"
+marque: "detectivebelgique"
+dossier: "[[ADF/_index]]"
+zone: "jaune"
+langue: "fr"
+doc_id: "doc-upload-12345678"
+metadata: {"source": "cockpit_upload", "filename": "rapport.pdf", "size_bytes": 124000}
+---
+
+# Rapport surveillance Dupont.pdf
+
+## Contenu
+
+texte extrait du document ici...
+```
+
+- Le champ `type` distingue `"correspondance"` et `"document"`.
 - Le parsing du frontmatter se fait par split sur `---` + lecture clé:valeur.
+- Les documents sont rangés dans `02_dossiers/{id}/documents/`.
+- Les correspondances sont rangées dans `02_dossiers/{id}/correspondances/`.
+- `/query` avec `dossier_id` recherche dans **les deux dossiers** et retourne emails + documents.
 
 ---
 
@@ -145,6 +212,12 @@ curl -s -X POST https://cerveau2-det.digitalhs.biz/query \
   -H "Authorization: Bearer $CERVEAU2_API_SECRET" \
   -H "Content-Type: application/json" \
   -d '{"question":"test","limit":3}'
+
+# Tester /ingest-note manuellement
+curl -s -X POST https://cerveau2-det.digitalhs.biz/ingest-note \
+  -H "Authorization: Bearer $CERVEAU2_API_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{"id":"test-doc-123","type":"document","dossier_id":"ADF","marque":"detectivebelgique","date":"2026-05-20","titre":"Test rapport","body":"Contenu extrait du document...","metadata":{"source":"test"},"zone":"jaune","langue":"fr"}'
 
 # Tester /ingest-email manuellement
 curl -s -X POST https://cerveau2-det.digitalhs.biz/ingest-email \
