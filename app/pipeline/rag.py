@@ -53,9 +53,18 @@ def _connect(db_path: Path) -> sqlite3.Connection:
 def retrieve(db_path: Path, query_text: str, top_k: int = 5) -> list[RetrievedPair]:
     """TODO S3 : ajuster aux vrais noms de tables/colonnes après inspection des DB
     existantes. Présume une table `pairs_vec` (rowid → embedding) jointable à une
-    table `pairs` (incoming, response, brand, lang, date)."""
-    qvec = embed(query_text)
-    conn = _connect(db_path)
+    table `pairs` (incoming, response, brand, lang, date).
+
+    Dégradation silencieuse : si la table n'existe pas ou si sqlite-vec est
+    indisponible, retourne [] pour ne pas bloquer la génération du brouillon.
+    """
+    try:
+        qvec = embed(query_text)
+        conn = _connect(db_path)
+    except Exception as e:
+        log.warning("rag.embed_or_connect_failed", db=str(db_path), error=str(e))
+        return []
+
     try:
         cur = conn.execute(
             """
@@ -68,8 +77,15 @@ def retrieve(db_path: Path, query_text: str, top_k: int = 5) -> list[RetrievedPa
             (sqlite_vec.serialize_float32(qvec), top_k),
         )
         rows = cur.fetchall()
+    except sqlite3.OperationalError as e:
+        log.warning("rag.table_missing", db=str(db_path), error=str(e))
+        return []
+    except Exception as e:
+        log.warning("rag.query_failed", db=str(db_path), error=str(e))
+        return []
     finally:
         conn.close()
+
     return [
         RetrievedPair(
             incoming=row[0],

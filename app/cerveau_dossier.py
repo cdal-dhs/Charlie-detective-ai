@@ -18,6 +18,14 @@ log = structlog.get_logger()
 # Numéro de dossier court : 3+ caractères alpha-num majuscules
 _DOSSIER_REF_RE = re.compile(r"\b([A-Z][A-Z0-9]{2,})\b")
 
+# Mots courants à ignorer (faux positifs dans les sujets d'emails)
+_IGNORE_REFS = frozenset({
+    "TEST", "TESTING", "DEMO", "EXAMPLE", "SAMPLE",
+    "RE", "FW", "FWD", "R", "TR", "VS", "ND", "N",
+    "URGENT", "IMPORTANT", "PRIORITY",
+    "HELLO", "BONJOUR", "SALUT", "HI",
+})
+
 # Dossiers déjà connus de Cerveau2 — peuvent être référencés explicitement
 _KNOWN_PREFIXES = frozenset({"DOSSIER", "AFFAIRE", "PROJET", "ENQUETE", "INVESTIGATION"})
 
@@ -55,8 +63,8 @@ def extract_dossier_ref(subject: str) -> str | None:
     m = _DOSSIER_REF_RE.search(subject)
     if m:
         ref = m.group(1)
-        # Éviter les faux positifs (RE, FW, FWD, etc.)
-        if ref not in {"RE", "FW", "FWD", "R", "TR", "VS", "ND", "N"}:
+        # Éviter les faux positifs (RE, FW, FWD, TEST, etc.)
+        if ref not in _IGNORE_REFS:
             log.debug("dossier.ref_from_caps", ref=ref, subject=subject[:60])
             return ref
 

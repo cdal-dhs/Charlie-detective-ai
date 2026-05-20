@@ -4,6 +4,14 @@
 
 ---
 
+## [1.10.5] — 2026-05-20
+
+### Corrigé
+- **RAG robuste — fallback silencieux** : `retrieve()` dans `app/pipeline/rag.py` capturait `sqlite3.OperationalError` (table `pairs_vec` absente) et plantait le pipeline → aucun brouillon généré pour DPDH. Désormais toute erreur SQL ou d'embedding retourne `[]` avec un warning logué, et le générateur continue avec SOUL.md + personality seuls.
+- **Faux positifs dossier_id** : `extract_dossier_ref()` dans `app/cerveau_dossier.py` acceptait "TEST" comme référence de dossier, provoquant un 422 sur Cerveau2. Ajout d'une liste `_IGNORE_REFS` (TEST, TESTING, DEMO, URGENT, etc.) pour filtrer les mots courants.
+
+---
+
 ## [1.10.4] — 2026-05-20
 
 ### Modifié
