@@ -18,6 +18,14 @@
 
 ---
 
+## [1.11.1] — 2026-05-20
+
+### Corrigé
+- **`derive_dossier_id()` — expéditeurs internes** : les emails de CDAL (`cdal@digitalhs.biz`), Daniel ou tout domaine interne (`detectivebelgique.be`, `detectivebelgium.com`, `dpdhuinvestigations.be`, `digitalhs.biz`) généraient un `dossier_id` du type `detective_belgique_cdal`, provoquant un **422 Cerveau2** car le dossier n'existe pas. Désormais ces expéditeurs retournent `dossier_id=""`, ce qui permet à Cerveau2 de les ingérer sans rattachement forcé.
+- **`_INTERNAL_SENDERS` et `_INTERNAL_DOMAINS`** : garde-fou explicite dans `app/cerveau_dossier.py` pour traiter tous les emails entrants sans exception, y compris les internes.
+
+---
+
 ## [1.10.5] — 2026-05-20
 
 ### Corrigé

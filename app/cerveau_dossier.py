@@ -29,6 +29,24 @@ _IGNORE_REFS = frozenset({
 # Dossiers déjà connus de Cerveau2 — peuvent être référencés explicitement
 _KNOWN_PREFIXES = frozenset({"DOSSIER", "AFFAIRE", "PROJET", "ENQUETE", "INVESTIGATION"})
 
+# Expéditeurs internes — pas de dossier client à créer pour ces adresses
+_INTERNAL_DOMAINS = frozenset({
+    "digitalhs.biz",
+    "detectivebelgique.be",
+    "detectivebelgium.com",
+    "dpdhuinvestigations.be",
+})
+_INTERNAL_SENDERS = frozenset({
+    "cdal@digitalhs.biz",
+    "daniel@detectivebelgique.be",
+    "daniel@detectivebelgium.com",
+    "daniel@dpdhuinvestigations.be",
+    "support@detectivebelgique.be",
+    "info@detectivebelgique.be",
+    "support@detectivebelgium.com",
+    "info@detectivebelgium.com",
+})
+
 
 def _slug(text: str) -> str:
     """Normalise un texte en slug ASCII safe."""
@@ -105,8 +123,16 @@ def derive_dossier_id(
         slug = _slug(anonymized_name)
         return f"{marque}_{slug}"
 
-    # 3. Expéditeur (partie locale du mail)
+    # 3. Expéditeur (partie locale du mail) — ignorer les internes
     email = sender.strip().lower()
+    if email in _INTERNAL_SENDERS:
+        log.debug("dossier.internal_sender", email=email, marque=marque)
+        return ""
+    domain = email.split("@")[1] if "@" in email else ""
+    if domain in _INTERNAL_DOMAINS:
+        log.debug("dossier.internal_domain", email=email, domain=domain, marque=marque)
+        return ""
+
     # Extraire la partie locale avant le @, ou utiliser le domaine entier
     local = email.split("@")[0] if "@" in email else email
     slug = _slug(local)
