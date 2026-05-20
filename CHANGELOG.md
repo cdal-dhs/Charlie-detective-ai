@@ -4,6 +4,15 @@
 
 ---
 
+## [1.10.2] — 2026-05-20
+
+### Ajouté
+- **Auto-évolution SOUL.md (tâche de fond)** : nouveau script `scripts/evolve_soul.py` qui compare le SOUL.md actuel avec les emails sortants récents de Cerveau2 et génère une version enrichie via LLM. Garde-fous : backup automatique `SOUL.md.bak.YYYYMMDD`, mode `--dry-run`, détection des suppressions risquées (section RÈGLES ABSOLUES, règles critiques). Si trop de suppressions, l'évolution est bloquée et un aperçu est écrit dans `/tmp/SOUL_proposed.md`.
+- **Scheduler d'évolution** : coroutine `run_soul_evolver` dans `app/main.py` qui lance `evolve_soul.py` toutes les **72 heures** via subprocess isolé. Attend 5 min au boot pour ne pas saturer le LLM.
+- **Persistance SOUL.md dans `data/`** : `app/main.py` copie `app/prompts/SOUL.md` → `data/SOUL.md` au boot si absent. Tous les modules (`generator.py`, `admin.py`, `extract_soul.py`, `evolve_soul.py`) lisent/écrivent désormais `data/SOUL.md`, ce qui garantit la persistance entre redémarrages Docker (volume `data/` monté en read-write).
+
+---
+
 ## [1.10.1] — 2026-05-20
 
 ### Ajouté

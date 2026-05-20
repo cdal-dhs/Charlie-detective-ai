@@ -24,7 +24,7 @@ from app.llm.router import complete
 
 log = structlog.get_logger()
 
-SOUL_PATH = Path(__file__).parent.parent / "app" / "prompts" / "SOUL.md"
+SOUL_PATH = get_settings().data_dir / "SOUL.md"
 
 # Mapping marque interne → marque Cerveau2
 MARQUE_MAP = {

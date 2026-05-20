@@ -306,7 +306,7 @@ async def soul_read(
     user: dict = Depends(require_admin),  # noqa: B008
 ):
     """Retourne le contenu actuel de SOUL.md."""
-    soul_path = Path(__file__).parent.parent / "prompts" / "SOUL.md"
+    soul_path = get_settings().data_dir / "SOUL.md"
     content = soul_path.read_text(encoding="utf-8") if soul_path.exists() else ""
     return {"content": content}
 
@@ -320,7 +320,7 @@ async def soul_save(
     """Sauvegarde le contenu de SOUL.md."""
     body = await request.json()
     content = str(body.get("content", ""))
-    soul_path = Path(__file__).parent.parent / "prompts" / "SOUL.md"
+    soul_path = get_settings().data_dir / "SOUL.md"
     soul_path.parent.mkdir(parents=True, exist_ok=True)
     soul_path.write_text(content, encoding="utf-8")
 

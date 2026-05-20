@@ -12,7 +12,6 @@ from app.pipeline.rag import RetrievedPair, retrieve
 log = structlog.get_logger()
 
 PERSONALITY_PATH = Path(__file__).parent.parent / "prompts" / "personality_daniel.txt"
-SOUL_PATH = Path(__file__).parent.parent / "prompts" / "SOUL.md"
 
 
 @dataclass
@@ -31,9 +30,10 @@ def _load_personality() -> str:
 
 def _load_soul_for_brand(brand: str) -> str:
     """Extrait du SOUL.md la section correspondant à la marque demandée."""
-    if not SOUL_PATH.exists():
+    soul_path = get_settings().data_dir / "SOUL.md"
+    if not soul_path.exists():
         return ""
-    text = SOUL_PATH.read_text(encoding="utf-8")
+    text = soul_path.read_text(encoding="utf-8")
     header = f"## {brand}"
     idx = text.find(header)
     if idx == -1:
