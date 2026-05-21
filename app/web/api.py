@@ -610,9 +610,9 @@ async def charlie_ask(
         .replace("<", "&lt;")
         .replace(">", "&gt;")
     )
-    # Échapper quotes et backslashes pour le JSON dans hx-vals (attribut single-quoted)
-    json_q = safe_question.replace('\\', '\\\\').replace("'", "\\'").replace('"', '\\"')
-    json_r = safe_response.replace('\\', '\\\\').replace("'", "\\'").replace('"', '\\"')
+    # Échapper pour les attributs HTML (value="...")
+    html_q = safe_question.replace('"', '&quot;').replace("'", "&#39;")
+    html_r = safe_response.replace('"', '&quot;').replace("'", "&#39;")
 
     user_bubble = (
         f'<div class="flex gap-3 justify-end animate-in fade-in slide-in-from-bottom-2">'
@@ -630,12 +630,14 @@ async def charlie_ask(
         f'<div class="mt-3 pt-2 border-t border-gray-700/50">'
         f'<div class="flex items-center gap-2 text-xs">'
         f'<span class="text-gray-500">Cette réponse vous a-t-elle aidé ?</span>'
-        f'<button type="button" class="text-green-400 hover:text-green-300 flex items-center gap-1 transition-colors"'
-        f' hx-post="/api/charlie/feedback" hx-vals=\'{{"question": "{json_q}", "response": "{json_r}", "feedback": "good"}}\' '
-        f' hx-target="#{feedback_id}" hx-swap="outerHTML">'
+        f'<form hx-post="/api/charlie/feedback" hx-target="#{feedback_id}" hx-swap="outerHTML" class="inline">'
+        f'<input type="hidden" name="question" value="{html_q}">'
+        f'<input type="hidden" name="response" value="{html_r}">'
+        f'<input type="hidden" name="feedback" value="good">'
+        f'<button type="submit" class="text-green-400 hover:text-green-300 flex items-center gap-1 transition-colors">'
         f'<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>'
         f'Bonne réponse'
-        f'</button>'
+        f'</button></form>'
         f'<button type="button" class="text-red-400 hover:text-red-300 flex items-center gap-1 transition-colors"'
         f' onclick="document.getElementById(\'{feedback_id}-form\').classList.remove(\'hidden\'); this.classList.add(\'hidden\');">'
         f'<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>'
@@ -644,9 +646,9 @@ async def charlie_ask(
         f'</div>'
         f'<div id="{feedback_id}-form" class="hidden mt-2">'
         f'<form hx-post="/api/charlie/feedback" hx-target="#{feedback_id}-form" hx-swap="outerHTML">'
-        f"<input type='hidden' name='question' value='{safe_question}'>"
-        f"<input type='hidden' name='response' value='{safe_response}'>"
-        f"<input type='hidden' name='feedback' value='bad'>"
+        f'<input type="hidden" name="question" value="{html_q}">'
+        f'<input type="hidden" name="response" value="{html_r}">'
+        f'<input type="hidden" name="feedback" value="bad">'
         f'<textarea name="corrected_response" rows="2" class="w-full bg-gray-950 border border-gray-700 rounded px-3 py-2 text-xs text-gray-200" '
         f'placeholder="Votre correction..."></textarea>'
         f'<div class="flex justify-end mt-1">'
