@@ -29,7 +29,6 @@ CREATE TABLE IF NOT EXISTS charlie_memory (
 );
 CREATE INDEX IF NOT EXISTS idx_charlie_memory_dossier ON charlie_memory(dossier_id);
 CREATE INDEX IF NOT EXISTS idx_charlie_memory_created ON charlie_memory(created_at);
-CREATE INDEX IF NOT EXISTS idx_charlie_memory_feedback ON charlie_memory(feedback);
 """
 
 # ── Verbes d'enregistrement ──────────────────────────────────────────────────
@@ -71,6 +70,11 @@ async def init_memory_table(db_path: Path) -> None:
         if "corrected_response" not in existing:
             await db.execute("ALTER TABLE charlie_memory ADD COLUMN corrected_response TEXT")
             log.info("charlie_memory.migrate_add_corrected")
+        # Index feedback créé APRÈS migration pour éviter OperationalError
+        # si la table existe déjà sans la colonne
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_charlie_memory_feedback ON charlie_memory(feedback)"
+        )
         await db.commit()
     log.info("charlie_memory.init_ok")
 
