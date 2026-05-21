@@ -465,8 +465,13 @@ async def ask_charlie(
     vault_notes: list[VaultNote] = []
     memory_notes: list = []
     if sql:
-        need_vault = not _is_count_query(sql) and (
-            _is_vault_relevant(question, sql) or dossier_id
+        # Les questions identitaires (qui est X, nom de l'épouse, etc.) DOIVENT
+        # toujours consulter le vault car la réponse ne se trouve jamais dans
+        # SQL — elle est dans les documents du second cerveau.
+        is_identity = _is_identity_query(question)
+        need_vault = is_identity or (
+            not _is_count_query(sql)
+            and (_is_vault_relevant(question, sql) or dossier_id)
         )
         # S2 : toujours consulter la mémoire en parallèle — pas seulement quand
         # Daniel demande explicitement de se souvenir. La mémoire est une source
