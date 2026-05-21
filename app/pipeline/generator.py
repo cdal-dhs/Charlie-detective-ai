@@ -8,6 +8,7 @@ from app.config import MailboxConfig, get_settings
 from app.llm.router import complete
 from app.pipeline.language import Language
 from app.pipeline.rag import RetrievedPair, retrieve
+from app.settings_store import get_llm_models
 
 log = structlog.get_logger()
 
@@ -124,8 +125,9 @@ async def generate_draft(
     messages = _build_messages(
         incoming_subject, incoming_body, sender, mailbox, language, pairs, vault_notes
     )
+    llm_default, _llm_fallback = get_llm_models()
     draft = await complete(
-        model=settings.llm_model_default,
+        model=llm_default,
         messages=messages,
         max_tokens=1500,
         temperature=0.4,
@@ -135,7 +137,7 @@ async def generate_draft(
         draft=draft.strip(),
         language=language,
         rag_pairs=pairs,
-        model_used=settings.llm_model_default,
+        model_used=llm_default,
         category=category,
         vault_notes=vault_notes,
     )

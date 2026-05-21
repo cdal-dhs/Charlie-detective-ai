@@ -4,6 +4,26 @@
 
 ---
 
+## [1.13.8] — 2026-05-21
+
+### Ajouté
+- **Édition des modèles LLM depuis le dashboard admin** : le superadmin peut modifier `llm_model_default`, `llm_model_classifier` et `llm_model_fallback` directement dans `/admin/settings` (onglet IA), sans SSH ni redémarrage.
+  - Nouveau module `app/settings_store.py` : lecture synchrone de `app_settings` (DB) avec fallback `.env`.
+  - `app/llm/router.py`, `app/pipeline/classifier.py`, `app/pipeline/generator.py` lisent désormais les modèles en temps réel depuis `app_settings`.
+  - Le formulaire sauvegarde en DB via `POST /admin/api/settings` ; si un champ est vidé, la ligne DB est supprimée pour revenir au `.env`.
+
+---
+
+## [1.13.7] — 2026-05-21
+
+### Ajouté
+- **Visibilité backup Cerveau2 dans Audit Logs** : card en haut de page `/admin/audit` affichant la date/heure du dernier backup vault poussé sur GitHub.
+  - Nouveau endpoint Cerveau2 `GET /admin/backup/status` qui lit `vault/00_system/.last_backup`.
+  - Script `backup-vault.sh` écrit la date dans ce fichier après chaque push réussi.
+  - Dashboard appelle cet endpoint via `get_backup_status()` dans `cerveau_client.py`.
+
+---
+
 ## [1.13.6] — 2026-05-21
 
 ### Corrigé

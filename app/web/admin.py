@@ -11,7 +11,7 @@ from fastapi.templating import Jinja2Templates
 import asyncio
 from datetime import datetime
 
-from app.cerveau_client import feed_document
+from app.cerveau_client import feed_document, get_backup_status
 from app.config import get_settings
 from app.delivery.slack_notifier import send_slack_message
 from app.healthcheck import health
@@ -27,9 +27,10 @@ _SETTINGS_KEYS = [
     "llm_provider",
     "llm_base_url",
     "llm_api_key_encrypted",
-    "llm_model_general",
+    "llm_model_default",
     "llm_model_classifier",
     "llm_model_draft",
+    "llm_model_fallback",
     "llm_temperature_analysis",
     "llm_temperature_draft",
     "llm_max_tokens",
@@ -75,17 +76,22 @@ async def _recent_telemetry(db: aiosqlite.Connection, limit: int = 10) -> list[d
     return [dict(zip(cols, r, strict=True)) for r in rows]
 
 
-async def _load_settings(db: aiosqlite.Connection) -> dict:
-    settings = {}
+async def _load_settings(db: aiosqlite.Connection, env_settings: dict | None = None) -> dict:
+    """Charge les paramètres DB avec fallback sur les valeurs .env."""
+    db_vals = {}
     async with db.execute("SELECT key, value, is_encrypted FROM app_settings") as cur:
         async for row in cur:
             key, value, is_enc = row
-            settings[key] = {"value": value or "", "masked": bool(is_enc)}
-    # Ensure all known keys exist with empty defaults
+            db_vals[key] = {"value": value or "", "masked": bool(is_enc)}
+    # Ensure all known keys exist with .env fallback
     for key in _SETTINGS_KEYS:
-        if key not in settings:
-            settings[key] = {"value": "", "masked": "key" in key.lower()}
-    return settings
+        if key not in db_vals or not db_vals[key]["value"]:
+            # Fallback sur la valeur .env correspondante
+            fallback = ""
+            if env_settings and key in env_settings:
+                fallback = env_settings[key]
+            db_vals[key] = {"value": fallback, "masked": "key" in key.lower() or "token" in key.lower()}
+    return db_vals
 
 
 @router.get("/")
@@ -124,9 +130,14 @@ async def settings_page(
     db: aiosqlite.Connection = Depends(get_db),  # noqa: B008
     user: dict = Depends(require_admin),  # noqa: B008
 ):
-    settings = await _load_settings(db)
     env = get_settings()
     env_settings = {
+        "llm_model_default": env.llm_model_default,
+        "llm_model_classifier": env.llm_model_classifier,
+        "llm_model_fallback": env.llm_model_fallback,
+    }
+    settings = await _load_settings(db, env_settings)
+    env_full = {
         "imap_host": env.imap_host,
         "imap_port": env.imap_port,
         "ollama_pro_base_url": env.ollama_pro_base_url,
@@ -153,7 +164,7 @@ async def settings_page(
     return templates.TemplateResponse(
         request,
         "admin/settings.html",
-        {"settings": settings, "cfg": env_settings, "user": user},
+        {"settings": settings, "cfg": env_full, "user": user},
     )
 
 
@@ -167,10 +178,18 @@ async def settings_save(
     fernet = FernetManager()
 
     for key in _SETTINGS_KEYS:
-        raw = str(form.get(key, "")).strip()
-        if not raw:
+        raw = form.get(key)
+        if raw is None:
             continue
+        raw = str(raw).strip()
         is_enc = "key" in key.lower() or "token" in key.lower()
+        if not raw:
+            # Champ vidé → suppression pour fallback .env
+            await db.execute(
+                "DELETE FROM app_settings WHERE key = ?",
+                (key,),
+            )
+            continue
         value = fernet.encrypt(raw) if is_enc else raw
         await db.execute(
             "INSERT INTO app_settings (key, value, is_encrypted, updated_by) "
@@ -485,6 +504,14 @@ async def audit_page(
     logs = [dict(zip(cols, r, strict=True)) for r in rows]
 
     total_pages = (total + per_page - 1) // per_page
+
+    # Récupérer statut backup Cerveau2 (rassurance opérationnelle)
+    settings = get_settings()
+    backup_info = await get_backup_status(
+        base_url=settings.cerveau2_base_url,
+        api_secret=settings.cerveau2_api_secret,
+    )
+
     return templates.TemplateResponse(
         request,
         "admin/audit.html",
@@ -495,5 +522,6 @@ async def audit_page(
             "total": total,
             "action_filter": action,
             "user": user,
+            "cerveau2_backup": backup_info,
         },
     )

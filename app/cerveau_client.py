@@ -226,3 +226,29 @@ async def feed_document(
 
     log.error("cerveau.document_feed_gave_up", doc_id=doc_id, dossier_id=dossier_id)
     return False
+
+
+async def get_backup_status(
+    base_url: str,
+    api_secret: str,
+) -> dict | None:
+    """Interroge Cerveau2 sur la date du dernier backup vault.
+
+    Retourne {"status": "ok", "last_backup": "..."} ou None si indisponible.
+    """
+    if not base_url or not api_secret:
+        return None
+
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            resp = await client.get(
+                f"{base_url.rstrip('/')}/admin/backup/status",
+                headers={"Authorization": f"Bearer {api_secret}"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            log.info("cerveau.backup_status_ok", last_backup=data.get("last_backup"))
+            return data
+    except Exception as e:
+        log.warning("cerveau.backup_status_failed", error=str(e))
+        return None

@@ -8,12 +8,11 @@
     <p class="text-gray-400 text-sm">IA, Email, Slack et Resend</p>
 </div>
 
-<div class="mb-4 p-3 bg-yellow-900/30 border border-yellow-800 rounded text-sm text-yellow-200">
-    ⚠️ Ces valeurs sont issues du fichier <code class="bg-gray-800 px-1 rounded">.env</code>.
-    Pour les modifier, édite le fichier <code class="bg-gray-800 px-1 rounded">.env</code> et redémarre le serveur.
-    L'édition en ligne sera disponible en V2.
+<div class="mb-4 p-3 bg-blue-900/30 border border-blue-800 rounded text-sm text-blue-200">
+    ℹ️ Les modèles LLM peuvent être modifiés en ligne ci-dessous. Les autres paramètres restent dans le fichier <code class="bg-gray-800 px-1 rounded">.env</code>.
 </div>
 
+<form hx-post="/admin/api/settings" hx-target="#settings-msg" hx-swap="innerHTML">
 <div x-data="{ tab: 'ai' }" class="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
     <div class="flex border-b border-gray-800">
         <button @click="tab = 'ai'" :class="tab === 'ai' ? 'border-b-2 border-blue-500 text-white' : 'text-gray-400 hover:text-white'" class="px-4 py-3 text-sm font-medium">
@@ -39,6 +38,24 @@
             <h2 class="font-semibold mb-4">Intelligence Artificielle</h2>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-3xl">
                 <div>
+                    <label class="block text-sm mb-1 text-gray-400">Modèle général (default)</label>
+                    <input type="text" name="llm_model_default" value="{{ settings.llm_model_default.value }}"
+                           class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-gray-200 focus:border-blue-500 focus:outline-none">
+                    <p class="text-xs text-gray-500 mt-1">.env: {{ cfg.llm_model_default }}</p>
+                </div>
+                <div>
+                    <label class="block text-sm mb-1 text-gray-400">Modèle fallback</label>
+                    <input type="text" name="llm_model_fallback" value="{{ settings.llm_model_fallback.value }}"
+                           class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-gray-200 focus:border-blue-500 focus:outline-none">
+                    <p class="text-xs text-gray-500 mt-1">.env: {{ cfg.llm_model_fallback }}</p>
+                </div>
+                <div>
+                    <label class="block text-sm mb-1 text-gray-400">Modèle classification</label>
+                    <input type="text" name="llm_model_classifier" value="{{ settings.llm_model_classifier.value }}"
+                           class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-gray-200 focus:border-blue-500 focus:outline-none">
+                    <p class="text-xs text-gray-500 mt-1">.env: {{ cfg.llm_model_classifier }}</p>
+                </div>
+                <div>
                     <label class="block text-sm mb-1 text-gray-400">Provider LLM</label>
                     <input type="text" value="Ollama Pro + OpenRouter fallback" readonly
                            class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-gray-300">
@@ -46,21 +63,6 @@
                 <div>
                     <label class="block text-sm mb-1 text-gray-400">Base URL</label>
                     <input type="text" value="{{ cfg.ollama_pro_base_url }}" readonly
-                           class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-gray-300">
-                </div>
-                <div>
-                    <label class="block text-sm mb-1 text-gray-400">Modèle général</label>
-                    <input type="text" value="{{ cfg.llm_model_default }}" readonly
-                           class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-gray-300">
-                </div>
-                <div>
-                    <label class="block text-sm mb-1 text-gray-400">Modèle classification</label>
-                    <input type="text" value="{{ cfg.llm_model_classifier }}" readonly
-                           class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-gray-300">
-                </div>
-                <div>
-                    <label class="block text-sm mb-1 text-gray-400">Modèle fallback</label>
-                    <input type="text" value="{{ cfg.llm_model_fallback }}" readonly
                            class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-gray-300">
                 </div>
                 <div>
@@ -73,6 +75,12 @@
                     <input type="text" value="{{ cfg.rag_top_k }}" readonly
                            class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-gray-300">
                 </div>
+            </div>
+            <div class="mt-6">
+                <button type="submit" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded text-sm font-medium">
+                    Sauvegarder les modèles LLM
+                </button>
+                <div id="settings-msg" class="inline-block ml-3"></div>
             </div>
         </div>
 
@@ -202,5 +210,5 @@
             </div>
         </div>
     </div>
-</div>
+</form>
 {% endblock %}

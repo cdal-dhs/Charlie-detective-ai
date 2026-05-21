@@ -5,6 +5,7 @@ import structlog
 
 from app.config import get_settings
 from app.llm.router import complete
+from app.settings_store import get_llm_model_classifier
 
 log = structlog.get_logger()
 
@@ -37,10 +38,9 @@ def _load_prompt() -> str:
 
 
 async def classify(subject: str, body: str, sender: str) -> Category:
-    settings = get_settings()
     prompt = _load_prompt().format(subject=subject, body=body[:2000], sender=sender)
     response = await complete(
-        model=settings.llm_model_classifier,
+        model=get_llm_model_classifier(),
         messages=[{"role": "user", "content": prompt}],
         max_tokens=15,
         temperature=0.0,

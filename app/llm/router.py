@@ -4,6 +4,7 @@ import structlog
 from litellm import acompletion
 
 from app.config import get_settings
+from app.settings_store import get_llm_models
 
 log = structlog.get_logger()
 
@@ -29,6 +30,7 @@ async def complete(
     """Wrapper LiteLLM avec fallback automatique vers le modèle de secours en cas d'échec."""
     _ensure_env()
     settings = get_settings()
+    default_model, fallback_model = get_llm_models()
     extra: dict = {}
     if model.startswith("ollama_chat/") or model.startswith("ollama/"):
         extra["api_base"] = settings.ollama_pro_base_url
@@ -50,15 +52,15 @@ async def complete(
         return content
     except Exception as e:
         log.warning("llm.primary_failed", model=model, error=str(e))
-        if model == settings.llm_model_fallback:
+        if model == fallback_model:
             raise
-        log.info("llm.fallback", fallback=settings.llm_model_fallback)
+        log.info("llm.fallback", fallback=fallback_model)
         resp = await acompletion(
-            model=settings.llm_model_fallback,
+            model=fallback_model,
             messages=messages,
             max_tokens=max_tokens,
             temperature=temperature,
         )
         content = resp.choices[0].message.content or ""
-        log.info("llm.fallback_response", fallback=settings.llm_model_fallback, length=len(content))
+        log.info("llm.fallback_response", fallback=fallback_model, length=len(content))
         return content
