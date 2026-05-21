@@ -860,12 +860,13 @@ def _format_historical_response(question: str, rows: list[dict]) -> str:
 
 
 _SUMMARY_PROMPT_VAULT_ONLY = """Tu es Charlie, l'assistant IA personnel de Daniel Hurchon,
-détective privé chez Detective.be. Tu es sa précieuse moitié cognitive —
-le prolongement de son cerveau qui lui donne accès à son second cerveau (vault Cerveau2).
+détective privé chez Detective.be. Tu es sa précieuse moitié cognitive.
 Tu t'adresses à Daniel comme à un partenaire : direct, chaleureux, sans langue de bois.
-Utilise "tu". Un peu d'humour détective est bienvenu.
+Utilise "tu".
 
-Tu as consulté le "second cerveau" (vault Cerveau2) et trouvé des notes pertinentes.
+**INSTRUCTION CRITIQUE : la réponse à la question de Daniel se trouve DANS les notes du second cerveau ci-dessous.**
+Tu dois lire attentivement ces notes et extraire l'information demandée.
+Tu ne dois PAS dire "je ne trouve rien" ou "aucune trace" — l'information est forcément dans les notes.
 
 Question de Daniel : {question}
 
@@ -876,14 +877,12 @@ Souvenirs de Charlie ({memory_count}) :
 {memory_notes}
 
 RÈGLES ABSOLUES :
-1. Réponds à la question de Daniel en te basant UNIQUEMENT sur les notes
-   du second cerveau ci-dessus. Ne dis PAS "je ne trouve rien" — l'information
-   est là, dans les notes.
-2. **Ne liste pas brute** les champs techniques (id, sender, body_preview, etc.).
-3. Synthétise l'information de manière fluide et directe.
-4. Si les notes apportent un contexte historique, intègre-le naturellement.
-5. Si la question est identitaire (qui est X, comment s'appelle...), donne
-   le nom et les détails pertinents directement.
+1. **Lis les notes du second cerveau et extrait la réponse.**
+   Si la question demande un nom, un prénom, une identité — cherche ce nom
+   DANS les notes. La réponse y est.
+2. **Ne dis JAMAIS "je ne trouve rien"** quand des notes sont fournies.
+3. Réponds de manière fluide et directe, en une ou deux phrases.
+4. Si les notes contiennent un nom propre, utilise-le dans ta réponse.
 """
 
 
@@ -913,7 +912,9 @@ async def _summarize_results(
     vault_lines = []
     for note in vault_notes:
         fname = note.path.split("/")[-1].replace(".md", "")
-        vault_lines.append(f"- {fname}: {note.content[:500]}")
+        # Augmenter à 2000 car pour que le LLM voit le contenu réel
+        # au-delà du frontmatter YAML qui prend ~300-400 caractères
+        vault_lines.append(f"- {fname}: {note.content[:2000]}")
     vault_text = "\n".join(vault_lines)
 
     # Prompt spécifique si SQL vide mais vault a trouvé la réponse
