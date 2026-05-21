@@ -6,7 +6,7 @@ services:
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
-      - ./.env.production:/app/.env:ro
+      - ./.env:/app/.env:ro
       - hf_cache:/root/.cache/huggingface
       # Dev mount : permet de modifier le code sans rebuild Docker
       - ./app:/app/app:ro
