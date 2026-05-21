@@ -4,6 +4,18 @@
 
 ---
 
+## [1.13.10] — 2026-05-21
+
+### Ajouté
+- **Alerte email crédit Ollama Pro épuisé** : quand le modèle principal (`gemma4:31b`) retourne une erreur 429 / rate limit, Charlie envoie immédiatement un email d'alerte sur `cdal@digitalhs.biz` puis bascule automatiquement sur le fallback OpenRouter.
+  - Nouveau module `app/alerts.py` : fonction `alert_ollama_credit_low()` envoyant un email HTML via Resend.
+  - `app/llm/router.py` détecte les erreurs `429`, `ratelimit`, `rate limit`, `usage limit` et déclenche l'alerte (une seule fois par session jusqu'au redémarrage).
+
+### Corrigé
+- **Fallback OpenRouter non fonctionnel** : le modèle fallback `google/gemini-3.1-flash-lite` n'était pas reconnu par LiteLLM (provider manquant). Remplacé par `openrouter/google/gemini-2.5-flash-preview` dans les settings DB avec `api_base` et `api_key` explicites lors du fallback.
+
+---
+
 ## [1.13.9] — 2026-05-21
 
 ### Corrigé
