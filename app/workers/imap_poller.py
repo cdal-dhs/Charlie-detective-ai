@@ -116,6 +116,28 @@ def _mail_exists(db_path: Path, imap_uid: str, mailbox_name: str) -> bool:
         conn.close()
 
 
+def _is_known_sender(db_path: Path, sender: str) -> bool:
+    """Vérifie si l'expéditeur a déjà envoyé des emails traités.
+
+    Garde anti-faux-positif phishing : un expéditeur connu ne devrait
+    pas être classé phishing automatiquement par le prefilter.
+    """
+    sender_norm = sender.lower().strip()
+    if not sender_norm:
+        return False
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.execute(
+            "SELECT 1 FROM mail_processed WHERE LOWER(sender) = ? LIMIT 1",
+            (sender_norm,),
+        )
+        found = bool(cursor.fetchone())
+        conn.close()
+        return found
+    except Exception:
+        return False
+
+
 def _persist(
     db_path: Path,
     imap_uid: str,
@@ -451,8 +473,23 @@ async def _process_single_mail(
 
     prefilter_category = quick_classify(msg)
     if prefilter_category:
-        category = prefilter_category
-        log.info("poller.prefilter", mailbox=mailbox.name, uid=uid, category=category)
+        # Garde anti-faux-positif phishing : si l'expéditeur est déjà connu
+        # (présent dans mail_processed), ne pas forcer phishing via prefilter.
+        # On laisse le LLM classifier décider à la place.
+        if prefilter_category == "phishing" and await asyncio.to_thread(
+            _is_known_sender, settings.db_agent_state, sender
+        ):
+            category = await classify(subject, body, sender)
+            log.info(
+                "poller.prefilter_phishing_guard",
+                mailbox=mailbox.name,
+                uid=uid,
+                sender=sender,
+                llm_category=category,
+            )
+        else:
+            category = prefilter_category
+            log.info("poller.prefilter", mailbox=mailbox.name, uid=uid, category=category)
     else:
         category = await classify(subject, body, sender)
         log.info("poller.classified", mailbox=mailbox.name, uid=uid, category=category)

@@ -50,6 +50,13 @@ Sujet : Votre compte sera suspendu dans 24h
 Corps : Nous avons détecté une activité suspecte. Cliquez sur le lien ci-dessous pour vérifier votre identité immédiatement.
 → phishing
 
+Exemple 5b — PAS phishing (email interne de test) :
+De : cdal@digitalhs.biz
+Sujet : ** TEST ** Activation et Detection
+Corps : Voici un document PDF en annexe pour vérifier le système.
+→ autre
+(NB : un email de test interne avec "TEST" dans le sujet et une pièce jointe PDF n'est PAS du phishing. Le phishing implique une MENACE, un SPOOFING ou une DEMANDE D'ACTION frauduleuse.)
+
 Exemple 6 — rappel :
 De : recouvrement@infomaniak.com
 Sujet : Rappel — facture impayée F-2024-0012
@@ -93,6 +100,7 @@ RÈGLES DE DÉCISION :
 - Demande d'identifiants / lien bizarre = phishing (pas spam)
 - Arnaque nigériane / princesse = spam (pas phishing, car pas de spoofing technique)
 - Relance de rendez-vous / convocation = rappel
+- **Email interne de test avec "TEST" dans le sujet + pièce jointe PDF = autre** (PAS phishing — il n'y a ni menace ni spoofing)
 
 ---
 
