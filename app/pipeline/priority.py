@@ -21,6 +21,13 @@ FORM_KEYWORDS = (
     "demande de devis", "demande de consultation", "prise de contact",
 )
 
+PAYMENT_LINK_KEYWORDS = (
+    "pay", "paiement", "régler", "regler", "payer", "règlement",
+    "reglement", "tva", "total", "montant", "amount", "eur", "€",
+    "checkout", "stripe", "paypal", "virement", "carte bancaire",
+    "facture n°", "invoice #", "facture numero", "en ligne",
+)
+
 
 def assign_priority(category: str, subject: str, body: str, sender: str) -> str:
     """Retourne 'high', 'normal' ou 'low'."""
@@ -40,8 +47,10 @@ def assign_priority(category: str, subject: str, body: str, sender: str) -> str:
             return "high"
         return "normal"
 
-    # 4. Facture → normal
+    # 4. Facture → normal (high si lien de paiement ou pièce jointe)
     if category == "facture":
+        if any(kw in text for kw in PAYMENT_LINK_KEYWORDS):
+            return "high"
         return "normal"
 
     # 5. Le reste (newsletter, spam, autre) → low

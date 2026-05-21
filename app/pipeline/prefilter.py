@@ -59,7 +59,8 @@ AUTRE_KEYWORDS = (
     "accepté", "refusé", "tentative", "provisoire",
     "notification", "noreply", "no-reply", "donotreply",
     # Emails automatiques de services / transactions
-    "renouvellement", "renewal", "votre abonnement", "your subscription",
+    # NOTE : "renouvellement" retiré — géré par is_facture() quand combiné avec "facture"
+    "renewal", "votre abonnement", "your subscription",
     "confirmation de", "confirmation de commande", "confirmation de paiement",
     "reçu de", "reçu de paiement", "payment receipt", "receipt",
     "votre commande", "your order", "commande confirmée",
@@ -110,6 +111,8 @@ FACTURE_KEYWORDS = (
     "pro forma", "proforma", "bon de commande", "purchase order",
     "pièce jointe : facture", "pièce jointe: facture",
     "facture n°", "facture numero", "numero de facture",
+    "renouvellement", "renewal", "renouveler", "régler", "regler",
+    "paiement en ligne", "pay online", "règlement",
 )
 FACTURE_SENDERS = (
     "ovh", "infomaniak", "stripe", "paypal", "amazon",

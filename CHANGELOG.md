@@ -4,6 +4,15 @@
 
 ---
 
+## [1.13.9] — 2026-05-21
+
+### Corrigé
+- **Renouvellement de facture classé "autre" au lieu de "facture"** : "renouvellement" retiré de `AUTRE_KEYWORDS` ; ajouté à `FACTURE_KEYWORDS` avec "régler", "paiement en ligne", etc.
+- **Priorité facture avec lien de paiement** : `PAYMENT_LINK_KEYWORDS` déclenche `priority=high` pour les factures avec lien de règlement ou pièce jointe.
+- **Invitations calendrier/meeting auto-approved** : `autre` + mots-clés invitation/ical/vcalendar/event → `status=approved` + `priority=low` (plus besoin de les traiter manuellement).
+
+---
+
 ## [1.13.8] — 2026-05-21
 
 ### Ajouté

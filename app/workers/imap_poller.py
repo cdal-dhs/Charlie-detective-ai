@@ -502,9 +502,17 @@ async def _process_single_mail(
         priority = "high"          # menace sécurité
     elif category == "autre":
         priority = "low"           # rien à traiter
-    # Newsletter : auto-approved + low priority (rien à traiter)
+    # Newsletter / calendrier : auto-approved + low priority (rien à traiter)
     status = "pending"
+    text_lower = f"{subject} {body}".lower()
     if category == "newsletter":
+        status = "approved"
+        priority = "low"
+    elif category == "autre" and any(kw in text_lower for kw in (
+        "invitation", "calendar", "ical", "vcalendar", "event",
+        "meeting request", "updated invitation", "invitation updated",
+        "accepté", "refusé", "tentative", "provisoire",
+    )):
         status = "approved"
         priority = "low"
     log.info("poller.priority", mailbox=mailbox.name, uid=uid, category=category, priority=priority)
