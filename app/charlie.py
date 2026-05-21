@@ -468,7 +468,10 @@ async def ask_charlie(
         need_vault = not _is_count_query(sql) and (
             _is_vault_relevant(question, sql) or dossier_id
         )
-        need_memory = is_memory_query(question) or dossier_id
+        # S2 : toujours consulter la mémoire en parallèle — pas seulement quand
+        # Daniel demande explicitement de se souvenir. La mémoire est une source
+        # de contexte comme SQL et le vault.
+        need_memory = True
 
         async def _sql_task() -> list[dict]:
             try:
@@ -633,6 +636,10 @@ async def ask_charlie(
             f"C'est noté dans ma mémoire, Daniel ! "
             f"{result.response_text[:200]}..."
         )
+    else:
+        # S2 : auto-save des faits clés (identités, noms, relations)
+        # sans que Daniel ait besoin de dire "retiens"
+        await _auto_save_fact(db_path, question, result.response_text, dossier_id)
 
     return result
 
@@ -737,14 +744,57 @@ def _is_vault_relevant(question: str, sql: str) -> bool:
 
 
 _IDENTITY_KEYWORDS = (
-    "qui", "personne", "nom", "prenom", "client",
-    "epouse", "mari", "conjoint", "contact", "sappelle",
+    "qui", "personne", "nom", "prenom", "client", "contact", "sappelle",
+    "epouse", "mari", "conjoint", "femme", "compagne", "compagnon",
+    "fille", "fils", "enfant", "bebe", "pere", "mere", "parent",
+    "soeur", "frere", "famille", "cousin", "cousine", "oncle", "tante",
 )
 
 
 def _is_identity_query(question: str) -> bool:
     q = _normalize(question)
     return any(kw in q for kw in _IDENTITY_KEYWORDS)
+
+
+async def _auto_save_fact(
+    db_path: Path, question: str, response: str, dossier_id: str | None,
+) -> None:
+    """Stocke automatiquement les faits identitaires dans la mémoire de Charlie."""
+    if not response or len(response) < 10:
+        return
+    norm_resp = _normalize(response)
+    # Skip réponses d'erreur / vide / temporaires
+    skip_phrases = (
+        "aucun email", "erreur sql", "charlie est momentanement",
+        "reessaie dans un instant", "aucun dossier trouve",
+        "reponse context_only", "reponse zone_rouge",
+    )
+    if any(p in norm_resp for p in skip_phrases):
+        return
+    lower_q = _normalize(question)
+    is_identity = any(kw in lower_q for kw in _IDENTITY_KEYWORDS)
+    # Un nom propre dans la réponse = potentiel fait durable
+    has_proper_noun = bool(re.search(r"\b[A-Z][a-z]{2,}\b", response))
+    if not is_identity and not has_proper_noun:
+        return
+    # Éviter les doublons exacts (question + réponse identique)
+    try:
+        async with aiosqlite.connect(db_path) as db:
+            cursor = await db.execute(
+                "SELECT 1 FROM charlie_memory WHERE question = ? AND response = ?",
+                (question, response),
+            )
+            if await cursor.fetchone():
+                return
+    except Exception:
+        pass
+    await save_memory(
+        db_path=db_path,
+        question=question,
+        response=response,
+        dossier_id=dossier_id,
+    )
+    log.info("charlie.auto_save_fact", dossier_id=dossier_id, question=question[:60])
 
 
 def _sanitize_rows_for_prompt(rows: list[dict]) -> str:

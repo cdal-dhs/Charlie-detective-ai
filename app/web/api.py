@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 
 import aiosqlite
 import structlog
@@ -11,6 +12,7 @@ from fastapi.templating import Jinja2Templates
 
 from app import __version__
 from app.charlie import BOX_ABBR, ask_charlie
+from app.charlie_memory import save_feedback
 from app.config import get_settings
 from app.pipeline.generator import generate_draft
 from app.pipeline.language import detect_language
@@ -608,6 +610,9 @@ async def charlie_ask(
         .replace("<", "&lt;")
         .replace(">", "&gt;")
     )
+    # Échapper les doubles quotes pour le JSON dans hx-vals
+    json_q = safe_question.replace('"', '\\"')
+    json_r = safe_response.replace('"', '\\"')
 
     user_bubble = (
         f'<div class="flex gap-3 justify-end animate-in fade-in slide-in-from-bottom-2">'
@@ -620,6 +625,39 @@ async def charlie_ask(
         '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg> Copier</button>'
     )
 
+    feedback_id = f"fb-{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
+    feedback_html = (
+        f'<div class="mt-3 pt-2 border-t border-gray-700/50">'
+        f'<div class="flex items-center gap-2 text-xs">'
+        f'<span class="text-gray-500">Cette réponse vous a-t-elle aidé ?</span>'
+        f'<button type="button" class="text-green-400 hover:text-green-300 flex items-center gap-1 transition-colors"'
+        f' hx-post="/api/charlie/feedback" hx-vals=\'{{"question": "{json_q}", "response": "{json_r}", "feedback": "good"}}\' '
+        f' hx-target="#{feedback_id}" hx-swap="outerHTML">'
+        f'<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>'
+        f'Bonne réponse'
+        f'</button>'
+        f'<button type="button" class="text-red-400 hover:text-red-300 flex items-center gap-1 transition-colors"'
+        f' onclick="document.getElementById(\'{feedback_id}-form\').classList.remove(\'hidden\'); this.classList.add(\'hidden\');">'
+        f'<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>'
+        f'À corriger'
+        f'</button>'
+        f'</div>'
+        f'<div id="{feedback_id}-form" class="hidden mt-2">'
+        f'<form hx-post="/api/charlie/feedback" hx-target="#{feedback_id}-form" hx-swap="outerHTML">'
+        f"<input type='hidden' name='question' value='{safe_question}'>"
+        f"<input type='hidden' name='response' value='{safe_response}'>"
+        f"<input type='hidden' name='feedback' value='bad'>"
+        f'<textarea name="corrected_response" rows="2" class="w-full bg-gray-950 border border-gray-700 rounded px-3 py-2 text-xs text-gray-200" '
+        f'placeholder="Votre correction..."></textarea>'
+        f'<div class="flex justify-end mt-1">'
+        f'<button type="submit" class="px-3 py-1 bg-purple-700 hover:bg-purple-600 rounded text-xs text-white">Envoyer correction</button>'
+        f'</div>'
+        f'</form>'
+        f'</div>'
+        f'<div id="{feedback_id}"></div>'
+        f'</div>'
+    )
+
     ai_bubble = (
         f'<div class="flex gap-3 animate-in fade-in slide-in-from-bottom-2 charlie-bubble">'
         f'<div class="w-9 h-9 rounded-full bg-purple-600 flex items-center justify-center text-sm font-bold shrink-0 mt-1">AI</div>'
@@ -628,8 +666,63 @@ async def charlie_ask(
         f'{results_html}'
         f'{vault_html}'
         f'<div class="flex">{copy_btn}</div>'
+        f'{feedback_html}'
         f'</div>'
         f'</div>'
     )
 
     return JSONResponse({"html": user_bubble + ai_bubble, "response_text": result.response_text})
+
+
+@router.post("/charlie/feedback")
+async def charlie_feedback(
+    request: Request,
+    db: aiosqlite.Connection = Depends(get_db),  # noqa: B008
+    user: dict = Depends(require_operator),  # noqa: B008
+) -> HTMLResponse:
+    """Enregistre un feedback (good/bad) sur une réponse de Charlie."""
+    form = await request.form()
+    question = str(form.get("question", "")).strip()
+    response = str(form.get("response", "")).strip()
+    feedback = str(form.get("feedback", "")).strip()
+    corrected_response = str(form.get("corrected_response", "")).strip() or None
+
+    if not question or not response or feedback not in ("good", "bad"):
+        return HTMLResponse(
+            '<span class="text-xs text-red-400">Données manquantes.</span>'
+        )
+
+    settings = get_settings()
+    try:
+        await save_feedback(
+            db_path=settings.db_agent_state,
+            question=question,
+            response=response,
+            feedback=feedback,
+            corrected_response=corrected_response,
+        )
+    except Exception as e:
+        log.warning("charlie.feedback_failed", error=str(e))
+        return HTMLResponse(
+            '<span class="text-xs text-red-400">Erreur lors de l\'enregistrement.</span>'
+        )
+
+    ip = request.client.host if request.client else None
+    await audit_log(
+        db, user["id"], "charlie_feedback", "charlie_memory", "",
+        f"feedback={feedback} q={question[:40]}", ip, request.headers.get("user-agent"),
+    )
+
+    if feedback == "good":
+        return HTMLResponse(
+            '<span class="text-xs text-green-400 flex items-center gap-1">'
+            '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">'
+            '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>'
+            "</svg> Merci ! Charlie retient cette réponse.</span>"
+        )
+    return HTMLResponse(
+        '<span class="text-xs text-purple-400 flex items-center gap-1">'
+        '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">'
+        '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>'
+        "</svg> Correction enregistrée. Charlie apprend.</span>"
+    )

@@ -121,7 +121,7 @@ DETECTIVE_BE/
 ### ⬜ Roadmap V2 — Système fluide, puissant et auto-améliorant
 > Objectif : Charlie devient un assistant bionique qui "sait tout, n'oublie rien, s'améliore avec le temps".
 
-1. **S1 — Semantic Search Cerveau2** (`sqlite-vec` + embeddings `e5-large`) : comprendre le sens, pas juste les mots-clés. "femme de CDAL" = "épouse de Cyril".
+1. **S1 — Semantic Search Cerveau2** (`sqlite-vec` + embeddings `e5-large`) : comprendre le sens, pas juste les mots-clés. "femme de CDAL" = "épouse de CDAL".
 2. **S2 — Mémoire long terme Charlie** : module `memory.py` qui persiste chaque interaction, correction, préférence. Sarah = épouse est retenu forever.
 3. **S3 — Feedback loop** : bouton ✅/❌ dans le chat, stockage auto des paires (question, bonne réponse) dans Cerveau2 comme FAQ interne.
 4. **S4 — LLM local rapide** : modèle 7B quantifié sur le VPS pour réponses < 2s sur 80% des questions simples. Garder Claude/OpenRouter pour les 20% complexes.
