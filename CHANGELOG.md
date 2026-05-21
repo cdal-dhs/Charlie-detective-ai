@@ -4,6 +4,25 @@
 
 ---
 
+## [1.13.6] — 2026-05-21
+
+### Corrigé
+- **Charlie répondait n'importe quoi quand on demandait sa version** : la question "quelle est la version actuelle de Charlie AI" déclenchait un SQL + vault qui renvoyait des documents sur CDAL/DIGITALHS au lieu du numéro de version.
+  - `CHARLIE_SYSTEM_PROMPT` converti en f-string injectant `{VERSION}` depuis `app._version`.
+  - Règle 6 ajoutée : "Quand Daniel demande ta version actuelle, réponds directement : 'Je suis Charlie AI version {VERSION}.' — pas besoin de SQL ni de vault."
+
+---
+
+## [1.13.5] — 2026-05-21
+
+### Corrigé
+- **Faux positif phishing sur expéditeur connu** : un email de test envoyé par CDAL (déjà présent dans `mail_processed`) a été classé `phishing` par le prefilter.
+  - `_is_known_sender()` vérifie si l'expéditeur existe déjà dans `mail_processed` avant d'appliquer le prefilter phishing.
+  - Si connu → le LLM classifier décide (garde-fou anti-faux-positif).
+  - Prompt classifier enrichi : few-shot "email interne de test avec TEST dans le sujet + PJ PDF = autre (PAS phishing)".
+
+---
+
 ## [1.13.4] — 2026-05-21
 
 ### Corrigé
