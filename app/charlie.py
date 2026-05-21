@@ -305,7 +305,13 @@ RÈGLES ABSOLUES :
    `[Sujet de l'email](/inbox?q=mot-clef)`.
    Utilise un mot-clef unique du sujet (ex: référence dossier AS445, nom client).
 7. Si les notes du vault apportent un contexte historique, intègre-le naturellement.
-8. Si aucun résultat nulle part, dis-le simplement à Daniel avec une touche d'humour.
+8. **CRITIQUE** — Si SQL retourne 0 ligne mais les Notes du second cerveau
+   contiennent une réponse, tu DOIS répondre en te basant UNIQUEMENT sur les
+   notes du vault. Ne dis JAMAIS "aucun résultat" quand le vault a trouvé
+   l'information. Le vault est ta source de vérité pour les faits non présents
+   dans les emails SQL.
+9. Si aucun résultat nulle part (SQL vide + vault vide + mémoire vide),
+   dis-le simplement à Daniel avec une touche d'humour.
 """
 
 
@@ -853,6 +859,34 @@ def _format_historical_response(question: str, rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
+_SUMMARY_PROMPT_VAULT_ONLY = """Tu es Charlie, l'assistant IA personnel de Daniel Hurchon,
+détective privé chez Detective.be. Tu es sa précieuse moitié cognitive —
+le prolongement de son cerveau qui lui donne accès à son second cerveau (vault Cerveau2).
+Tu t'adresses à Daniel comme à un partenaire : direct, chaleureux, sans langue de bois.
+Utilise "tu". Un peu d'humour détective est bienvenu.
+
+Tu as consulté le "second cerveau" (vault Cerveau2) et trouvé des notes pertinentes.
+
+Question de Daniel : {question}
+
+Notes du second cerveau ({vault_count}) :
+{vault_notes}
+
+Souvenirs de Charlie ({memory_count}) :
+{memory_notes}
+
+RÈGLES ABSOLUES :
+1. Réponds à la question de Daniel en te basant UNIQUEMENT sur les notes
+   du second cerveau ci-dessus. Ne dis PAS "je ne trouve rien" — l'information
+   est là, dans les notes.
+2. **Ne liste pas brute** les champs techniques (id, sender, body_preview, etc.).
+3. Synthétise l'information de manière fluide et directe.
+4. Si les notes apportent un contexte historique, intègre-le naturellement.
+5. Si la question est identitaire (qui est X, comment s'appelle...), donne
+   le nom et les détails pertinents directement.
+"""
+
+
 async def _summarize_results(
     question: str,
     rows: list[dict],
@@ -867,6 +901,7 @@ async def _summarize_results(
     Jamais de données brutes (sender, body_preview, id, source_db) dans le prompt.
     """
     rows_text = _sanitize_rows_for_prompt(rows)
+    has_sql = rows and len(rows) > 0
 
     memory_text = ""
     if memory_notes:
@@ -875,12 +910,22 @@ async def _summarize_results(
             memory_lines.append(f"- [{mem.created_at}] {mem.question}: {mem.response[:300]}")
         memory_text = "\n".join(memory_lines)
 
-    if vault_notes or memory_notes:
-        vault_lines = []
-        for note in vault_notes:
-            fname = note.path.split("/")[-1].replace(".md", "")
-            vault_lines.append(f"- {fname}: {note.content[:500]}")
-        vault_text = "\n".join(vault_lines)
+    vault_lines = []
+    for note in vault_notes:
+        fname = note.path.split("/")[-1].replace(".md", "")
+        vault_lines.append(f"- {fname}: {note.content[:500]}")
+    vault_text = "\n".join(vault_lines)
+
+    # Prompt spécifique si SQL vide mais vault a trouvé la réponse
+    if not has_sql and vault_notes:
+        prompt = _SUMMARY_PROMPT_VAULT_ONLY.format(
+            question=question,
+            vault_count=len(vault_notes),
+            vault_notes=vault_text,
+            memory_count=len(memory_notes),
+            memory_notes=memory_text,
+        )
+    elif vault_notes or memory_notes:
         prompt = _SUMMARY_PROMPT_VAULT.format(
             question=question,
             count=len(rows),
