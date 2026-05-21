@@ -4,6 +4,53 @@
 
 ---
 
+## [1.13.4] — 2026-05-21
+
+### Corrigé
+- **Feedback buttons ✅/❌ totalement inertes** : le `hx-vals` JSON avec `\'` (échappement d'apostrophe) produisait du JSON invalide — HTMX ne parsait rien et envoyait un POST vide.
+  - Remplacé `hx-vals` par un vrai `<form>` avec `<input type=hidden>` pour le bouton "Bonne réponse".
+  - Attributs `value` avec `&quot;` et `&#39;` pour résister à tout contenu.
+  - Même correction appliquée au formulaire "À corriger".
+
+---
+
+## [1.13.3] — 2026-05-21
+
+### Corrigé
+- **HTMX ne processait pas les bulles Charlie injectées dynamiquement** : `insertAdjacentHTML` n'appelle pas `htmx.process()`, donc les `hx-post` des boutons feedback restaient sans écouteur.
+  - Fix : après chaque injection, boucle `htmx.process(child)` sur les nouveaux nœuds (`inbox.html:318`).
+- **Échappement JSON `hx-vals` amélioré** : backslash + single quote + double quote (`\`, `'`, `"`).
+
+---
+
+## [1.13.2] — 2026-05-21
+
+### Ajouté
+- **Bypass LLM pour les questions identitaires** : `_extract_identity_answer()` extrait directement les noms propres depuis le contenu du vault via regex ciblées.
+  - Patterns : `"aidé par son épouse : Sarah"`, `"son épouse Sarah"`, `"épouse : Sarah"`, `"Sarah, épouse de CDAL"`.
+  - Fallback par tokenisation voisine si aucun pattern ne match.
+  - Quand SQL vide + question identitaire + vault retourne des notes → réponse directe sans appel LLM.
+  - Élimine définitivement le bug "aucun résultat" malgré le document visible.
+
+---
+
+## [1.13.1] — 2026-05-21
+
+### Corrigé
+- **Vault content tronqué à 500 caractères** : le frontmatter YAML consommait ~350 caractères, le LLM ne voyait que "TEST PIECE JOINTE...".
+  - Augmenté à **2000 caractères** dans `_summarize_results()`.
+- **Prompt vault-only trop permissif** : `_SUMMARY_PROMPT_VAULT_ONLY` renforcé avec "INSTRUCTION CRITIQUE : la réponse se trouve DANS les notes... Ne dis JAMAIS 'je ne trouve rien'".
+
+---
+
+## [1.13.0] — 2026-05-21
+
+### Ajouté
+- **Forçage vault pour questions identitaires** : `_is_identity_query()` détecte "qui", "épouse", "mari", "fille", "fils", etc. et force `need_vault=True` indépendamment du SQL généré.
+- **Prompt vault-only** : `_SUMMARY_PROMPT_VAULT_ONLY` sans section SQL, utilisé quand SQL vide + vault présent.
+
+---
+
 ## [1.12.7] — 2026-05-20
 
 ### Corrigé
