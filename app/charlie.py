@@ -754,6 +754,102 @@ def _is_vault_relevant(question: str, sql: str) -> bool:
     return any(kw in q for kw in _VAULT_KEYWORDS)
 
 
+_IDENTITY_NAME_RE = re.compile(
+    r"[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?"
+)
+
+
+def _extract_identity_answer(vault_notes: list[VaultNote], question: str) -> str | None:
+    """Extraction directe d'une réponse identitaire depuis le vault, sans LLM.
+
+    Cherche des patterns comme 'épouse : Sarah', 'femme : Jean',
+    'aidé par son épouse : Marie' dans le contenu des notes.
+    """
+    q_norm = _normalize(question)
+
+    # Déterminer la relation cherchée
+    relation: str | None = None
+    target_person: str | None = None
+    for kw, rel in (
+        ("epouse", "épouse"), ("femme", "femme"), ("mari", "mari"),
+        ("conjoint", "conjoint"), ("compagne", "compagne"), ("compagnon", "compagnon"),
+        ("fille", "fille"), ("fils", "fils"), ("enfant", "enfant"),
+        ("pere", "père"), ("mere", "mère"), ("parent", "parent"),
+        ("soeur", "sœur"), ("frere", "frère"),
+    ):
+        if kw in q_norm:
+            relation = rel
+            break
+
+    # Détecter la personne dont on parle (ex: "épouse de CDAL" → CDAL)
+    # Pattern: "relation de/de/d' XXXX"
+    m = re.search(r"(?:de|d')\s+([A-Z][a-zA-Z0-9]{1,})", question, re.IGNORECASE)
+    if m:
+        target_person = m.group(1)
+
+    if not relation:
+        return None
+
+    # Concaténer tout le contenu des notes
+    all_text = "\n".join(n.content for n in vault_notes)
+    all_text_lower = all_text.lower()
+
+    # Patterns de recherche ordonnés du plus spécifique au plus général
+    patterns = [
+        # "aidé par son épouse : Sarah"  →  capture Sarah
+        rf"(?:par|avec)\s+(?:son|sa)\s+{relation}\s*[:\-–]\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)",
+        # "son épouse Sarah"  →  capture Sarah
+        rf"(?:son|sa)\s+{relation}\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)",
+        # "épouse : Sarah"  →  capture Sarah
+        rf"{relation}\s*[:\-–]\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)",
+        # "Sarah, épouse de CDAL"  →  capture Sarah (avant la relation)
+        rf"([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?),?\s+(?:son|sa)?\s*{relation}",
+        # "l'épouse de CDAL est Sarah"  →  capture Sarah (après 'est')
+        rf"{relation}\s+(?:de|d')\s+{re.escape(target_person or '')}\s+(?:est|s'appelle|se nomme)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)",
+        # "l'épouse de CDAL, Sarah"  →  capture Sarah (après virgule)
+        rf"{relation}\s+(?:de|d')\s+{re.escape(target_person or '')},?\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)",
+    ]
+
+    for pat in patterns:
+        try:
+            m = re.search(pat, all_text, re.IGNORECASE)
+            if m:
+                name = m.group(1).strip()
+                # Filtrer les faux positifs (mots communs)
+                if name.lower() in ("lui", "elle", "moi", "toi", "nous", "vous", "personne", "rien", "tout", "tous"):
+                    continue
+                return f"La {relation} de {target_person or 'CDAL'} s'appelle **{name}**."
+        except re.error:
+            continue
+
+    # Fallback : chercher un nom propre à proximité du mot relation
+    # On tokenise et on cherche le mot relation, puis on regarde les tokens voisins
+    tokens = re.findall(r"[A-Za-zÀ-ÿ]+", all_text)
+    for i, tok in enumerate(tokens):
+        tok_lower = tok.lower()
+        # Match relation (ex: épouse, femme, mari)
+        if tok_lower == relation or (relation == "conjoint" and tok_lower in ("conjoint", "conjointe")):
+            # Chercher un nom propre majuscule dans une fenêtre de ±8 tokens
+            for j in range(max(0, i - 8), min(len(tokens), i + 9)):
+                if j == i:
+                    continue
+                candidate = tokens[j]
+                if candidate[0].isupper() and len(candidate) > 2:
+                    # Vérifier que ce n'est pas un mot commun majuscule
+                    if candidate.lower() not in (
+                        "detective", "belgique", "belgium", "investigations",
+                        "digitalhs", "infomaniak", "gmail", "outlook", "yahoo",
+                        "lundi", "mardi", "mercredi", "jeudi", "vendredi",
+                        "samedi", "dimanche", "janvier", "fevrier", "mars",
+                        "avril", "mai", "juin", "juillet", "aout", "septembre",
+                        "octobre", "novembre", "decembre",
+                        "monsieur", "madame", "mademoiselle", "docteur", "maitre",
+                    ):
+                        return f"La {relation} de {target_person or 'CDAL'} s'appelle **{candidate}**."
+
+    return None
+
+
 _IDENTITY_KEYWORDS = (
     "qui", "personne", "nom", "prenom", "client", "contact", "sappelle",
     "epouse", "mari", "conjoint", "femme", "compagne", "compagnon",
@@ -916,6 +1012,13 @@ async def _summarize_results(
         # au-delà du frontmatter YAML qui prend ~300-400 caractères
         vault_lines.append(f"- {fname}: {note.content[:2000]}")
     vault_text = "\n".join(vault_lines)
+
+    # Bypass LLM pour les questions identitaires : extraction directe du vault
+    if not has_sql and vault_notes and _is_identity_query(question):
+        direct = _extract_identity_answer(vault_notes, question)
+        if direct:
+            log.info("charlie.identity_direct_extract", question=question[:60], answer=direct[:80])
+            return direct
 
     # Prompt spécifique si SQL vide mais vault a trouvé la réponse
     if not has_sql and vault_notes:
