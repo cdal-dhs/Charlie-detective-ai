@@ -311,7 +311,12 @@
         .then(data => {
           const patienceEl = document.getElementById(patienceId);
           if (patienceEl) patienceEl.remove();
-          messages.insertAdjacentHTML('beforeend', data.html);
+          const wrapper = document.createElement('div');
+          wrapper.innerHTML = data.html;
+          Array.from(wrapper.children).forEach(child => {
+            messages.appendChild(child);
+            if (window.htmx) htmx.process(child);
+          });
           this.history.push({role: 'user', content: question});
           this.history.push({role: 'assistant', content: data.response_text});
           if (this.history.length > 20) this.history = this.history.slice(-20);

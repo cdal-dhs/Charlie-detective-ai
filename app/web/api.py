@@ -610,9 +610,9 @@ async def charlie_ask(
         .replace("<", "&lt;")
         .replace(">", "&gt;")
     )
-    # Échapper les doubles quotes pour le JSON dans hx-vals
-    json_q = safe_question.replace('"', '\\"')
-    json_r = safe_response.replace('"', '\\"')
+    # Échapper quotes et backslashes pour le JSON dans hx-vals (attribut single-quoted)
+    json_q = safe_question.replace('\\', '\\\\').replace("'", "\\'").replace('"', '\\"')
+    json_r = safe_response.replace('\\', '\\\\').replace("'", "\\'").replace('"', '\\"')
 
     user_bubble = (
         f'<div class="flex gap-3 justify-end animate-in fade-in slide-in-from-bottom-2">'
