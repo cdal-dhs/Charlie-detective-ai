@@ -181,29 +181,51 @@ async def query_memory(
     dossier_id: str | None = None,
     limit: int = 5,
 ) -> list[MemoryEntry]:
-    """Recherche des souvenirs pertinents pour la question courante."""
-    # Normaliser la question pour la recherche
+    """Recherche des souvenirs pertinents pour la question courante.
+
+    PRIORITÉ : les corrections utilisateur (feedback='bad') sont
+    retournées avec leur corrected_response pour écraser les fausses
+    informations du vault.
+    """
     q_norm = _normalize(question)
     words = [w for w in q_norm.split() if len(w) > 3]
 
     async with aiosqlite.connect(db_path) as db:
         if dossier_id:
-            # Priorité au dossier exact
-            rows = await db.execute(
+            # 1) Corrections (feedback=bad) pour ce dossier — PRIORITAIRES
+            cursor = await db.execute(
                 """
-                SELECT id, dossier_id, category, question, response, tags, created_at
+                SELECT id, dossier_id, category, question,
+                       COALESCE(corrected_response, response) as response,
+                       tags, created_at
                 FROM charlie_memory
-                WHERE dossier_id = ?
+                WHERE dossier_id = ? AND feedback = 'bad'
                 ORDER BY created_at DESC
                 LIMIT ?
                 """,
                 (dossier_id, limit),
             )
-            results = await rows.fetchall()
+            results = await cursor.fetchall()
+            if results:
+                log.info("charlie_memory.corrections_found", dossier_id=dossier_id, count=len(results))
+                return [_row_to_entry(r) for r in results]
+
+            # 2) Mémoires validées (feedback=good ou NULL) pour ce dossier
+            cursor = await db.execute(
+                """
+                SELECT id, dossier_id, category, question, response, tags, created_at
+                FROM charlie_memory
+                WHERE dossier_id = ? AND (feedback IS NULL OR feedback != 'bad')
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (dossier_id, limit),
+            )
+            results = await cursor.fetchall()
             if results:
                 return [_row_to_entry(r) for r in results]
 
-        # Sinon recherche par mots-clés dans question/response/tags
+        # 3) Recherche par mots-clés — exclure les feedback='bad' sans correction
         if words:
             like_template = "question LIKE ? OR response LIKE ? OR tags LIKE ?"
             like_clauses = " OR ".join([like_template] * len(words))
@@ -212,20 +234,52 @@ async def query_memory(
                 params.extend([f"%{w}%", f"%{w}%", f"%{w}%"])
             params.append(limit)
 
-            rows = await db.execute(
+            cursor = await db.execute(
                 f"""
-                SELECT id, dossier_id, category, question, response, tags, created_at
+                SELECT id, dossier_id, category, question,
+                       COALESCE(corrected_response, response) as response,
+                       tags, created_at
                 FROM charlie_memory
-                WHERE {like_clauses}
+                WHERE ({like_clauses})
+                  AND (feedback IS NULL OR feedback != 'bad' OR corrected_response IS NOT NULL)
                 ORDER BY created_at DESC
                 LIMIT ?
                 """,
                 params,
             )
-            results = await rows.fetchall()
+            results = await cursor.fetchall()
             return [_row_to_entry(r) for r in results]
 
     return []
+
+
+async def query_corrections(
+    db_path: Path,
+    dossier_id: str | None = None,
+    limit: int = 5,
+) -> list[MemoryEntry]:
+    """Retourne UNIQUEMENT les corrections utilisateur (feedback='bad')."""
+    async with aiosqlite.connect(db_path) as db:
+        params: list = []
+        where = "feedback = 'bad'"
+        if dossier_id:
+            where += " AND dossier_id = ?"
+            params.append(dossier_id)
+        params.append(limit)
+        cursor = await db.execute(
+            f"""
+            SELECT id, dossier_id, category, question,
+                   COALESCE(corrected_response, response) as response,
+                   tags, created_at
+            FROM charlie_memory
+            WHERE {where}
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            params,
+        )
+        results = await cursor.fetchall()
+        return [_row_to_entry(r) for r in results]
 
 
 def is_save_request(question: str) -> bool:
@@ -236,6 +290,17 @@ def is_save_request(question: str) -> bool:
 def is_memory_query(question: str) -> bool:
     """Détecte si Daniel demande de se souvenir d'une information."""
     return bool(_QUERY_VERBS.search(question))
+
+
+def is_correction(question: str) -> bool:
+    """Détecte si Daniel corrige une réponse précédente de Charlie."""
+    q = _normalize(question)
+    return any(kw in q for kw in (
+        "mauvaise reponse", "mauvais reponse", "non cest", "non c",
+        "faux", "fause", "incorrect", "erreur", "tu te trompes",
+        "ce nest pas", "ce n est pas", "c pas", "pas ca", "pas sa",
+        "correction", "corrige", "en fait", "en realite",
+    ))
 
 
 def _normalize(text: str) -> str:

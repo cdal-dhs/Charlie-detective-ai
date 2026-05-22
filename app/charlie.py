@@ -13,8 +13,10 @@ import structlog
 
 from app.cerveau_client import VaultNote, query_vault
 from app.charlie_memory import (
+    is_correction,
     is_memory_query,
     is_save_request,
+    query_corrections,
     query_memory,
     save_memory,
 )
@@ -296,26 +298,32 @@ Notes du second cerveau ({vault_count}) :
 Souvenirs de Charlie ({memory_count}) :
 {memory_notes}
 
+CORRECTIONS UTILISATEUR ({correction_count}) — PRIORITÉ ABSOLUE :
+{correction_notes}
+
 RÈGLES ABSOLUES :
-1. **NE JAMAIS afficher les champs techniques bruts** (id, sender, body_preview, source_db, type, direction, heure null, etc.).
+1. **CORRECTIONS UTILISATEUR PRIMENT SUR TOUT** — Si des corrections sont
+   fournies ci-dessus, elles écrasent le vault ET la mémoire. Daniel a déjà
+   corrigé cette information. Utilise-la directement sans discuter.
+2. **NE JAMAIS afficher les champs techniques bruts** (id, sender, body_preview, source_db, type, direction, heure null, etc.).
    Daniel ne veut PAS voir de dump de base de données.
-2. **NE JAMAIS afficher les expéditeurs réels** ou le contenu brut des emails.
-3. **Ne liste pas brute** les champs techniques.
-4. **Raconte l'histoire** : qui est le client, de quoi parle ce dossier,
+3. **NE JAMAIS afficher les expéditeurs réels** ou le contenu brut des emails.
+4. **Ne liste pas brute** les champs techniques.
+5. **Raconte l'histoire** : qui est le client, de quoi parle ce dossier,
    quelles sont les étapes clés, qui a écrit à qui et quand.
-5. Synthétise les emails ET les notes du vault en un récit cohérent et fluide.
-6. **Liens cliquables** : chaque fois que tu mentionnes un email spécifique,
+6. Synthétise les emails ET les notes du vault en un récit cohérent et fluide.
+7. **Liens cliquables** : chaque fois que tu mentionnes un email spécifique,
    formate son sujet comme un lien markdown vers l'inbox :
    `[Sujet de l'email](/inbox?q=mot-clef)`.
    Utilise un mot-clef unique du sujet (ex: référence dossier AS445, nom client).
-7. Si les notes du vault apportent un contexte historique, intègre-le naturellement.
-8. **CRITIQUE** — Si SQL retourne 0 ligne mais les Notes du second cerveau
+8. Si les notes du vault apportent un contexte historique, intègre-le naturellement.
+9. **CRITIQUE** — Si SQL retourne 0 ligne mais les Notes du second cerveau
    contiennent une réponse, tu DOIS répondre en te basant UNIQUEMENT sur les
    notes du vault. Ne dis JAMAIS "aucun résultat" quand le vault a trouvé
    l'information. Le vault est ta source de vérité pour les faits non présents
    dans les emails SQL.
-9. Si aucun résultat nulle part (SQL vide + vault vide + mémoire vide),
-   dis-le simplement à Daniel avec une touche d'humour.
+10. Si aucun résultat nulle part (SQL vide + vault vide + mémoire vide),
+    dis-le simplement à Daniel avec une touche d'humour.
 """
 
 
@@ -471,9 +479,10 @@ async def ask_charlie(
             result.sql_safe = False
             return result
 
-    # --- Phase 2 : SQL + vault + mémoire en parallèle ---
+    # --- Phase 2 : SQL + vault + mémoire + corrections en parallèle ---
     vault_notes: list[VaultNote] = []
     memory_notes: list = []
+    correction_notes: list = []
     if sql:
         # Les questions identitaires (qui est X, nom de l'épouse, etc.) DOIVENT
         # toujours consulter le vault car la réponse ne se trouve jamais dans
@@ -517,8 +526,16 @@ async def ask_charlie(
                 limit=3,
             )
 
-        rows, vault_notes, memory_notes = await asyncio.gather(
-            _sql_task(), _vault_task(), _memory_task(),
+        async def _correction_task() -> list:
+            # CORRECTIONS UTILISATEUR = priorité absolute sur vault
+            return await query_corrections(
+                db_path=db_path,
+                dossier_id=dossier_id,
+                limit=3,
+            )
+
+        rows, vault_notes, memory_notes, correction_notes = await asyncio.gather(
+            _sql_task(), _vault_task(), _memory_task(), _correction_task(),
         )
         result.rows = rows
         result.vault_notes = vault_notes
@@ -527,10 +544,11 @@ async def ask_charlie(
             sql_rows=len(rows),
             vault=len(vault_notes),
             memory=len(memory_notes),
+            corrections=len(correction_notes),
             dossier_id=dossier_id,
         )
     else:
-        # Pas de SQL généré : vault et mémoire restent disponibles seuls
+        # Pas de SQL généré : vault, mémoire et corrections restent disponibles
         if _is_vault_relevant(question, sql) or dossier_id:
             vault_notes = await query_vault(
                 question=question,
@@ -550,6 +568,14 @@ async def ask_charlie(
             )
             if memory_notes:
                 log.info("charlie.memory_fetched", count=len(memory_notes), dossier_id=dossier_id)
+        # Corrections : toujours chercher même sans SQL
+        correction_notes = await query_corrections(
+            db_path=db_path,
+            dossier_id=dossier_id,
+            limit=3,
+        )
+        if correction_notes:
+            log.info("charlie.corrections_fetched", count=len(correction_notes), dossier_id=dossier_id)
 
     # --- Phase 3 : summary intelligent avec les deux sources ---
     has_sql_data = result.rows and len(result.rows) > 0
@@ -630,11 +656,11 @@ async def ask_charlie(
     force_summary = has_vault_data and not has_sql_data
     needs_summary = _needs_summary(question)
     if (
-        (has_sql_data or has_vault_data or has_memory_data)
-        and (needs_summary or force_summary)
+        (has_sql_data or has_vault_data or has_memory_data or correction_notes)
+        and (needs_summary or force_summary or bool(correction_notes))
     ):
         summary = await _summarize_results(
-            question, result.rows or [], vault_notes, memory_notes, model, settings,
+            question, result.rows or [], vault_notes, memory_notes, correction_notes, model, settings,
         )
         if summary:
             result.response_text = summary
@@ -897,6 +923,18 @@ async def _auto_save_fact(
             )
             if await cursor.fetchone():
                 return
+            # Ne pas ré-enregistrer une réponse qui a été corrigée par Daniel
+            cursor = await db.execute(
+                """
+                SELECT 1 FROM charlie_memory
+                WHERE response = ? AND feedback = 'bad'
+                AND created_at >= datetime('now', '-30 days')
+                """,
+                (response,),
+            )
+            if await cursor.fetchone():
+                log.info("charlie.auto_save_skipped_corrected", response=response[:60])
+                return
     except Exception:
         pass
     await save_memory(
@@ -964,7 +1002,7 @@ détective privé chez Detective.be. Tu es sa précieuse moitié cognitive.
 Tu t'adresses à Daniel comme à un partenaire : direct, chaleureux, sans langue de bois.
 Utilise "tu".
 
-**INSTRUCTION CRITIQUE : la réponse à la question de Daniel se trouve DANS les notes du second cerveau ci-dessous.**
+**INSTRUCTION CRITIQUE : la réponse à la question de Daniel se trouve DANS les notes ci-dessous.**
 Tu dois lire attentivement ces notes et extraire l'information demandée.
 Tu ne dois PAS dire "je ne trouve rien" ou "aucune trace" — l'information est forcément dans les notes.
 
@@ -976,13 +1014,19 @@ Notes du second cerveau ({vault_count}) :
 Souvenirs de Charlie ({memory_count}) :
 {memory_notes}
 
+CORRECTIONS UTILISATEUR ({correction_count}) — PRIORITÉ ABSOLUE :
+{correction_notes}
+
 RÈGLES ABSOLUES :
-1. **Lis les notes du second cerveau et extrait la réponse.**
+1. **CORRECTIONS UTILISATEUR PRIMENT SUR TOUT** — Si des corrections sont
+   fournies ci-dessus, elles écrasent le vault ET la mémoire. Daniel a déjà
+   corrigé cette information. Utilise-la directement sans discuter.
+2. **Lis les notes du second cerveau et extrait la réponse.**
    Si la question demande un nom, un prénom, une identité — cherche ce nom
    DANS les notes. La réponse y est.
-2. **Ne dis JAMAIS "je ne trouve rien"** quand des notes sont fournies.
-3. Réponds de manière fluide et directe, en une ou deux phrases.
-4. Si les notes contiennent un nom propre, utilise-le dans ta réponse.
+3. **Ne dis JAMAIS "je ne trouve rien"** quand des notes sont fournies.
+4. Réponds de manière fluide et directe, en une ou deux phrases.
+5. Si les notes contiennent un nom propre, utilise-le dans ta réponse.
 """
 
 
@@ -991,6 +1035,7 @@ async def _summarize_results(
     rows: list[dict],
     vault_notes: list[VaultNote],
     memory_notes: list,
+    correction_notes: list,
     model: str,
     settings,
 ) -> str | None:
@@ -1008,6 +1053,20 @@ async def _summarize_results(
         for mem in memory_notes:
             memory_lines.append(f"- [{mem.created_at}] {mem.question}: {mem.response[:300]}")
         memory_text = "\n".join(memory_lines)
+
+    correction_text = ""
+    if correction_notes:
+        correction_lines = []
+        for c in correction_notes:
+            correction_lines.append(f"- [{c.created_at}] {c.question}: {c.response[:500]}")
+        correction_text = "\n".join(correction_lines)
+
+    # Bypass si corrections existent — réponse directe sans passer par le LLM
+    if correction_notes:
+        log.info("charlie.correction_bypass", question=question[:60], corrections=len(correction_notes))
+        # Retourner la correction la plus récente, formatée proprement
+        latest = correction_notes[0]
+        return latest.response.strip()
 
     vault_lines = []
     for note in vault_notes:
@@ -1032,6 +1091,8 @@ async def _summarize_results(
             vault_notes=vault_text,
             memory_count=len(memory_notes),
             memory_notes=memory_text,
+            correction_count=len(correction_notes),
+            correction_notes=correction_text,
         )
     elif vault_notes or memory_notes:
         prompt = _SUMMARY_PROMPT_VAULT.format(
@@ -1042,6 +1103,8 @@ async def _summarize_results(
             vault_notes=vault_text,
             memory_count=len(memory_notes),
             memory_notes=memory_text,
+            correction_count=len(correction_notes),
+            correction_notes=correction_text,
         )
     else:
         prompt = _SUMMARY_PROMPT.format(question=question, count=len(rows), rows=rows_text)

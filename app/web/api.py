@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 
 import aiosqlite
@@ -694,6 +695,16 @@ async def charlie_feedback(
             '<span class="text-xs text-red-400">Données manquantes.</span>'
         )
 
+    # Extraire le dossier_id de la question pour lier la correction
+    dossier_id = None
+    m = re.search(r"(?i:dossier|affaire|projet|enquete|investigation)[\s:]+([A-Z][a-zA-Z0-9]{2,})", question)
+    if m:
+        dossier_id = m.group(1)
+    else:
+        m = re.search(r"#([A-Z][A-Z0-9]{2,})", question)
+        if m:
+            dossier_id = m.group(1)
+
     settings = get_settings()
     try:
         await save_feedback(
@@ -702,6 +713,7 @@ async def charlie_feedback(
             response=response,
             feedback=feedback,
             corrected_response=corrected_response,
+            dossier_id=dossier_id,
         )
     except Exception as e:
         log.warning("charlie.feedback_failed", error=str(e))

@@ -4,6 +4,20 @@
 
 ---
 
+## [1.13.12] — 2026-05-22
+
+### Corrigé
+- **Corrections utilisateur ignorées par Charlie** : quand Daniel disait "mauvaise réponse, c'est Sofie Latte", Charlie répondait encore Kevin Gay à la question suivante.
+  - `query_memory` retourne désormais `COALESCE(corrected_response, response)` quand `feedback='bad'` — la correction écrase la mauvaise réponse.
+  - Nouvelle fonction `query_corrections()` qui retourne UNIQUEMENT les corrections pour un dossier.
+  - Le pipeline `ask_charlie()` interroge les corrections en parallèle avec SQL/vault/mémoire.
+  - `_summarize_results()` fait un **bypass direct** quand des corrections existent — pas besoin de passer par le LLM, la réponse corrigée est retournée telle quelle.
+  - Le prompt de synthèse inclut désormais une section "CORRECTIONS UTILISATEUR — PRIORITÉ ABSOLUE" qui dit au LLM d'utiliser la correction sans discuter.
+  - `_auto_save_fact()` ne ré-enregistre plus une réponse qui a déjà été corrigée (`feedback='bad'` dans les 30 derniers jours).
+  - Le endpoint `/api/charlie/feedback` extrait maintenant le `dossier_id` de la question et le lie à la correction en DB.
+
+---
+
 ## [1.13.11] — 2026-05-22
 
 ### Ajouté
