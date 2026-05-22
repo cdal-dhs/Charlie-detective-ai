@@ -671,10 +671,8 @@ def _build_count_sql(question: str, dossier_id: str | None) -> str | None:
     if date_filter:
         where_clauses.append(date_filter)
 
-    # Direction
-    if any(kw in q for kw in ("recu", "entrant", "arrivee", "incoming")):
-        where_clauses.append("mailbox_name LIKE '%belgique%' OR mailbox_name LIKE '%belgium%' OR mailbox_name LIKE '%dpdh%'")
-    elif any(kw in q for kw in ("envoye", "sortant", "outgoing")):
+    # Emails envoyés seulement (mail_processed contient uniquement les emails reçus par le pipeline)
+    if any(kw in q for kw in ("envoye", "sortant", "outgoing", "envoyes")):
         where_clauses.append("status = 'sent'")
 
     where = " AND ".join(f"({c})" for c in where_clauses) if where_clauses else "1=1"
