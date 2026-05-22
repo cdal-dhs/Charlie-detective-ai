@@ -357,6 +357,71 @@ _ENQUETE_TO_CATEGORY: dict[str, str] = {
 }
 
 
+async def _search_historical_by_keyword(
+    db_path: Path, keyword: str, year: str | None = None, limit: int = 50,
+) -> list[dict]:
+    """Cherche dans les 3 DB historiques par mot-clé (subject, body_preview, sender).
+
+    Utilisé quand un dossier spécifique est mentionné (ex: ADF) pour trouver
+    tous les emails liés, même ceux antérieurs au cutoff de mail_processed.
+    """
+    data_dir = db_path.parent
+    results: list[dict] = []
+    like = f"%{keyword}%"
+    for db_name in ("boite1.sqlite", "boite2.sqlite", "boite3.sqlite"):
+        db_file = data_dir / db_name
+        if not db_file.exists():
+            continue
+        try:
+            async with aiosqlite.connect(db_file) as db:
+                sql = (
+                    "SELECT id, subject, sender, date, body_preview, category "
+                    "FROM emails WHERE (subject LIKE ? OR body_preview LIKE ? OR sender LIKE ?) "
+                )
+                params: list = [like, like, like]
+                if year:
+                    sql += "AND date LIKE ? "
+                    params.append(f"%{year}%")
+                sql += "ORDER BY date DESC LIMIT ?"
+                params.append(limit)
+                cursor = await db.execute(sql, tuple(params))
+                rows = await cursor.fetchall()
+                for row in rows:
+                    results.append({
+                        "id": row[0],
+                        "subject": row[1],
+                        "sender": row[2],
+                        "received_at": row[3],
+                        "body_preview": row[4],
+                        "category": row[5],
+                        "source_db": db_name,
+                    })
+        except Exception as e:
+            log.warning("charlie.historical_keyword_failed", db=db_name, keyword=keyword, error=str(e))
+    # Tri global par date
+    def _parse_date(r: dict) -> datetime:
+        raw = r.get("received_at") or ""
+        if not raw:
+            return datetime.min
+        try:
+            dt = parsedate_to_datetime(raw)
+            if dt.tzinfo is not None:
+                return dt.replace(tzinfo=None)
+            return dt
+        except Exception:
+            pass
+        try:
+            dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            if dt.tzinfo is not None:
+                return dt.replace(tzinfo=None)
+            return dt
+        except Exception:
+            pass
+        return datetime.min
+    results.sort(key=_parse_date, reverse=True)
+    return results
+
+
 async def _search_historical_by_category(
     db_path: Path, category: str, year: str | None = None, limit: int = 5,
 ) -> list[dict]:
@@ -469,6 +534,27 @@ async def ask_charlie(
                 f"`sender LIKE '%domaine%'` en plus de `subject LIKE '%{dossier_id}%'`."
             )
 
+        # Recherche dans les archives historiques (3 bases boite1/2/3)
+        year_filter = _extract_year(question)
+        historical = await _search_historical_by_keyword(
+            db_path, dossier_id, year=year_filter, limit=10,
+        )
+        if historical:
+            preview_lines = []
+            for h in historical[:5]:
+                preview_lines.append(f"- {h['subject'] or 'Sans sujet'} ({h['received_at'][:16] if h['received_at'] else '?'}) — {h['source_db']}")
+            historical_preview = (
+                f"\n\nARCHIVES HISTORIQUES ({len(historical)} email(s) trouvé(s) pour {dossier_id}"
+                f"{f' en {year_filter}' if year_filter else ''}) :\n"
+                + "\n".join(preview_lines)
+            )
+            if len(historical) > 5:
+                historical_preview += f"\n… et {len(historical) - 5} autres."
+            historical_preview += (
+                f"\n\nTOTAL ARCHIVES : {len(historical)} email(s). "
+                f"Si Daniel demande un comptage, ce total est la réponse de référence."
+            )
+
     system_prompt = CHARLIE_SYSTEM_PROMPT
     if dossier_id:
         extra = (
@@ -478,6 +564,7 @@ async def ask_charlie(
         )
         system_prompt += extra
         system_prompt += dossier_context
+        system_prompt += historical_preview
 
     enriched_question = _enrichir_question(question)
     log.info("charlie.question_enriched", original=question[:60], enriched=enriched_question[:80])

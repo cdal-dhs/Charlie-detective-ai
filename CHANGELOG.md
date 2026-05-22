@@ -4,6 +4,16 @@
 
 ---
 
+## [1.13.17] — 2026-05-22
+
+### Corrigé
+- **Charlie ignore les archives historiques pour les comptages de dossiers** : `mail_processed` ne contient que 19 emails (post-cutoff 2026-05-15) tandis que les vrais emails ADF (8 en 2026) sont dans `boite1.sqlite`. Charlie répondait "1 seul email" ou "total 0".
+  - **Nouvelle fonction `_search_historical_by_keyword()`** — recherche par mot-clé dans les 3 bases historiques (boite1/2/3) en parallèle.
+  - **Phase 0 étendue** — quand un `dossier_id` est détecté, Charlie consulte les archives AVANT de générer le SQL et injecte le résultat dans le prompt : "ARCHIVES HISTORIQUES (8 emails trouvés pour ADF en 2026) : [liste] — TOTAL ARCHIVES : 8 email(s)."
+  - Le LLM voit directement le comptage exact et peut générer un SQL cohérent ou répondre directement depuis les archives.
+
+---
+
 ## [1.13.16] — 2026-05-22
 
 ### Corrigé
