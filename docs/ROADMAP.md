@@ -67,7 +67,7 @@ Les 3 DB indexées avec embeddings, le guide de style validé, l'environnement l
 
 ---
 
-## 🚧 S3 — Cœur intelligent : RAG + génération (EN COURS — MVP fonctionnel)
+## ✅ S3 — Cœur intelligent : RAG + génération (TERMINÉ)
 
 **Objectif** : pour chaque `demande_client` détecté, générer un brouillon de qualité et l'envoyer à CDAL via Resend.
 
@@ -76,54 +76,149 @@ Les 3 DB indexées avec embeddings, le guide de style validé, l'environnement l
 - [x] Brancher `pipeline.rag.retrieve` (déjà codé, validé sur vraie DB — 2042 paires)
 - [x] Brancher `pipeline.generator.generate_draft` (déjà codé, validé end-to-end)
 - [x] Brancher `delivery.resend_notifier.notify_draft` après génération
-- [ ] Calibration qualité sur 50 mails réels, ajustements prompts *(à faire avec Daniel)*
-- [x] Vérifier multilingue : FR validé, NL validé, EN validé — détection via `langdetect` (remplace `fasttext` qui ne build pas sur Mac ARM)
+- [ ] Calibration qualité sur 50 mails réels, ajustements prompts *(en cours avec Daniel — sprint V2a)*
+- [x] Vérifier multilingue : FR validé, NL validé, EN validé — détection via `langdetect`
 - [x] Vérifier signatures par marque : boîte 1 validée, boîtes 2 et 3 en attente
 - [ ] Tests d'intégration automatisés *(reporté V2)*
 
-### Canal Slack Boss ↔ Charlie (remplace Telegram — MVP)
-- [x] Webhook Slack configuré dans `.env`
-- [x] Module `app/delivery/slack_notifier.py`
-- [x] Notification push quand un nouveau brouillon est généré (métadonnées + référence email)
+### Canal Slack Boss ↔ Charlie
+- [x] Webhook Slack + module `app/delivery/slack_notifier.py`
+- [x] Notification push à chaque nouveau brouillon (métadonnées + lien cockpit)
 - [x] Newsletter digest quotidien sur Slack
-- [x] **Slack Bot Charlie AI interactif** — @mention ou DM sur #detective, même pipeline que le cockpit web (module `app/delivery/slack_bot.py`, route `/slack/events`)
-- [ ] Approbation/rejet depuis Slack *(V2 — nécessite Slack App interactive avec Block Kit buttons)*
+- [x] **Slack Bot Charlie AI interactif** — @mention ou DM sur #detective
 
-### Livrable S3
-CDAL reçoit un email Resend formaté + une notification Slack pour chaque demande client. L'agent tourne en local sur 3 boîtes. Qualité à valider avec Daniel sur vrais cas.
+### Livrable S3 ✅
+MVP opérationnel sur VPS. CDAL reçoit brouillons via Resend + notification Slack. Cockpit web accessible via `detective.digitalhs.biz`. Daniel interagit avec Charlie via Slack.
 
 ---
 
-## ⬜ S4 — Production sur KVM8 + supervision
+## ✅ S4 — Production sur KVM8 + supervision (TERMINÉ)
 
 **Objectif** : agent déployé sur le VPS, tournant 24/7 avec supervision et backups.
 
 ### Tâches
 - [x] Setup KVM8 : Docker + Docker Compose, structure `/opt/DETECTIVE/`
-- [x] Copier le code et build l'image
-- [x] `.env` prod synchronisé via `scripts/deploy-to-vps.sh`
-- [x] Healthcheck FastAPI sur `127.0.0.1:8765`
+- [x] Build image + déploiement continu via `git pull + docker restart`
+- [x] `.env.production` synchronisé sur VPS
+- [x] Healthcheck FastAPI sur `:8765`
 - [x] Bot Slack Charlie AI interactif déployé et fonctionnel
-- [ ] Bot Telegram — canal **alertes système** : brancher `healthcheck` + erreurs critiques
-- [ ] Bot Telegram — canal **conversation Boss ↔ Charlie** : migrer le bot test vers le compte Daniel
-- [ ] Cron quotidien de backup → Backblaze B2 (les 4 SQLite, chiffrés via `age`)
-- [ ] Procédure de restore documentée et testée
-- [ ] Documentation opérationnelle (procédure restart, restore, ajout boîte mail)
-- [ ] Lancement officiel + monitoring 1 semaine
+- [x] Cockpit web (inbox, conversation, chat AI, admin) — Traefik + TLS
+- [x] Logs JSON structurés, rotation 7j
+- [x] Backup nightly Cerveau2 vault via cron `0 1 * * *`
+- [ ] Bot Telegram alertes système *(dépriorisé — Slack suffisant)*
+- [ ] Backup SQLite → Backblaze B2 chiffré *(V2 nice-to-have)*
+- [ ] Procédure de restore documentée *(à faire avant V2)*
 
-### Livrable S4
-MVP en production, monitoring actif, CDAL reçoit les brouillons à mesure que les vrais mails arrivent. Daniel peut interagir avec Charlie via Slack en direct.
+### Livrable S4 ✅
+MVP en production 24/7. Daniel interagit avec Charlie via Slack + cockpit web.
 
 ---
 
-## ⬜ V2 — Bascule Drafts IMAP + feedback loop
+## 🔥 V2a — Bascule Drafts IMAP + boucle approbation Daniel (SPRINT LUNDI 2026-05-25)
 
-**Pré-requis** : MVP stable depuis ≥ 2 semaines avec qualité validée par CDAL/Daniel.
+**Contexte** : Accord du 2026-05-22. Daniel commence lundi à approuver les brouillons directement depuis sa boîte mail. Resend reste pour les alertes système uniquement.
 
-- [ ] Module `delivery/imap_drafts.py` : `IMAP APPEND` du brouillon dans `Drafts` de la boîte d'origine
-- [ ] Switch config `DELIVERY_MODE=resend|imap_drafts`
-- [ ] Capture feedback : détection des mails envoyés depuis `Sent`, diff avec brouillon stocké, persistance dans `agent_state.db`
-- [ ] Tableau de bord léger : taux d'acceptation, distance moyenne édit, top éditions par catégorie
+### Objectif
+Remplacer la livraison Resend (brouillon → CDAL par email) par un dépôt direct en **Brouillons IMAP** de la boîte qui a reçu le mail client. Daniel lit, édite si besoin, et envoie lui-même. Il donne du feedback par email séparé ou forward si correction nécessaire.
+
+### Spécification technique
+
+**Format du brouillon IMAP** :
+- **De** : adresse de la boîte source (ex: `contact@detectivebelgique.be`)
+- **À** : adresse du client (expéditeur du mail entrant)
+- **Sujet** : `DEMANDE D'Approbation - Reponse Demande Client : [sujet original]`
+- **Corps** : brouillon généré par Charlie (texte brut), précédé d'un bandeau contextuel :
+  ```
+  ⚠️ BROUILLON IA — À RELIRE AVANT ENVOI
+  Dossier cockpit : https://detective.digitalhs.biz/app/conversation/{mail_id}
+  ────────────────────────────────────────
+  [texte du brouillon]
+  ```
+- **Flag IMAP** : `\Draft`
+- **Dossier cible** : `Drafts` (fallback : `INBOX.Drafts` → `Brouillons` → premier dossier contenant "draft" ou "brouillon" insensible à la casse)
+
+**Module à créer** : `app/delivery/imap_draft.py`
+```python
+async def append_draft(
+    incoming: IncomingMail,
+    mailbox: MailboxConfig,
+    gen: GenerationResult,
+    mail_id: int | None,
+    settings: Settings,
+) -> bool:
+    """Dépose le brouillon dans les Drafts IMAP de la boîte source.
+    Retourne True si succès, False si échec (fallback Resend activé)."""
+```
+
+Logique interne :
+1. Construire le message RFC 2822 via `email.message.EmailMessage` (text/plain)
+2. Ouvrir connexion `aioimaplib.IMAP4_SSL(host, port)`
+3. `login(user, app_password)`
+4. `LIST "" "*"` pour trouver le dossier Drafts
+5. `APPEND mailbox_name (\Draft) {date} {message_bytes}`
+6. `logout()`
+
+**Modification `imap_poller.py`** (ligne ~845) :
+```python
+# Ancien :
+await notify_draft(incoming, mailbox, gen, mail_id=mail_id)
+
+# Nouveau :
+draft_ok = await append_draft(incoming, mailbox, gen, mail_id, settings)
+if not draft_ok:
+    # Fallback Resend si IMAP APPEND échoue
+    await notify_draft(incoming, mailbox, gen, mail_id=mail_id)
+```
+
+**Config `.env`** : aucun nouveau paramètre requis — la boîte source a déjà `user` + `app_password`.
+
+### Tâches lundi
+
+- [ ] **1. Créer `app/delivery/imap_draft.py`** — fonction `append_draft()` avec :
+  - Construction email RFC 2822 (`email.message`, text/plain + UTF-8)
+  - Découverte auto du dossier Drafts via `LIST`
+  - IMAP APPEND avec flag `\Draft`
+  - Logging structuré (`imap_draft.ok`, `imap_draft.failed`, `imap_draft.folder_found`)
+  - Timeout 15s, propagation propre des exceptions
+
+- [ ] **2. Modifier `app/workers/imap_poller.py`** :
+  - Remplacer l'appel `notify_draft()` par `append_draft()` + fallback Resend si échec
+  - Garder import `notify_draft` (utilisé pour les alertes système)
+
+- [ ] **3. Test sur boîte de dev** :
+  - Envoyer un mail test à l'une des 3 boîtes depuis une adresse externe
+  - Vérifier que le brouillon apparaît dans les Brouillons d'Infomaniak
+  - Vérifier le sujet, le corps, le flag `\Draft`
+  - Vérifier que le lien cockpit est correct
+
+- [ ] **4. Bump version** : `1.15.1 → 1.16.0` (changement livraison = minor bump)
+
+- [ ] **5. Déployer sur VPS** et surveiller les logs du premier vrai mail
+
+### Resend — rôle post-V2a
+Resend reste actif **uniquement** pour :
+- Alertes système (disque VPS > 75%, erreurs critiques)
+- Fallback si IMAP APPEND échoue
+- N'envoie plus de brouillons de réponse client
+
+### Points d'attention
+- Infomaniak peut nommer le dossier Drafts différemment selon la locale du compte (`Brouillons` en FR, `Drafts` en EN) → découverte dynamique obligatoire via `LIST`
+- Le flag IMAP `\Draft` est standard RFC 3501 — testé sur Infomaniak ?
+- Si la connexion IMAP Append échoue (timeout, auth), le fallback Resend garantit qu'aucun brouillon n'est perdu
+
+---
+
+## ⬜ V2b — Feedback loop qualité Daniel
+
+**Pré-requis** : V2a stable depuis ≥ 1 semaine, Daniel a approuvé ≥ 10 brouillons.
+
+**Objectif** : apprendre des corrections de Daniel pour améliorer les prochains brouillons.
+
+- [ ] Détecter les mails envoyés depuis `Sent` qui correspondent à un brouillon V2a (par sujet/Message-ID)
+- [ ] Calculer la distance textuelle (diff) entre brouillon IA et version envoyée par Daniel
+- [ ] Persister dans `agent_state.db` : taux d'acceptation, types d'éditions fréquentes
+- [ ] Dashboard léger dans le cockpit : "Charlie — taux d'approbation cette semaine"
+- [ ] Affiner le prompt `personality_daniel.txt` avec les patterns d'édition les plus fréquents
 
 ---
 
@@ -136,6 +231,25 @@ MVP en production, monitoring actif, CDAL reçoit les brouillons à mesure que l
 - [ ] Architecture multi-sub-agents : router orchestrateur qui dispatch par tâche, chaque agent sa config LLM
 - [ ] **Pipeline Cerveau2 — ingestion continue** : alimenter Cerveau2 en temps réel depuis IMAP (v1.9.4 lancé, à stabiliser)
 - [ ] **Charlie AI temps réel** : court-circuiter le LLM pour 80% des requêtes (SQL programmatique) ou basculer vers Claude Sonnet 4 via OpenRouter pour fiabilité maximale
+
+---
+
+## 📝 Notes de session 2026-05-22 (v1.15.1)
+
+**État prod au 22 mai** :
+- Charlie v1.15.1 tourne sur VPS — 3 boîtes pollées, pipeline complet opérationnel
+- Cerveau2 v0.4.6 — second cerveau alimenté en temps réel + 933 fiches contacts importées (batch extract terminé)
+- Cockpit web accessible : `detective.digitalhs.biz` — inbox, conversation, chat Charlie, admin
+- Backup nightly fonctionnel avec timestamp `.last_backup`
+
+**Bugs résolus aujourd'hui** :
+- Charlie timeout "Failed to fetch" → `context_only=True` élimine le double appel LLM Cerveau2
+- "combien d'emails depuis le 20 mai ?" → SQL programmatique `_build_count_sql()` bypass deepseek-v4-pro (réponses SQL vides)
+- Download PJ → logging path manquant + dossier `attachments/` créé au boot
+
+**Décision clé** : bascule V2a IMAP Drafts lundi 2026-05-25 — Daniel approuve les brouillons depuis sa boîte mail directement.
+
+**LLM chat actuel** : `openai/deepseek-v4-pro` (langage naturel OK, SQL generation vide — contourné par SQL programmatique)
 
 ---
 
