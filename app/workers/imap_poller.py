@@ -26,6 +26,17 @@ from app.pipeline.language import detect_language
 from app.pipeline.prefilter import quick_classify
 from app.pipeline.priority import assign_priority
 
+# Signaux de coordonnées contact dans un body (tél belge, code postal, adresse)
+_CONTACT_SIGNALS_RE = re.compile(
+    r'(?:'
+    r'0\d[\d\s/\.\-]{6,12}|'               # mobile belge 04xx/...
+    r'\+32[\s\d]{8,15}|'                   # +32 ...
+    r'\b\d{4}\s+[A-ZÀ-Ÿa-z][a-zà-ÿ]|'    # code postal + ville
+    r'(?:Rue|Avenue|Boulevard|Chaussée|Place|Drève|Chemin|Av\.)\s'
+    r')',
+    re.IGNORECASE,
+)
+
 # Mapping mailbox.name → marque Cerveau2
 _MARQUE_CERVEAU2 = {
     "detective_belgique": "detectivebelgique",
@@ -136,6 +147,130 @@ def _is_known_sender(db_path: Path, sender: str) -> bool:
         return found
     except Exception:
         return False
+
+
+def _normalize_contact_key(email: str | None, tel: str | None, nom: str, dossier_id: str | None) -> str:
+    """Clé de dédup stable : email > tel > nom+dossier."""
+    import unicodedata
+    def strip_accents(s: str) -> str:
+        return "".join(c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn")
+
+    if email:
+        return f"contact-{hashlib.md5(email.lower().strip().encode(), usedforsecurity=False).hexdigest()[:12]}"
+    if tel:
+        tel_clean = re.sub(r"[\s/\.\-]", "", tel)
+        return f"contact-{hashlib.md5(tel_clean.encode(), usedforsecurity=False).hexdigest()[:12]}"
+    nom_clean = strip_accents(nom.lower().strip()) if nom else "inconnu"
+    key = f"{nom_clean}:{dossier_id or 'global'}"
+    return f"contact-{hashlib.md5(key.encode(), usedforsecurity=False).hexdigest()[:12]}"
+
+
+async def _extract_and_feed_contact(
+    text: str,
+    subject: str,
+    sender: str,
+    dossier_id: str | None,
+    marque: str,
+    date_str: str,
+    base_url: str,
+    api_secret: str,
+    source_label: str = "email",
+) -> None:
+    """Extrait les coordonnées du demandeur et crée une fiche contact dans Cerveau2."""
+    if not _CONTACT_SIGNALS_RE.search(text or ""):
+        return
+
+    from app.llm.router import complete
+    from app.settings_store import get_llm_model_classifier
+
+    prompt = (
+        "Extrait les coordonnées de la PERSONNE MENTIONNÉE dans ce message "
+        "(client/demandeur, pas l'expéditeur technique ni la signature de Daniel/Detective.be).\n"
+        "Réponds UNIQUEMENT en JSON, sans texte autour.\n"
+        'Format : {"nom":"...","prenom":"...","adresse":"...","code_postal":"...","ville":"...","telephone":"...","email":"..."}\n'
+        "Mets null pour les champs absents. Si aucune coordonnée trouvée, réponds: {}\n\n"
+        f"Message :\n{text[:2500]}"
+    )
+    try:
+        raw = await complete(
+            model=get_llm_model_classifier(),
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=250,
+            temperature=0.0,
+        )
+    except Exception as e:
+        log.warning("poller.contact_llm_failed", error=str(e), source=source_label)
+        return
+
+    import json
+    data: dict = {}
+    try:
+        json_match = re.search(r'\{[^{}]*\}', raw or "", re.DOTALL)
+        if json_match:
+            data = json.loads(json_match.group())
+    except (json.JSONDecodeError, AttributeError):
+        pass
+
+    if not any(v for v in data.values() if v):
+        return
+
+    nom = data.get("nom") or ""
+    prenom = data.get("prenom") or ""
+    nom_complet = " ".join(filter(None, [prenom, nom])) or sender
+    doc_id = _normalize_contact_key(data.get("email"), data.get("telephone"), nom_complet, dossier_id)
+
+    lines = [
+        f"# Fiche contact — {nom_complet}",
+        "",
+        f"**Dossier** : {dossier_id or 'non assigné'}",
+        f"**Source** : {source_label} du {date_str} — {subject}",
+        "",
+        "## Coordonnées",
+    ]
+    if nom or prenom:
+        lines.append(f"- **Nom** : {prenom} {nom}".strip(" -"))
+    if data.get("adresse"):
+        lines.append(f"- **Adresse** : {data['adresse']}")
+    if data.get("code_postal") or data.get("ville"):
+        lines.append(f"- **Localité** : {data.get('code_postal', '')} {data.get('ville', '')}".strip())
+    if data.get("telephone"):
+        lines.append(f"- **Téléphone** : {data['telephone']}")
+    if data.get("email"):
+        lines.append(f"- **Email** : {data['email']}")
+
+    fiche_body = "\n".join(lines)
+
+    asyncio.create_task(
+        feed_document(
+            doc_id=doc_id,
+            type="fiche_contact",
+            dossier_id=dossier_id,
+            marque=marque,
+            date=date_str,
+            titre=f"Contact — {nom_complet}",
+            body=fiche_body,
+            metadata={
+                "source": f"extraction_{source_label}",
+                "nom": nom,
+                "prenom": prenom,
+                "telephone": data.get("telephone"),
+                "email_contact": data.get("email"),
+                "code_postal": data.get("code_postal"),
+                "ville": data.get("ville"),
+            },
+            zone="jaune",
+            langue="fr",
+            base_url=base_url,
+            api_secret=api_secret,
+        )
+    )
+    log.info(
+        "poller.contact_extracted",
+        nom=nom_complet,
+        dossier_id=dossier_id,
+        doc_id=doc_id,
+        source=source_label,
+    )
 
 
 def _persist(
@@ -587,6 +722,8 @@ async def _process_single_mail(
             date_str = received_at[:10] if received_at else ""
             heure_str = ""
 
+        _marque = _MARQUE_CERVEAU2.get(mailbox.name, mailbox.name)
+
         _task = asyncio.create_task(  # noqa: RUF006
             feed_correspondance(
                 message_id=message_id or f"{mailbox.name}_{uid}",
@@ -597,7 +734,7 @@ async def _process_single_mail(
                 destinataire=mailbox.user,
                 objet=subject,
                 body=body,
-                marque=_MARQUE_CERVEAU2.get(mailbox.name, mailbox.name),
+                marque=_marque,
                 dossier_id=dossier_id,
                 categorie=category,
                 zone="jaune",
@@ -608,10 +745,26 @@ async def _process_single_mail(
             )
         )
 
+        # --- Extraction fiche contact depuis le body (tous sauf newsletter/phishing) ---
+        asyncio.create_task(  # noqa: RUF006
+            _extract_and_feed_contact(
+                text=body,
+                subject=subject,
+                sender=sender,
+                dossier_id=dossier_id,
+                marque=_marque,
+                date_str=date_str,
+                base_url=settings.cerveau2_base_url,
+                api_secret=settings.cerveau2_api_secret,
+                source_label="email",
+            )
+        )
+
         # --- Pièces jointes -> Cerveau2 (ZERO tolérance : TOUTES ingérées) ---
         for att_filename, att_data in attachments:
             att_text = extract_text_bytes(att_data, att_filename)
-            if not att_text or not att_text.strip():
+            att_extractable = bool(att_text and att_text.strip())
+            if not att_extractable:
                 # Fallback : même non extractable, on ingère avec métadonnées pour référence
                 att_text = (
                     f"[Pièce jointe non extractable automatiquement]\n"
@@ -639,7 +792,7 @@ async def _process_single_mail(
                     doc_id=att_id,
                     type="document",
                     dossier_id=dossier_id,
-                    marque=_MARQUE_CERVEAU2.get(mailbox.name, mailbox.name),
+                    marque=_marque,
                     date=date_str,
                     titre=f"[PJ] {att_filename}",
                     body=att_text,
@@ -664,6 +817,22 @@ async def _process_single_mail(
                 size=len(att_data),
                 doc_id=att_id,
             )
+
+            # --- Extraction fiche contact depuis la pièce jointe (si texte extractable) ---
+            if att_extractable:
+                asyncio.create_task(  # noqa: RUF006
+                    _extract_and_feed_contact(
+                        text=att_text,
+                        subject=att_filename,
+                        sender=sender,
+                        dossier_id=dossier_id,
+                        marque=_marque,
+                        date_str=date_str,
+                        base_url=settings.cerveau2_base_url,
+                        api_secret=settings.cerveau2_api_secret,
+                        source_label=f"pièce jointe [{att_filename}]",
+                    )
+                )
 
     if category == "demande_client" and is_new and not settings.dry_run:
         incoming = IncomingMail(
