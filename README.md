@@ -25,6 +25,9 @@ L'agent surveille 3 boîtes Infomaniak (3 marques : Detective Belgique, Detectiv
     Détection langue (FR/NL/EN)
     RAG sur 1200 paires Q/R historiques (sqlite-vec + multilingual-e5-large)
     Génération brouillon (Kimi K2 via LiteLLM, style "Daniel")
+  Chat AI Charlie :
+    Recherche SQL + archives historiques (boite1/2/3) + Cerveau2 vault + mémoire
+    Modèle chat dédié : deepseek-v4-pro via Ollama Pro (`openai/deepseek-v4-pro`)
          ↓
 [Flag IMAP AgentProcessed]       → idempotence
 [DB SQLite mail_processed]      → stockage + cockpit web + table email_attachment
@@ -177,14 +180,14 @@ DETECTIVE_BE/
 
 ## Statut
 
-✅ **Production active** — `detective.digitalhs.biz` — v1.12.7
+✅ **Production active** — `detective.digitalhs.biz` — V1.14.2
 
 - **Pipeline IMAP** : polling 3 boîtes, classification 8 catégories, priorité intelligente
 - **Génération brouillon** : style Daniel, multilingue FR/NL/EN, fallback OpenRouter
 - **Cockpit web** : inbox filtrable, conversation avec viewer pièces jointes (badge, liste, preview, download)
-- **Chat AI Charlie** : SQL + Cerveau2 vault, mémoire courte, résumé automatique
+- **Chat AI Charlie** : SQL + Cerveau2 vault + archives historiques + mémoire courte, garde anti-réponse vide (V1.14.2)
 - **Slack Bot Charlie AI** : @mention + DM sur #detective
-- **Cerveau2 vault** (v1.12.x) : ingestion 100% emails + pièces jointes, recherche sans troncation, insensible aux accents, blindé injection
+- **Cerveau2 vault** : ingestion 100% emails + pièces jointes, recherche sans troncation, insensible aux accents, blindé injection
 - **Dashboard admin** : stats, settings LLM, audit logs
 
 Voir `docs/ROADMAP.md` pour la roadmap V2 (auto-amélioration, mémoire long terme, semantic search).
@@ -193,7 +196,7 @@ Voir `docs/ROADMAP.md` pour la roadmap V2 (auto-amélioration, mémoire long ter
 
 ## Versions
 
-Version source de vérité : **`app/_version.py`** (`VERSION = "1.12.7"`).
+Version source de vérité : **`app/_version.py`** (`VERSION = "1.14.2"`).
 
 Le badge affiché dans le cockpit est lu dynamiquement depuis `app/_version.py`. **Tolérance zéro** sur la désynchronisation.
 
