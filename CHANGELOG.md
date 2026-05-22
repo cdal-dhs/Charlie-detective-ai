@@ -4,6 +4,16 @@
 
 ---
 
+## [1.13.11] — 2026-05-22
+
+### Ajouté
+- **Visibilité poller + emails dans Audit Logs** : la page `/admin/audit` affiche désormais :
+  - Un tableau "Emails traités aujourd'hui" avec le breakdown par boîte et catégorie.
+  - Un tableau "Cycles poller (24h)" montrant l'activité réelle des 3 boîtes (télémétrie `agent_telemetry`).
+  - Rassure que le système tourne même quand aucun nouvel email n'est trouvé (`processed=0`).
+
+---
+
 ## [1.13.10] — 2026-05-21
 
 ### Ajouté

@@ -26,6 +26,52 @@
 </div>
 {% endif %}
 
+<!-- Emails traités aujourd'hui -->
+<div class="mb-4 bg-gray-900 border border-gray-800 rounded-lg p-3">
+    <h2 class="text-sm font-bold text-gray-300 mb-2">📧 Emails traités aujourd'hui</h2>
+    {% if today_mails %}
+    <table class="w-full text-xs">
+        <thead class="text-gray-500">
+            <tr><th class="text-left py-1">Boîte</th><th class="text-left py-1">Catégorie</th><th class="text-right py-1">Total</th></tr>
+        </thead>
+        <tbody>
+            {% for m in today_mails %}
+            <tr class="border-t border-gray-800">
+                <td class="py-1 text-gray-300">{{ m.mailbox_name }}</td>
+                <td class="py-1 text-gray-400">{{ m.category }}</td>
+                <td class="py-1 text-right text-gray-300 font-mono">{{ m.count }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="text-gray-500 text-xs">Aucun email traité aujourd'hui.</p>
+    {% endif %}
+</div>
+
+<!-- Télémétrie poller -->
+<div class="mb-4 bg-gray-900 border border-gray-800 rounded-lg p-3">
+    <h2 class="text-sm font-bold text-gray-300 mb-2">🔄 Cycles poller (24h)</h2>
+    {% if telemetry %}
+    <table class="w-full text-xs">
+        <thead class="text-gray-500">
+            <tr><th class="text-left py-1">Date</th><th class="text-left py-1">Boîte</th><th class="text-left py-1">Détails</th></tr>
+        </thead>
+        <tbody>
+            {% for t in telemetry %}
+            <tr class="border-t border-gray-800">
+                <td class="py-1 text-gray-400 font-mono whitespace-nowrap">{{ t.created_at }}</td>
+                <td class="py-1 text-gray-300">{{ t.mailbox_name or '-' }}</td>
+                <td class="py-1 text-gray-400">{{ t.details }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="text-gray-500 text-xs">Aucune télémétrie poller sur les 24 dernières heures.</p>
+    {% endif %}
+</div>
+
 <div class="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
     <table class="w-full text-sm">
         <thead class="bg-gray-800">

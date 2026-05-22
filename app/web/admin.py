@@ -512,6 +512,32 @@ async def audit_page(
         api_secret=settings.cerveau2_api_secret,
     )
 
+    # Télémétrie poller : cycles des dernières 24h
+    telemetry_sql = (
+        "SELECT event_type, mailbox_name, details, created_at "
+        "FROM agent_telemetry WHERE created_at >= datetime('now', '-1 day') "
+        "ORDER BY created_at DESC LIMIT 30"
+    )
+    async with db.execute(telemetry_sql) as cur:
+        t_rows = await cur.fetchall()
+    telemetry = [
+        dict(zip(["event_type", "mailbox_name", "details", "created_at"], r, strict=True))
+        for r in t_rows
+    ]
+
+    # Emails traités aujourd'hui (résumé)
+    today_mails_sql = (
+        "SELECT mailbox_name, category, COUNT(*) as cnt "
+        "FROM mail_processed WHERE date(processed_at) = date('now') "
+        "GROUP BY mailbox_name, category ORDER BY cnt DESC"
+    )
+    async with db.execute(today_mails_sql) as cur:
+        m_rows = await cur.fetchall()
+    today_mails = [
+        dict(zip(["mailbox_name", "category", "count"], r, strict=True))
+        for r in m_rows
+    ]
+
     return templates.TemplateResponse(
         request,
         "admin/audit.html",
@@ -523,5 +549,7 @@ async def audit_page(
             "action_filter": action,
             "user": user,
             "cerveau2_backup": backup_info,
+            "telemetry": telemetry,
+            "today_mails": today_mails,
         },
     )
