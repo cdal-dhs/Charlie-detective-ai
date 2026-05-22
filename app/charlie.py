@@ -800,7 +800,7 @@ async def _formulate_response(
         archive_count = facts.get("archives_count", 0)
         if total == 0:
             return "Aucun email trouvé pour cette recherche."
-        parts = [f"J'ai trouvé **{total}** email{"s" if total > 1 else ""}."]
+        parts = [f"J'ai trouvé **{total}** email" + ("s" if total > 1 else "") + "."]
         if sql_count > 0 and archive_count > 0:
             parts.append(f"({sql_count} en base courante + {archive_count} dans les archives)")
         elif archive_count > 0 and sql_count == 0:
@@ -832,7 +832,7 @@ async def _formulate_response(
         )
         lines = []
         count = len(all_rows)
-        lines.append(f"J'ai trouvé **{count}** résultat{"s" if count > 1 else ""} :")
+        lines.append(f"J'ai trouvé **{count}** résultat" + ("s" if count > 1 else "") + " :")
         lines.append("")
         for r in all_rows[:15]:
             subject = r.get("subject") or "Sans sujet"
