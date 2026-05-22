@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     openrouter_api_key: str = ""
     llm_model_fallback: str = "openrouter/anthropic/claude-3.5-sonnet"
     llm_model_classifier: str = "ollama_chat/kimi-k2"
-    llm_model_chat: str = ""  # si vide, charlie utilise llm_model_default
+    llm_model_chat: str = "openai/deepseek-v4-pro"
 
     resend_api_key: str = ""
     resend_from: str = "agent@digitalhs.biz"

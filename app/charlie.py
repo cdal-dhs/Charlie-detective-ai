@@ -598,6 +598,89 @@ def _extract_year(question: str) -> str | None:
     return m.group(1) if m else None
 
 
+_MONTH_FR = {
+    "janvier": 1, "fevrier": 2, "mars": 3, "avril": 4, "mai": 5, "juin": 6,
+    "juillet": 7, "aout": 8, "septembre": 9, "octobre": 10, "novembre": 11, "decembre": 12,
+    "jan": 1, "fev": 2, "avr": 4, "juil": 7, "aou": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+}
+
+
+def _extract_date_filter(question: str) -> str | None:
+    """Extrait une condition SQL de date depuis une question en langage naturel.
+
+    Ex: 'depuis le 20 mai' → "processed_at >= '2026-05-20'"
+        'en mai 2026' → "processed_at >= '2026-05-01' AND processed_at < '2026-06-01'"
+    Retourne None si aucune date détectable.
+    """
+    from datetime import date as _d
+    q = _normalize(question)
+    today = _d.today()
+    year_str = _extract_year(question) or str(today.year)
+    year = int(year_str)
+
+    # "depuis le D mois" ou "a partir du D mois"
+    m = re.search(r'(?:depuis le?|a partir du?)\s+(\d{1,2})\s+([a-záàâéèêîïôùûü]+)', q)
+    if m:
+        day = int(m.group(1))
+        month_name = _normalize(m.group(2))
+        month = _MONTH_FR.get(month_name, 0)
+        if month and 1 <= day <= 31:
+            date_str = f"{year}-{month:02d}-{day:02d}"
+            return f"processed_at >= '{date_str}'"
+
+    # "en mois" ou "du mois de mois"
+    m = re.search(r'(?:en|du mois de|ce mois)\s+([a-záàâéèêîïôùûü]+)', q)
+    if m:
+        month_name = _normalize(m.group(1))
+        month = _MONTH_FR.get(month_name, 0)
+        if month:
+            next_month = month + 1 if month < 12 else 1
+            next_year = year if month < 12 else year + 1
+            return f"processed_at >= '{year}-{month:02d}-01' AND processed_at < '{next_year}-{next_month:02d}-01'"
+
+    # "depuis le 2026-05-20" ou "depuis le 20/05/2026"
+    m = re.search(r'depuis le?\s+(\d{4}-\d{2}-\d{2})', question)
+    if m:
+        return f"processed_at >= '{m.group(1)}'"
+
+    # juste une année (ex: "en 2026", "depuis 2026")
+    if year_str and re.search(r'\b' + year_str + r'\b', question):
+        return f"processed_at >= '{year_str}-01-01' AND processed_at < '{year + 1}-01-01'"
+
+    return None
+
+
+def _build_count_sql(question: str, dossier_id: str | None) -> str | None:
+    """Génère SQL de comptage sans LLM pour les questions simples (combien d'emails).
+
+    Retourne None si la question est trop complexe pour être gérée programmatiquement.
+    """
+    q = _normalize(question)
+
+    # Détecte 'combien d'emails reçus / envoyés'
+    is_email_count = any(kw in q for kw in ("email", "mail", "message", "courriel"))
+    if not is_email_count:
+        return None
+
+    date_filter = _extract_date_filter(question)
+    where_clauses = []
+
+    if dossier_id:
+        where_clauses.append(f"(subject LIKE '%{dossier_id}%' OR body LIKE '%{dossier_id}%')")
+
+    if date_filter:
+        where_clauses.append(date_filter)
+
+    # Direction
+    if any(kw in q for kw in ("recu", "entrant", "arrivee", "incoming")):
+        where_clauses.append("mailbox_name LIKE '%belgique%' OR mailbox_name LIKE '%belgium%' OR mailbox_name LIKE '%dpdh%'")
+    elif any(kw in q for kw in ("envoye", "sortant", "outgoing")):
+        where_clauses.append("status = 'sent'")
+
+    where = " AND ".join(f"({c})" for c in where_clauses) if where_clauses else "1=1"
+    return f"SELECT COUNT(*) as total FROM mail_processed WHERE {where}"
+
+
 def _normalize(text: str) -> str:
     return normalize("NFKD", text.lower()).encode("ascii", "ignore").decode("ascii")
 
@@ -651,24 +734,27 @@ async def ask_charlie(
     is_identity_request = any(kw in q_norm for kw in ("qui est", "nom", "prenom", "contact", "personne", "sappelle", "epouse", "mari", "conjoint"))
 
     # ── 2. Génération SQL ──
-    sql = ""
-    try:
-        from datetime import date as _date
-        today_str = _date.today().isoformat()
-        system = CHARLIE_SYSTEM_PROMPT + f"\n\nDate du jour : {today_str}. Si Daniel dit 'aujourd'hui', 'ce mois-ci', 'depuis le X mai' sans préciser l'année, utilise {today_str[:4]} comme année."
-        if dossier_id:
-            system += f"\nNote : Daniel demande le dossier '{dossier_id}'. Inclus ce terme dans les clauses LIKE."
-        messages = [
-            {"role": "system", "content": system},
-            {"role": "user", "content": _enrichir_question(question)},
-        ]
-        raw = await complete(model=model, messages=messages, max_tokens=500, temperature=0.1)
-        if not raw or not raw.strip():
-            log.warning("charlie.sql_gen_empty", model=model)
-        else:
-            sql, _ = parse_charlie_response(raw)
-    except Exception as e:
-        log.warning("charlie.sql_gen_failed", error=str(e))
+    # Fallback programmatique pour les comptages simples (pas besoin de LLM)
+    sql = _build_count_sql(question, dossier_id) if is_count_request else ""
+
+    if not sql:
+        try:
+            from datetime import date as _date
+            today_str = _date.today().isoformat()
+            system = CHARLIE_SYSTEM_PROMPT + f"\n\nDate du jour : {today_str}. Si Daniel dit 'aujourd\\'hui', 'ce mois-ci', 'depuis le X mai' sans préciser l\\'année, utilise {today_str[:4]} comme année."
+            if dossier_id:
+                system += f"\nNote : Daniel demande le dossier '{dossier_id}'. Inclus ce terme dans les clauses LIKE."
+            messages = [
+                {"role": "system", "content": system},
+                {"role": "user", "content": _enrichir_question(question)},
+            ]
+            raw = await complete(model=model, messages=messages, max_tokens=500, temperature=0.1)
+            if not raw or not raw.strip():
+                log.warning("charlie.sql_gen_empty", model=model)
+            else:
+                sql, _ = parse_charlie_response(raw)
+        except Exception as e:
+            log.warning("charlie.sql_gen_failed", error=str(e))
 
     # ── 3. Recherches en parallèle ──
     async def _sql_task() -> list[dict]:
