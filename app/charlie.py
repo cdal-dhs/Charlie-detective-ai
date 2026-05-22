@@ -1061,10 +1061,12 @@ async def _summarize_results(
             correction_lines.append(f"- [{c.created_at}] {c.question}: {c.response[:500]}")
         correction_text = "\n".join(correction_lines)
 
-    # Bypass si corrections existent — réponse directe sans passer par le LLM
-    if correction_notes:
+    # Bypass si corrections existent ET question identitaire — réponse directe
+    # sans passer par le LLM. Pour les questions analytiques (comptage,
+    # statistiques, etc.), la correction reste un contexte PRIORITAIRE
+    # dans le prompt mais laisse le LLM synthétiser avec les résultats SQL.
+    if correction_notes and _is_identity_query(question):
         log.info("charlie.correction_bypass", question=question[:60], corrections=len(correction_notes))
-        # Retourner la correction la plus récente, formatée proprement
         latest = correction_notes[0]
         return latest.response.strip()
 

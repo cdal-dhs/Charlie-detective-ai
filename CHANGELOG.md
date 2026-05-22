@@ -4,6 +4,15 @@
 
 ---
 
+## [1.13.14] — 2026-05-22
+
+### Corrigé
+- **Correction qui écrase les questions analytiques** : quand Daniel demandait "Combien d'emails pour le dossier ADF en 2026 ?" après avoir corrigé le contact ADF, Charlie répondait "Sofie Latte" au lieu de faire la requête SQL.
+  - Le bypass direct de `_summarize_results()` ne s'applique désormais que si la question est **identitaire** (`_is_identity_query`).
+  - Les questions de comptage/statistiques laissent le LLM synthétiser les résultats SQL avec la correction comme contexte PRIORITAIRE dans le prompt.
+
+---
+
 ## [1.13.13] — 2026-05-22
 
 ### Ajouté
