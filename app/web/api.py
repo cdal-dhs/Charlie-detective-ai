@@ -597,7 +597,9 @@ async def charlie_ask(
     elif result.sql and result.sql_error:
         results_html = f'<p class="text-xs text-red-400 mt-1">Erreur SQL : {result.sql_error}</p>'
     elif result.rows is not None:
-        results_html = _format_rows_html(result.rows)
+        # Ignorer les résultats COUNT(*) mono-cellule : déjà inclus dans response_text
+        if not (len(result.rows) == 1 and len(result.rows[0]) == 1):
+            results_html = _format_rows_html(result.rows)
 
     vault_html = ""
     if result.vault_notes:

@@ -4,6 +4,16 @@
 
 ---
 
+## [1.14.3] — 2026-05-22
+
+### Corrigé
+- **Bug critique Charlie — comptage dossier précis** : la condition `if not dossier_id and archive_rows and is_count_request` bloquait le bypass Python pour toute question avec un dossier identifié (ex: "Combien d'emails pour ADF en 2026 ?"). Résultat : le LLM répondait "Je n'ai pas trouvé d'informations" malgré 7 archives ADF disponibles. Condition corrigée en `if is_count_request and (rows or archive_rows)` — bypass actif avec OU sans `dossier_id`.
+- **Extraction `sql_cnt` correcte** : distinction entre résultat `COUNT(*)` (1 ligne, 1 colonne → valeur extraite) et `SELECT *` (n lignes → `len(rows)`), évitant les faux totaux.
+- **Guard étendu** : en plus des réponses vides, détecte les réponses inutiles du LLM ("je n'ai pas trouvé", "aucun résultat"…) quand des données existent → force la réponse de secours.
+- **UI — table COUNT supprimée** : le résultat `[{"total": 0}]` ne s'affichait plus comme tableau "total | 0" dans le cockpit — déjà inclus dans la réponse texte.
+
+---
+
 ## [1.14.2] — 2026-05-22
 
 ### Corrigé

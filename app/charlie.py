@@ -756,20 +756,27 @@ async def ask_charlie(
     is_list_request = any(kw in q_norm for kw in ("liste", "lister", "donne-moi", "donne moi", "quels", "quelles", "lesquels", "lesquelles", "montre-moi", "tous les", "toutes les"))
     is_count_request = any(kw in q_norm for kw in ("combien", "nombre", "total", "count", "combien de"))
 
-    # Comptages sans dossier précis → réponse directe Python (exacte)
-    if not dossier_id and archive_rows and is_count_request:
-        total = len(archive_rows)
-        sql_total = len(rows) if rows else 0
-        parts = [f"J'ai trouvé **{total}** email{'s' if total > 1 else ''} en {year or 'cette période'}."]
-        if sql_total > 0:
-            parts.append(f"({sql_total} en base courante + {total} dans les archives)")
+    # Comptages → réponse directe Python (exacte, sans LLM, avec OU sans dossier précis)
+    if is_count_request and (rows or archive_rows):
+        if rows and len(rows) == 1 and len(rows[0]) == 1:
+            sql_cnt = int(next(iter(rows[0].values())))
         else:
-            parts.append("(tous dans les archives historiques)")
-        response = " ".join(parts)
+            sql_cnt = len(rows)
+        arc_cnt = len(archive_rows)
+        total = sql_cnt + arc_cnt
+        label = f"le dossier **{dossier_id}**" if dossier_id else "cette période"
+        msg = f"J'ai trouvé **{total}** email{'s' if total != 1 else ''} pour {label}"
+        if year:
+            msg += f" en {year}"
+        msg += "."
+        if sql_cnt > 0 and arc_cnt > 0:
+            msg += f" ({sql_cnt} en base courante + {arc_cnt} dans les archives historiques)"
+        elif arc_cnt > 0 and sql_cnt == 0:
+            msg += " (tous dans les archives historiques)"
 
-        await _auto_save_fact(db_path, question, response, dossier_id)
+        await _auto_save_fact(db_path, question, msg, dossier_id)
         return CharlieResult(
-            response_text=response,
+            response_text=msg,
             sql=sql,
             rows=rows,
             sql_safe=True,
@@ -818,7 +825,10 @@ RÉPONSE À DANIEL :"""
         log.warning("charlie.final_llm_failed", error=str(e))
         response = ""
 
-    # Garde : si le LLM retourne vide mais qu'on a des données → réponse de secours
+    # Garde : réponse vide OU inutile alors qu'on a des données → réponse de secours
+    _BAD = ("je n'ai pas trouvé", "aucun résultat", "aucune information", "je ne trouve pas", "pas d'information", "aucune donnée")
+    if not response or (any(p in response.lower() for p in _BAD) and (rows or archive_rows)):
+        response = ""
     if not response:
         if is_count_request and (rows or archive_rows):
             sql_cnt = int(next(iter(rows[0].values()))) if rows and len(rows) == 1 and len(rows[0]) == 1 else 0
