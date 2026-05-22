@@ -4,6 +4,16 @@
 
 ---
 
+## [1.13.13] — 2026-05-22
+
+### Ajouté
+- **Séparateur visuel inbox entre emails HOT et autres** : les emails `demande_client` + `high` + `pending` sont toujours affichés en haut de l'inbox, suivis d'une ligne épaisse verte (`border-b-4 border-green-600`) puis du reste des emails.
+  - `_fetch_mails()` et `_fetch_mails_partial()` exécutent désormais **deux requêtes SQL** : une pour les HOT, une pour les OTHER.
+  - Si aucun email HOT n'existe, aucune séparation n'est affichée.
+  - Les templates `inbox.html`, `inbox_rows.html` et l'endpoint HTMX `/api/inbox` sont mis à jour pour recevoir et rendre `hot_mails` + `other_mails`.
+
+---
+
 ## [1.13.12] — 2026-05-22
 
 ### Corrigé

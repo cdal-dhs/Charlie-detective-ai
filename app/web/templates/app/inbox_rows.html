@@ -1,8 +1,6 @@
 {% set box_short = {'detective_belgique': 'D_FR', 'detective_belgium': 'D_NL', 'dpdh_investigations': 'D_PD'} %}
-{% if not mails %}
-<tr><td colspan="8" class="px-4 py-8 text-center text-gray-500">Aucun message</td></tr>
-{% else %}
-{% for m in mails %}
+
+{% macro mail_row(m) %}
 {% set effective_status = m.status or 'pending' %}
 {% set is_hot = (m.category == 'demande_client' and m.priority == 'high' and effective_status == 'pending') %}
 {% set is_danger = (m.category == 'phishing') %}
@@ -76,5 +74,16 @@
   </td>
   <td class="px-2 py-3 whitespace-nowrap text-xs text-gray-400 w-24">{{ m.processed_at or '-' }}</td>
 </tr>
-{% endfor %}
+{% endmacro %}
+
+{% if not hot_mails and not other_mails %}
+<tr><td colspan="8" class="px-4 py-8 text-center text-gray-500">Aucun message</td></tr>
+{% else %}
+{% for m in hot_mails %}{{ mail_row(m) }}{% endfor %}
+{% if hot_mails %}
+<tr>
+  <td colspan="8" class="px-0 py-0 border-b-4 border-green-600"></td>
+</tr>
+{% endif %}
+{% for m in other_mails %}{{ mail_row(m) }}{% endfor %}
 {% endif %}

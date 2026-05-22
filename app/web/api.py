@@ -49,7 +49,8 @@ async def _fetch_mails_partial(
     sort_col: str = "date",
     sort_order: str = "desc",
     limit: int = 50,
-) -> list[dict]:
+) -> tuple[list[dict], list[dict]]:
+    """Retourne (hot_mails, other_mails)."""
     where = ["processed_at >= ?"]
     params = [_CUTOFF_DATE]
     if boxes is not None:
@@ -75,25 +76,48 @@ async def _fetch_mails_partial(
 
     col = _SORTABLE_COLS.get(sort_col, "processed_at")
     order = "DESC" if sort_order.lower() == "desc" else "ASC"
-
-    # Tri par défaut intelligent : pending first, high priority first, puis date
-    sql = (
-        "SELECT m.id, m.mailbox_name, m.subject, m.sender, m.received_at, m.category, "
-        "m.status, m.priority, m.processed_at, m.body_preview, "
-        "(SELECT COUNT(*) FROM email_attachment WHERE mail_processed_id = m.id) AS attachment_count "
-        "FROM mail_processed m WHERE " + " AND ".join(where) + " "
-        f"ORDER BY (m.status = 'pending') DESC, (m.priority = 'high') DESC, {col} {order} LIMIT ?"
-    )
-    params.append(limit)
-
-    async with db.execute(sql, params) as cursor:
-        rows = await cursor.fetchall()
-
     cols = [
         "id", "mailbox_name", "subject", "sender", "received_at",
         "category", "status", "priority", "processed_at", "body_preview", "attachment_count",
     ]
-    return [dict(zip(cols, row, strict=True)) for row in rows]
+
+    # ── Requête 1 : HOT (demande_client + high + pending) ──
+    hot_where = where + [
+        "category = 'demande_client'",
+        "priority = 'high'",
+        "(status = 'pending' OR status IS NULL)",
+    ]
+    hot_sql = (
+        "SELECT m.id, m.mailbox_name, m.subject, m.sender, m.received_at, m.category, "
+        "m.status, m.priority, m.processed_at, m.body_preview, "
+        "(SELECT COUNT(*) FROM email_attachment WHERE mail_processed_id = m.id) AS attachment_count "
+        "FROM mail_processed m WHERE " + " AND ".join(hot_where) + " "
+        f"ORDER BY {col} {order} LIMIT ?"
+    )
+    hot_params = params.copy()
+    hot_params.append(limit)
+    async with db.execute(hot_sql, hot_params) as cursor:
+        hot_rows = await cursor.fetchall()
+    hot_mails = [dict(zip(cols, row, strict=True)) for row in hot_rows]
+
+    # ── Requête 2 : OTHER (tout sauf hot) ──
+    other_where = where + [
+        "NOT (category = 'demande_client' AND priority = 'high' AND (status = 'pending' OR status IS NULL))"
+    ]
+    other_sql = (
+        "SELECT m.id, m.mailbox_name, m.subject, m.sender, m.received_at, m.category, "
+        "m.status, m.priority, m.processed_at, m.body_preview, "
+        "(SELECT COUNT(*) FROM email_attachment WHERE mail_processed_id = m.id) AS attachment_count "
+        "FROM mail_processed m WHERE " + " AND ".join(other_where) + " "
+        f"ORDER BY (m.status = 'pending') DESC, (m.priority = 'high') DESC, {col} {order} LIMIT ?"
+    )
+    other_params = params.copy()
+    other_params.append(limit)
+    async with db.execute(other_sql, other_params) as cursor:
+        other_rows = await cursor.fetchall()
+    other_mails = [dict(zip(cols, row, strict=True)) for row in other_rows]
+
+    return hot_mails, other_mails
 
 
 @router.get("/health")
@@ -116,12 +140,15 @@ async def inbox_partial(
     sort_col = request.query_params.get("sort") or "date"
     sort_order = request.query_params.get("order") or "desc"
 
-    mails = await _fetch_mails_partial(db, boxes, category, status, priority, q, sort_col, sort_order)
+    hot_mails, other_mails = await _fetch_mails_partial(
+        db, boxes, category, status, priority, q, sort_col, sort_order
+    )
     return templates.TemplateResponse(
         request,
         "app/inbox_rows.html",
         {
-            "mails": mails,
+            "hot_mails": hot_mails,
+            "other_mails": other_mails,
             "filters": {
                 "box": box_raw, "category": category, "status": status,
                 "priority": priority, "q": q, "sort": sort_col, "order": sort_order,
