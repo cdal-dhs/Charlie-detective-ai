@@ -498,6 +498,74 @@ async def _search_historical_by_category(
     return results
 
 
+async def _search_historical_all(
+    db_path: Path, year: str | None = None, limit: int = 50,
+) -> list[dict]:
+    """Cherche dans les 3 DB historiques tous les emails pertinents (exclut spam/newsletter/phishing)."""
+    data_dir = db_path.parent
+    results: list[dict] = []
+    generic_subjects = ("%Nouveau Message De Détective%", "%Formulaire%", "%Contact%")
+    exclude_cats = ("spam", "newsletter", "phishing")
+    for db_name in ("boite1.sqlite", "boite2.sqlite", "boite3.sqlite"):
+        db_file = data_dir / db_name
+        if not db_file.exists():
+            continue
+        try:
+            async with aiosqlite.connect(db_file) as db:
+                placeholders = ", ".join(["?"] * len(exclude_cats))
+                sql = (
+                    f"SELECT id, subject, sender, date, body_preview, category "
+                    f"FROM emails WHERE category NOT IN ({placeholders}) "
+                    f"AND body_preview IS NOT NULL AND LENGTH(body_preview) > 30 "
+                    f"AND sender NOT LIKE '%noreply%' "
+                    f"AND sender NOT LIKE '%no-reply%' "
+                )
+                params: list = list(exclude_cats)
+                for gs in generic_subjects:
+                    sql += "AND subject NOT LIKE ? "
+                    params.append(gs)
+                if year:
+                    sql += "AND date LIKE ? "
+                    params.append(f"%{year}%")
+                sql += "ORDER BY date DESC LIMIT ?"
+                params.append(limit)
+                cursor = await db.execute(sql, tuple(params))
+                rows = await cursor.fetchall()
+                for row in rows:
+                    results.append({
+                        "id": row[0],
+                        "subject": row[1],
+                        "sender": row[2],
+                        "received_at": row[3],
+                        "body_preview": row[4],
+                        "category": row[5],
+                        "source_db": db_name,
+                    })
+        except Exception as e:
+            log.warning("charlie.historical_all_failed", db=db_name, error=str(e))
+    def _parse_date(r: dict) -> datetime:
+        raw = r.get("received_at") or ""
+        if not raw:
+            return datetime.min
+        try:
+            dt = parsedate_to_datetime(raw)
+            if dt.tzinfo is not None:
+                return dt.replace(tzinfo=None)
+            return dt
+        except Exception:
+            pass
+        try:
+            dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            if dt.tzinfo is not None:
+                return dt.replace(tzinfo=None)
+            return dt
+        except Exception:
+            pass
+        return datetime.min
+    results.sort(key=_parse_date, reverse=True)
+    return results
+
+
 async def ask_charlie(
     question: str,
     db_path: Path,
@@ -673,6 +741,9 @@ async def _execute_plan(
             if matched_cat:
                 histo = await _search_historical_by_category(db_path, matched_cat, year=year, limit=1000)
                 archive_count = len(histo)
+            elif year:
+                histo = await _search_historical_all(db_path, year=year, limit=1000)
+                archive_count = len(histo)
 
         total = sql_count + archive_count
         if sql_count == 0 and archive_count > 0:
@@ -683,13 +754,14 @@ async def _execute_plan(
         return facts
 
     if qtype == "identity":
-        corrections = await query_corrections(db_path, dossier_id=dossier_id, limit=5)
-        if corrections:
-            facts["answer"] = corrections[0].response.strip()
-            facts["source"] = "correction"
-            facts["vault_notes"] = []
-            log.info("charlie.identity_correction_bypass", dossier_id=dossier_id)
-            return facts
+        if dossier_id:
+            corrections = await query_corrections(db_path, dossier_id=dossier_id, limit=5)
+            if corrections:
+                facts["answer"] = corrections[0].response.strip()
+                facts["source"] = "correction"
+                facts["vault_notes"] = []
+                log.info("charlie.identity_correction_bypass", dossier_id=dossier_id)
+                return facts
 
         vault_notes = await query_vault(
             question=question,
@@ -740,6 +812,8 @@ async def _execute_plan(
                     break
             if matched_cat:
                 archive_rows = await _search_historical_by_category(db_path, matched_cat, year=year, limit=20)
+            elif year:
+                archive_rows = await _search_historical_all(db_path, year=year, limit=20)
         facts["archive_rows"] = archive_rows
         return facts
 
@@ -770,7 +844,9 @@ async def _execute_plan(
         return await query_memory(db_path, question=question, dossier_id=dossier_id, limit=3)
 
     async def _correction_task() -> list:
-        return await query_corrections(db_path, dossier_id=dossier_id, limit=3)
+        if dossier_id:
+            return await query_corrections(db_path, dossier_id=dossier_id, limit=3)
+        return []
 
     rows, vault_notes, memory_notes, correction_notes = await asyncio.gather(
         _sql_task(), _vault_task(), _memory_task(), _correction_task(),
