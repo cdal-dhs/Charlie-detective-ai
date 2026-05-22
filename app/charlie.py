@@ -628,7 +628,7 @@ async def ask_charlie(
 ) -> CharlieResult:
     """Pipeline Charlie AI V1.14.1 — Prompt unique avec contexte multi-sources."""
     settings = get_settings()
-    model = model or settings.llm_model_chat
+    model = model or settings.llm_model_chat or settings.llm_model_default
 
     # ── 1. Questions générales (pas de recherche) ──
     general_resp = _general_response(question)
@@ -653,15 +653,20 @@ async def ask_charlie(
     # ── 2. Génération SQL ──
     sql = ""
     try:
-        system = CHARLIE_SYSTEM_PROMPT
+        from datetime import date as _date
+        today_str = _date.today().isoformat()
+        system = CHARLIE_SYSTEM_PROMPT + f"\n\nDate du jour : {today_str}. Si Daniel dit 'aujourd'hui', 'ce mois-ci', 'depuis le X mai' sans préciser l'année, utilise {today_str[:4]} comme année."
         if dossier_id:
-            system += f"\n\nNote : Daniel demande le dossier '{dossier_id}'. Inclus ce terme dans les clauses LIKE."
+            system += f"\nNote : Daniel demande le dossier '{dossier_id}'. Inclus ce terme dans les clauses LIKE."
         messages = [
             {"role": "system", "content": system},
             {"role": "user", "content": _enrichir_question(question)},
         ]
         raw = await complete(model=model, messages=messages, max_tokens=500, temperature=0.1)
-        sql, _ = parse_charlie_response(raw)
+        if not raw or not raw.strip():
+            log.warning("charlie.sql_gen_empty", model=model)
+        else:
+            sql, _ = parse_charlie_response(raw)
     except Exception as e:
         log.warning("charlie.sql_gen_failed", error=str(e))
 
