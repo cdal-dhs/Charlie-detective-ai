@@ -228,6 +228,37 @@ async def feed_document(
     return False
 
 
+async def query_dossiers(
+    base_url: str,
+    api_secret: str,
+    since: str | None = None,
+    client_type: str | None = None,
+) -> list[dict]:
+    """Retourne la liste des dossiers depuis Cerveau2 GET /dossiers (dégradation silencieuse)."""
+    if not base_url or not api_secret:
+        return []
+    params: dict = {}
+    if since:
+        params["since"] = since
+    if client_type:
+        params["client_type"] = client_type
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            resp = await client.get(
+                f"{base_url.rstrip('/')}/dossiers",
+                headers={"Authorization": f"Bearer {api_secret}"},
+                params=params,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            result = data.get("dossiers", [])
+            log.info("cerveau.query_dossiers_ok", total=len(result), since=since)
+            return result
+    except Exception as e:
+        log.warning("cerveau.query_dossiers_failed", error=str(e))
+        return []
+
+
 async def get_backup_status(
     base_url: str,
     api_secret: str,

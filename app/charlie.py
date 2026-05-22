@@ -11,7 +11,7 @@ from unicodedata import normalize
 import aiosqlite
 import structlog
 
-from app.cerveau_client import VaultNote, query_vault
+from app.cerveau_client import VaultNote, query_dossiers, query_vault
 from app.charlie_memory import (
     is_correction,
     is_memory_query,
@@ -639,6 +639,12 @@ async def ask_charlie(
     year = _extract_year(question)
     log.info("charlie.ask", question=question[:60], dossier_id=dossier_id, year=year)
 
+    # Détection d'intention (avant les closures — late binding Python)
+    q_norm = _normalize(question)
+    is_list_request = any(kw in q_norm for kw in ("liste", "lister", "donne-moi", "donne moi", "quels", "quelles", "lesquels", "lesquelles", "montre-moi", "tous les", "toutes les"))
+    is_count_request = any(kw in q_norm for kw in ("combien", "nombre", "total", "count", "combien de"))
+    is_dossier_count = any(kw in q_norm for kw in ("nouveau dossier", "dossier ouvert", "dossier cree", "dossiers crees", "combien de dossier", "ouvert depuis", "crees depuis", "nouveau client", "nouveaux client", "dossiers client"))
+
     # ── 2. Génération SQL ──
     sql = ""
     try:
@@ -682,14 +688,25 @@ async def ask_charlie(
         return []
 
     async def _archive_task() -> list[dict]:
+        lim = 500 if is_count_request else 50
         if dossier_id:
-            return await _search_historical_by_keyword(db_path, dossier_id, year=year, limit=20)
+            return await _search_historical_by_keyword(db_path, dossier_id, year=year, limit=lim)
         if year:
-            return await _search_historical_all(db_path, year=year, limit=100)
+            return await _search_historical_all(db_path, year=year, limit=lim)
         return []
 
-    rows, vault_notes, memory_notes, correction_notes, archive_rows = await asyncio.gather(
-        _sql_task(), _vault_task(), _memory_task(), _correction_task(), _archive_task(),
+    async def _dossiers_task() -> list[dict]:
+        if not is_dossier_count:
+            return []
+        since = f"{year}-01-01" if year else None
+        return await query_dossiers(
+            base_url=settings.cerveau2_base_url,
+            api_secret=settings.cerveau2_api_secret,
+            since=since,
+        )
+
+    rows, vault_notes, memory_notes, correction_notes, archive_rows, dossier_list = await asyncio.gather(
+        _sql_task(), _vault_task(), _memory_task(), _correction_task(), _archive_task(), _dossiers_task(),
     )
 
     # ── 4. Construction du contexte ──
@@ -751,12 +768,31 @@ async def ask_charlie(
 
     context = "\n".join(context_parts)
 
-    # ── 5. Réponse directe pour COMPTAGES génériques (pas de LLM) ──
-    q_norm = _normalize(question)
-    is_list_request = any(kw in q_norm for kw in ("liste", "lister", "donne-moi", "donne moi", "quels", "quelles", "lesquels", "lesquelles", "montre-moi", "tous les", "toutes les"))
-    is_count_request = any(kw in q_norm for kw in ("combien", "nombre", "total", "count", "combien de"))
+    # ── 5. Réponses directes Python (pas de LLM) ──
 
-    # Comptages → réponse directe Python (exacte, sans LLM, avec OU sans dossier précis)
+    # Dossiers clients (Cerveau2 registry)
+    if is_dossier_count and dossier_list is not None:
+        total = len(dossier_list)
+        label_time = f"depuis le 1er janvier {year}" if year else "en tout"
+        msg = f"J'ai **{total}** dossier{'s' if total != 1 else ''} client{'s' if total != 1 else ''} ouverts {label_time}."
+        if 0 < total <= 20:
+            lines = [msg, ""]
+            for d in dossier_list:
+                date_str = d.get("created_at", "")[:10]
+                ct = d.get("client_type", "?")
+                lines.append(f"- **{d['dossier_id']}** — ouvert le {date_str} ({ct})")
+            msg = "\n".join(lines)
+        await _auto_save_fact(db_path, question, msg, dossier_id)
+        return CharlieResult(
+            response_text=msg,
+            sql=sql,
+            rows=rows,
+            sql_safe=True,
+            sql_error=None,
+            vault_notes=vault_notes,
+        )
+
+    # Comptages emails → réponse directe Python (exacte, sans LLM, avec OU sans dossier précis)
     if is_count_request and (rows or archive_rows):
         if rows and len(rows) == 1 and len(rows[0]) == 1:
             sql_cnt = int(next(iter(rows[0].values())))

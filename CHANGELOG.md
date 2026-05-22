@@ -4,6 +4,19 @@
 
 ---
 
+## [1.14.4] — 2026-05-22
+
+### Ajouté
+- **Charlie — comptage dossiers clients** : nouvelle détection `is_dossier_count` (mots-clés : "nouveau dossier", "ouvert depuis", "dossier client"…). Appel `GET /dossiers` sur Cerveau2-Det via `query_dossiers()`. Réponse directe Python avec liste détaillée (id, date, type) si ≤ 20 dossiers.
+- **`query_dossiers()`** dans `cerveau_client.py` — client GET `/dossiers` avec paramètres `since` et `client_type`.
+- **`_dossiers_task()`** dans `ask_charlie()` — tâche asyncio parallèle, ne s'exécute que si `is_dossier_count`.
+
+### Modifié
+- `q_norm`, `is_count_request`, `is_list_request` déplacés AVANT les closures de tâches → `_archive_task` peut maintenant utiliser `is_count_request` pour ajuster sa limite (20 → 500 pour les comptages).
+- Limite archive dynamique : `500 if is_count_request else 50` — évite les faux comptages pour les gros dossiers.
+
+---
+
 ## [1.14.3] — 2026-05-22
 
 ### Corrigé
