@@ -644,6 +644,8 @@ async def ask_charlie(
     is_list_request = any(kw in q_norm for kw in ("liste", "lister", "donne-moi", "donne moi", "quels", "quelles", "lesquels", "lesquelles", "montre-moi", "tous les", "toutes les"))
     is_count_request = any(kw in q_norm for kw in ("combien", "nombre", "total", "count", "combien de"))
     is_dossier_count = any(kw in q_norm for kw in ("nouveau dossier", "dossier ouvert", "dossier cree", "dossiers crees", "combien de dossier", "ouvert depuis", "crees depuis", "nouveau client", "nouveaux client", "dossiers client"))
+    is_dossier_list = is_list_request and not dossier_id and any(kw in q_norm for kw in ("dossier", "enquete", "enquetes", "affaire", "affaires", "client"))
+    is_identity_request = any(kw in q_norm for kw in ("qui est", "nom", "prenom", "contact", "personne", "sappelle", "epouse", "mari", "conjoint"))
 
     # ── 2. Génération SQL ──
     sql = ""
@@ -671,12 +673,13 @@ async def ask_charlie(
             return []
 
     async def _vault_task() -> list:
+        lim = 8 if (is_identity_request or is_list_request or is_dossier_list) else settings.cerveau2_limit
         return await query_vault(
             question=question,
             base_url=settings.cerveau2_base_url,
             api_secret=settings.cerveau2_api_secret,
             dossier_id=dossier_id,
-            limit=settings.cerveau2_limit,
+            limit=lim,
         )
 
     async def _memory_task() -> list:
@@ -696,7 +699,7 @@ async def ask_charlie(
         return []
 
     async def _dossiers_task() -> list[dict]:
-        if not is_dossier_count:
+        if not (is_dossier_count or is_dossier_list):
             return []
         since = f"{year}-01-01" if year else None
         return await query_dossiers(
@@ -719,20 +722,36 @@ async def ask_charlie(
             context_parts.append(f"- [{c.created_at}] Q: {c.question} | R: {c.response}")
         context_parts.append("")
 
+    # Vault — source principale (SECOND CERVEAU)
+    if vault_notes:
+        context_parts.append(f"SECOND CERVEAU — notes Cerveau2-Det ({len(vault_notes)} note(s)) :")
+        for note in vault_notes:
+            fname = note.path.split("/")[-1].replace(".md", "")
+            context_parts.append(f"[{fname}]\n{note.content[:2000]}")
+            context_parts.append("")
+        context_parts.append("")
+
+    # Mémoire Charlie
+    if memory_notes:
+        context_parts.append("SOUVENIRS DE CHARLIE :")
+        for mem in memory_notes[:3]:
+            context_parts.append(f"- [{mem.created_at}] {mem.question}: {mem.response[:300]}")
+        context_parts.append("")
+
     # SQL
     if rows:
-        context_parts.append(f"RÉSULTATS SQL ({len(rows)} ligne(s)) :")
+        context_parts.append(f"EMAILS BASE COURANTE — SQL ({len(rows)} ligne(s)) :")
         context_parts.append(_sanitize_rows_for_prompt(rows))
         context_parts.append("")
     elif sql:
-        context_parts.append("RÉSULTATS SQL : aucun email trouvé dans la base courante.")
+        context_parts.append("EMAILS BASE COURANTE : aucun email trouvé.")
         context_parts.append("")
 
-    # Archives — résumé par catégorie + détail des 50 premiers
+    # Archives historiques — résumé par catégorie + détail des 50 premiers
     if archive_rows:
         from collections import Counter
         cat_counts = Counter(r.get("category") or "SANS_CAT" for r in archive_rows)
-        context_parts.append(f"ARCHIVES HISTORIQUES ({len(archive_rows)} email(s)) :")
+        context_parts.append(f"EMAILS ARCHIVES HISTORIQUES ({len(archive_rows)} email(s)) :")
         context_parts.append("Répartition par catégorie :")
         for cat, cnt in cat_counts.most_common():
             context_parts.append(f"  - {cat}: {cnt}")
@@ -751,26 +770,55 @@ async def ask_charlie(
             context_parts.append(f"… et {len(archive_rows) - 50} autres.")
         context_parts.append("")
 
-    # Vault
-    if vault_notes:
-        context_parts.append(f"NOTES DU SECOND CERVEAU ({len(vault_notes)} note(s)) :")
-        for note in vault_notes[:3]:
-            fname = note.path.split("/")[-1].replace(".md", "")
-            context_parts.append(f"- {fname}: {note.content[:1500]}")
-        context_parts.append("")
-
-    # Mémoire
-    if memory_notes:
-        context_parts.append("SOUVENIRS DE CHARLIE :")
-        for mem in memory_notes[:3]:
-            context_parts.append(f"- [{mem.created_at}] {mem.question}: {mem.response[:300]}")
-        context_parts.append("")
-
     context = "\n".join(context_parts)
 
     # ── 5. Réponses directes Python (pas de LLM) ──
 
-    # Dossiers clients (Cerveau2 registry)
+    # Liste des dossiers (Cerveau2 registry ou fallback archives)
+    if is_dossier_list:
+        if dossier_list:
+            total = len(dossier_list)
+            lines = [f"J'ai **{total}** dossier{'s' if total != 1 else ''} client{'s' if total != 1 else ''} ouvert{'s' if total != 1 else ''}."]
+            lines.append("")
+            for d in dossier_list:
+                date_str = d.get("created_at", "")[:10]
+                ct = d.get("client_type", "?")
+                marque = d.get("marque", "")
+                line = f"- **{d['dossier_id']}** — ouvert le {date_str} ({ct})"
+                if marque:
+                    line += f" [{marque}]"
+                lines.append(line)
+            msg = "\n".join(lines)
+            await _auto_save_fact(db_path, question, msg, dossier_id)
+            return CharlieResult(
+                response_text=msg,
+                sql=sql, rows=rows, sql_safe=True, sql_error=None, vault_notes=vault_notes,
+            )
+        elif archive_rows:
+            seen_ids: set[str] = set()
+            dossier_ids_found: list[str] = []
+            for r in archive_rows:
+                did = r.get("dossier_id") or _extract_dossier_id(r.get("subject", "") or "")
+                if did and did not in seen_ids:
+                    seen_ids.add(did)
+                    dossier_ids_found.append(did)
+            if dossier_ids_found:
+                lines = [f"J'ai identifié **{len(dossier_ids_found)}** dossier{'s' if len(dossier_ids_found) != 1 else ''} dans les archives historiques :"]
+                lines.append("")
+                for did in dossier_ids_found[:30]:
+                    lines.append(f"- **{did}**")
+                if len(dossier_ids_found) > 30:
+                    lines.append(f"… et {len(dossier_ids_found) - 30} autres.")
+                lines.append("")
+                lines.append("_(Note : le registre Cerveau2 sera complet après les premières ingestions d'emails.)_")
+                msg = "\n".join(lines)
+                await _auto_save_fact(db_path, question, msg, dossier_id)
+                return CharlieResult(
+                    response_text=msg,
+                    sql=sql, rows=rows, sql_safe=True, sql_error=None, vault_notes=vault_notes,
+                )
+
+    # Dossiers clients — comptage (Cerveau2 registry)
     if is_dossier_count and dossier_list is not None:
         total = len(dossier_list)
         label_time = f"depuis le 1er janvier {year}" if year else "en tout"
@@ -821,16 +869,14 @@ async def ask_charlie(
         )
 
     # ── 6. Appel LLM final pour les questions spécifiques ──
-    is_identity_request = any(kw in q_norm for kw in ("qui est", "nom", "prenom", "contact", "personne", "sappelle", "epouse", "mari", "conjoint"))
-
     if is_list_request:
-        format_rule = "5. Daniel demande une LISTE de DOSSIERS/AFFAIRES. Lis les sujets des emails ci-dessus et extrais les NOMS DE DOSSIERS ou d'affaires identifiables (ex: ADF, Zaventem, client spécifique). Regroupe les emails par dossier apparent. Ne liste pas juste les catégories — donne les NOMS."
+        format_rule = "7. Daniel demande une LISTE. Si le second cerveau a des notes sur ces dossiers, liste-les en priorité. Sinon, extrait les noms de dossiers identifiables depuis les emails. Ne liste pas les catégories — donne les NOMS (ex: ADF, Zaventem, ODM)."
     elif is_count_request:
-        format_rule = "5. Daniel demande un COMPTAGE. Donne le nombre total clair et précis."
+        format_rule = "7. Daniel demande un COMPTAGE. Donne le nombre total clair et précis."
     elif is_identity_request:
-        format_rule = "5. Daniel demande une IDENTITÉ. Réponds en une ou deux phrases maximum, directement."
+        format_rule = "7. Daniel demande une IDENTITÉ. Cherche dans le second cerveau et réponds en une ou deux phrases maximum, directement."
     else:
-        format_rule = "5. Réponds de manière fluide et directe, en une ou deux phrases maximum."
+        format_rule = "7. Réponds de manière fluide et directe, en une ou deux phrases maximum."
 
     final_prompt = f"""Tu es Charlie, l'assistant IA personnel de Daniel Hurchon, détective privé chez Detective.be. Version {VERSION}.
 Tu t'adresses à Daniel comme à un partenaire : direct, chaleureux, sans langue de bois. Utilise "tu".
@@ -840,12 +886,14 @@ Question de Daniel : {question}
 {context}
 
 RÈGLES :
-1. Si des corrections utilisateur sont fournies ci-dessus, elles priment sur TOUT.
-2. Pour un comptage, additionne les résultats SQL et les archives.
-3. Pour une identité (qui est, nom, contact), cherche dans les notes du second cerveau.
-4. Si aucune source n'a de réponse, dis-le clairement.
+1. Si des corrections utilisateur sont fournies, elles priment sur TOUT.
+2. Le SECOND CERVEAU (Cerveau2-Det) est la SOURCE PRINCIPALE. Commence toujours par ses notes.
+3. Les emails (base courante + archives) sont un complément pour appuyer ou enrichir la réponse.
+4. Pour une identité (qui est, nom, contact, épouse, conjoint), cherche EN PRIORITÉ dans le second cerveau.
+5. Pour un comptage, additionne les résultats SQL et les archives.
+6. Si aucune source n'a de réponse, dis-le clairement en une phrase.
 {format_rule}
-6. N'invente jamais d'informations qui ne sont pas dans les sources ci-dessus.
+8. N'invente jamais d'informations absentes des sources ci-dessus.
 
 RÉPONSE À DANIEL :"""
 
