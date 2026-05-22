@@ -4,6 +4,26 @@
 
 ---
 
+## [1.14.2] — 2026-05-22
+
+### Corrigé
+- **Guard anti-réponse vide** : lorsque le LLM `deepseek-v4-pro` retourne une réponse vide (`length=0`), Charlie construit désormais une réponse de secours à partir des données brutes disponibles :
+  - **Comptage** (`count`) — total = SQL + archives, avec garde si SQL=0 et archives>0.
+  - **Liste** (`list`) — retourne une vraie liste de sujets d'archives (25 premiers + "… et X autres"), pas un simple comptage.
+- **Version bump systématique** : V1.14.2 — règle interne : *V1. nouveautés, bugs ou correction : TOUJOURS*.
+
+---
+
+## [1.14.1] — 2026-05-22
+
+### Ajouté
+- **Setting `llm_model_chat` dédié** : nouveau paramètre `llm_model_chat = "openai/deepseek-v4-pro"` dans `config.py`, séparé du modèle pipeline principal, pour utiliser un LLM spécifique et plus puissant sur les conversations Charlie AI.
+
+### Corrigé
+- **Architecture prompt unique multi-sources** : remplacement de l'orchestrateur 3-phases par un prompt unique enrichi (SQL + vault + mémoire + corrections + archives) pour réduire la latence et stabiliser le comportement avant la démo client.
+
+---
+
 ## [1.14.0] — 2026-05-22
 
 ### Ajouté

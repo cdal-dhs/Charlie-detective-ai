@@ -830,7 +830,17 @@ RÉPONSE À DANIEL :"""
             if arc_cnt > 0 and sql_cnt == 0:
                 response += " (tous dans les archives historiques)"
         elif is_list_request and archive_rows:
-            response = f"J'ai trouvé **{len(archive_rows)}** email{'s' if len(archive_rows) > 1 else ''} dans les archives pour {dossier_id or 'cette période'}."
+            lines = [f"J'ai trouvé **{len(archive_rows)}** email{'s' if len(archive_rows) > 1 else ''} dans les archives pour {dossier_id or 'cette période'} :"]
+            for r in archive_rows[:25]:
+                subject = r.get("subject") or "Sans sujet"
+                date = r.get("received_at") or r.get("date") or ""
+                line = f"- {subject}"
+                if date:
+                    line += f" ({date})"
+                lines.append(line)
+            if len(archive_rows) > 25:
+                lines.append(f"… et {len(archive_rows) - 25} autres.")
+            response = "\n".join(lines)
         else:
             response = "Je n'ai pas trouvé d'informations."
 
