@@ -4,6 +4,16 @@
 
 ---
 
+## [1.13.16] — 2026-05-22
+
+### Corrigé
+- **Charlie retourne "total 0" pour les comptages de dossiers** : quand Daniel demandait "Combien d'emails pour le dossier ADF en 2026 ?", le SQL cherchait `subject LIKE '%ADF%'` et ne trouvait rien car les emails ADF viennent de `@groupeadf.com`.
+  - **Phase 0 : contexte dossier AVANT génération SQL** — quand un `dossier_id` est détecté, Charlie interroge d'abord la mémoire et les corrections pour extraire les contacts/domaines connus (ex: `sofie.latte@groupeadf.com`).
+  - Cette info est injectée dans le `system_prompt` : "CONTEXTE DOSSIER ADF : contacts = sofie.latte@groupeadf.com; domaines = groupeadf.com. Quand tu cherches, utilise AUSSI `sender LIKE '%groupeadf.com%'`."
+  - Nouvelle fonction `_extract_emails_from_notes()` pour extraire les emails des corrections et mémoires.
+
+---
+
 ## [1.13.15] — 2026-05-22
 
 ### Corrigé

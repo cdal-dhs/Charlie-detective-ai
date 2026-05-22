@@ -447,14 +447,37 @@ async def ask_charlie(
     if dossier_id:
         log.info("charlie.dossier_detected", dossier_id=dossier_id)
 
+    # ── Phase 0 : contexte dossier (mémoire + corrections) ──
+    # Interroger la mémoire locale AVANT de générer le SQL pour que le LLM
+    # connaisse les contacts/domaines associés au dossier. Cela évite des
+    # requêtes SQL trop étroites (ex: chercher 'ADF' dans subject alors que
+    # les emails viennent de '@groupeadf.com').
+    dossier_context = ""
+    if dossier_id:
+        mems = await query_memory(db_path, question="", dossier_id=dossier_id, limit=5)
+        corrections = await query_corrections(db_path, dossier_id=dossier_id, limit=5)
+        emails = _extract_emails_from_notes(mems + corrections)
+        if emails:
+            domains = {e.split("@")[1] for e in emails if "@" in e}
+            contacts = ", ".join(emails[:3])
+            domain_str = ", ".join(sorted(domains)[:3])
+            dossier_context = (
+                f"\n\nCONTEXTE DOSSIER {dossier_id} : "
+                f"contacts connus = {contacts}; "
+                f"domaines email = {domain_str}. "
+                f"Quand tu cherches des emails pour ce dossier, utilise AUSSI "
+                f"`sender LIKE '%domaine%'` en plus de `subject LIKE '%{dossier_id}%'`."
+            )
+
     system_prompt = CHARLIE_SYSTEM_PROMPT
     if dossier_id:
         extra = (
             f"\n\nNote : Daniel demande spécifiquement le dossier "
             f"'{dossier_id}'. Inclus ce terme dans ta recherche SQL (subject, "
-            "body, body_preview, ai_draft) via des clauses LIKE."
+            "body, body_preview, ai_draft, sender) via des clauses LIKE."
         )
         system_prompt += extra
+        system_prompt += dossier_context
 
     enriched_question = _enrichir_question(question)
     log.info("charlie.question_enriched", original=question[:60], enriched=enriched_question[:80])
@@ -797,6 +820,18 @@ def _is_vault_relevant(question: str, sql: str) -> bool:
 _IDENTITY_NAME_RE = re.compile(
     r"[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?"
 )
+
+_EMAIL_RE = re.compile(r"[\w\.-]+@[\w\.-]+\.\w+")
+
+
+def _extract_emails_from_notes(notes: list) -> list[str]:
+    """Extrait les adresses email uniques d'une liste de notes/mémoires."""
+    emails: set[str] = set()
+    for note in notes:
+        text = f"{getattr(note, 'question', '')} {getattr(note, 'response', '')}"
+        for m in _EMAIL_RE.finditer(text):
+            emails.add(m.group(0).lower())
+    return sorted(emails)
 
 
 def _extract_identity_answer(vault_notes: list[VaultNote], question: str) -> str | None:
