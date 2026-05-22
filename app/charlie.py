@@ -566,269 +566,102 @@ async def _search_historical_all(
     return results
 
 
+_DOSSIER_RE = re.compile(
+    r"(?i:dossier|affaire|projet|enquete|investigation)"
+    r"[\s:]+([A-Z][a-zA-Z0-9]{2,})",
+)
+_HASH_DOSSIER_RE = re.compile(r"#([A-Z][A-Z0-9]{2,})")
+_CODE_RE = re.compile(r"\b([A-Z]{3,6})\b")
+_YEAR_RE = re.compile(r"\b(20\d{2})\b")
+
+
+def _extract_dossier_id(question: str) -> str | None:
+    m = _DOSSIER_RE.search(question)
+    if m:
+        return m.group(1)
+    m = _HASH_DOSSIER_RE.search(question)
+    if m:
+        return m.group(1)
+    # Codes dossier en majuscules isolés (ex: ADF, DPDH)
+    for m in _CODE_RE.finditer(question):
+        code = m.group(1)
+        if code not in ("SQL", "OK", "HTTP", "API", "URL", "HTML", "XML", "JSON"):
+            return code
+    return None
+
+
+def _extract_year(question: str) -> str | None:
+    m = _YEAR_RE.search(question)
+    return m.group(1) if m else None
+
+
+def _normalize(text: str) -> str:
+    return normalize("NFKD", text.lower()).encode("ascii", "ignore").decode("ascii")
+
+
+def _general_response(question: str) -> str | None:
+    """Réponse codée en dur pour les questions générales."""
+    q = _normalize(question)
+    if "version" in q or "quelle version" in q:
+        return f"Je suis Charlie AI version {VERSION}."
+    if any(kw in q for kw in ("salut", "bonjour", "coucou", "hey", "hello")):
+        return "Salut Daniel ! Prêt à enquêter. Qu'est-ce que je peux faire pour toi ?"
+    if any(kw in q for kw in ("ca va", "comment vas-tu", "comment ca va")):
+        return "Ça va super, les neurones chauffent et les dossiers sont à jour. Et toi ?"
+    if "merci" in q:
+        return "Avec plaisir, Daniel ! C'est mon job."
+    if "au revoir" in q or "bye" in q or "a plus" in q:
+        return "À plus, Daniel ! N'hésite pas si tu as besoin de moi."
+    if "tu es qui" in q or "qui es-tu" in q:
+        return f"Je suis Charlie AI version {VERSION}, ton assistant détective personnel."
+    return None
+
+
 async def ask_charlie(
     question: str,
     db_path: Path,
     model: str | None = None,
     history: list[dict] | None = None,
 ) -> CharlieResult:
-    """Pipeline Charlie AI V1.14.0 — Orchestrateur Intelligence.
-
-    classify → execute → formulate
-    """
+    """Pipeline Charlie AI V1.14.1 — Prompt unique avec contexte multi-sources."""
     settings = get_settings()
     model = model or settings.llm_model_default
 
-    # ── Phase 1 : Classification ──
-    qtype, entities = _classify_question(question)
-    dossier_id = entities.get("dossier_id")
-    year = entities.get("year")
-    log.info("charlie.classify", qtype=qtype, dossier_id=dossier_id, year=year, question=question[:60])
-
-    # ── Phase 2 : Exécution spécialisée ──
-    facts = await _execute_plan(qtype, entities, question, db_path, model, settings)
-
-    # ── Phase 3 : Formulation ──
-    response = await _formulate_response(qtype, facts, question, model, settings)
-
-    # Auto-save des faits clés
-    await _auto_save_fact(db_path, question, response, dossier_id)
-
-    return CharlieResult(
-        response_text=response,
-        sql=facts.get("sql", ""),
-        rows=facts.get("rows"),
-        sql_safe=True,
-        sql_error=facts.get("sql_error"),
-        vault_notes=facts.get("vault_notes", []),
-    )
-
-
-async def _generate_count_sql(
-    question: str,
-    model: str,
-    settings,
-    dossier_id: str | None,
-) -> str:
-    """Génère un SELECT COUNT(*) pour une question de comptage."""
-    system = CHARLIE_SYSTEM_PROMPT + (
-        "\n\nINSTRUCTION SPÉCIALE : cette question demande un COMPTAGE. "
-        "Génère UNIQUEMENT `SELECT COUNT(*) as total FROM mail_processed WHERE ...`. "
-        "N'inclus JAMAIS d'autres colonnes."
-    )
-    if dossier_id:
-        system += (
-            f"\n\nNote : Daniel demande le dossier '{dossier_id}'. "
-            "Inclus ce terme dans les clauses LIKE sur subject, body, body_preview, ai_draft, sender."
+    # ── 1. Questions générales (pas de recherche) ──
+    general_resp = _general_response(question)
+    if general_resp:
+        return CharlieResult(
+            response_text=general_resp, sql="", rows=None,
+            sql_safe=True, sql_error=None, vault_notes=[],
         )
-    messages = [
-        {"role": "system", "content": system},
-        {"role": "user", "content": _enrichir_question(question)},
-    ]
+
+    dossier_id = _extract_dossier_id(question)
+    year = _extract_year(question)
+    log.info("charlie.ask", question=question[:60], dossier_id=dossier_id, year=year)
+
+    # ── 2. Génération SQL ──
+    sql = ""
     try:
-        raw = await complete(model=model, messages=messages, max_tokens=300, temperature=0.1)
-    except Exception:
-        return ""
-    sql, _ = parse_charlie_response(raw)
-    return sql
-
-
-async def _generate_list_sql(
-    question: str,
-    model: str,
-    settings,
-    dossier_id: str | None,
-) -> str:
-    """Génère un SELECT pour une question de liste."""
-    system = CHARLIE_SYSTEM_PROMPT + (
-        "\n\nINSTRUCTION SPÉCIALE : cette question demande une LISTE. "
-        "Génère un SELECT avec id, subject, received_at, category. "
-        "Classe par `ORDER BY received_at DESC`."
-    )
-    if dossier_id:
-        system += (
-            f"\n\nNote : Daniel demande le dossier '{dossier_id}'. "
-            "Inclus ce terme dans les clauses LIKE sur subject, body, body_preview, ai_draft, sender."
-        )
-    messages = [
-        {"role": "system", "content": system},
-        {"role": "user", "content": _enrichir_question(question)},
-    ]
-    try:
-        raw = await complete(model=model, messages=messages, max_tokens=400, temperature=0.1)
-    except Exception:
-        return ""
-    sql, _ = parse_charlie_response(raw)
-    return sql
-
-
-async def _generate_summary_sql(
-    question: str,
-    model: str,
-    settings,
-    dossier_id: str | None,
-) -> str:
-    """Génère un SELECT pour une question de synthèse."""
-    system = CHARLIE_SYSTEM_PROMPT
-    if dossier_id:
-        system += (
-            f"\n\nNote : Daniel demande le dossier '{dossier_id}'. "
-            "Inclus ce terme dans les clauses LIKE sur subject, body, body_preview, ai_draft, sender."
-        )
-    messages = [
-        {"role": "system", "content": system},
-        {"role": "user", "content": _enrichir_question(question)},
-    ]
-    try:
+        system = CHARLIE_SYSTEM_PROMPT
+        if dossier_id:
+            system += f"\n\nNote : Daniel demande le dossier '{dossier_id}'. Inclus ce terme dans les clauses LIKE."
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": _enrichir_question(question)},
+        ]
         raw = await complete(model=model, messages=messages, max_tokens=500, temperature=0.1)
-    except Exception:
-        return ""
-    sql, _ = parse_charlie_response(raw)
-    return sql
+        sql, _ = parse_charlie_response(raw)
+    except Exception as e:
+        log.warning("charlie.sql_gen_failed", error=str(e))
 
-
-async def _execute_plan(
-    qtype: str,
-    entities: dict,
-    question: str,
-    db_path: Path,
-    model: str,
-    settings,
-) -> dict:
-    """Exécute la recherche spécialisée selon le type de question.
-
-    Retourne un dict avec les faits structurés :
-    - "count"   → {total: int, sql: str, rows: list, archives_count: int}
-    - "list"    → {rows: list, sql: str, archive_rows: list}
-    - "identity"→ {answer: str, source: str, vault_notes: list}
-    - "summary" → {rows: list, vault_notes: list, memory_notes: list, correction_notes: list, sql: str}
-    - "general" → {answer: str}
-    """
-    dossier_id = entities.get("dossier_id")
-    year = entities.get("year")
-    facts: dict = {}
-
-    if qtype == "general":
-        facts["answer"] = _general_response(question)
-        return facts
-
-    if qtype == "count":
-        sql = await _generate_count_sql(question, model, settings, dossier_id)
-        facts["sql"] = sql
-        sql_rows: list[dict] = []
-        if sql and is_safe_sql(sql):
-            try:
-                sql_rows = await run_sql(db_path, sql)
-            except Exception as e:
-                log.warning("charlie.count_sql_failed", sql=sql, error=str(e))
-                facts["sql_error"] = str(e)
-        sql_count = 0
-        if sql_rows and len(sql_rows) == 1 and len(sql_rows[0]) == 1:
-            sql_count = int(next(iter(sql_rows[0].values())) or 0)
-        facts["rows"] = sql_rows
-
-        archive_count = 0
-        if dossier_id:
-            histo = await _search_historical_by_keyword(db_path, dossier_id, year=year, limit=1000)
-            archive_count = len(histo)
-        else:
-            q_norm = _normalize(question)
-            matched_cat = None
-            for type_key, cat in _ENQUETE_TO_CATEGORY.items():
-                if type_key in q_norm:
-                    matched_cat = cat
-                    break
-            if matched_cat:
-                histo = await _search_historical_by_category(db_path, matched_cat, year=year, limit=1000)
-                archive_count = len(histo)
-            elif year:
-                histo = await _search_historical_all(db_path, year=year, limit=1000)
-                archive_count = len(histo)
-
-        total = sql_count + archive_count
-        if sql_count == 0 and archive_count > 0:
-            total = archive_count
-        facts["total"] = total
-        facts["sql_count"] = sql_count
-        facts["archives_count"] = archive_count
-        return facts
-
-    if qtype == "identity":
-        if dossier_id:
-            corrections = await query_corrections(db_path, dossier_id=dossier_id, limit=5)
-            if corrections:
-                facts["answer"] = corrections[0].response.strip()
-                facts["source"] = "correction"
-                facts["vault_notes"] = []
-                log.info("charlie.identity_correction_bypass", dossier_id=dossier_id)
-                return facts
-
-        vault_notes = await query_vault(
-            question=question,
-            base_url=settings.cerveau2_base_url,
-            api_secret=settings.cerveau2_api_secret,
-            dossier_id=dossier_id,
-            limit=settings.cerveau2_limit,
-        )
-        facts["vault_notes"] = vault_notes
-        if vault_notes:
-            direct = _extract_identity_answer(vault_notes, question)
-            if direct:
-                facts["answer"] = direct
-                facts["source"] = "vault_extract"
-                return facts
-
-        memory_notes = await query_memory(db_path, question=question, dossier_id=dossier_id, limit=3)
-        if memory_notes:
-            facts["answer"] = memory_notes[0].response
-            facts["source"] = "memory"
-            return facts
-
-        facts["answer"] = ""
-        facts["source"] = "none"
-        return facts
-
-    if qtype == "list":
-        sql = await _generate_list_sql(question, model, settings, dossier_id)
-        facts["sql"] = sql
-        rows: list[dict] = []
-        if sql and is_safe_sql(sql):
-            try:
-                rows = await run_sql(db_path, sql)
-            except Exception as e:
-                log.warning("charlie.list_sql_failed", sql=sql, error=str(e))
-                facts["sql_error"] = str(e)
-        facts["rows"] = rows
-
-        archive_rows: list[dict] = []
-        if dossier_id:
-            archive_rows = await _search_historical_by_keyword(db_path, dossier_id, year=year, limit=20)
-        else:
-            q_norm = _normalize(question)
-            matched_cat = None
-            for type_key, cat in _ENQUETE_TO_CATEGORY.items():
-                if type_key in q_norm:
-                    matched_cat = cat
-                    break
-            if matched_cat:
-                archive_rows = await _search_historical_by_category(db_path, matched_cat, year=year, limit=20)
-            elif year:
-                archive_rows = await _search_historical_all(db_path, year=year, limit=20)
-        facts["archive_rows"] = archive_rows
-        return facts
-
-    # Fallback "summary"
-    sql = await _generate_summary_sql(question, model, settings, dossier_id)
-    facts["sql"] = sql
-
+    # ── 3. Recherches en parallèle ──
     async def _sql_task() -> list[dict]:
         if not sql or not is_safe_sql(sql):
             return []
         try:
             return await run_sql(db_path, sql)
         except Exception as e:
-            log.warning("charlie.summary_sql_failed", sql=sql, error=str(e))
-            facts["sql_error"] = str(e)
+            log.warning("charlie.sql_exec_failed", sql=sql, error=str(e))
             return []
 
     async def _vault_task() -> list:
@@ -848,258 +681,165 @@ async def _execute_plan(
             return await query_corrections(db_path, dossier_id=dossier_id, limit=3)
         return []
 
-    rows, vault_notes, memory_notes, correction_notes = await asyncio.gather(
-        _sql_task(), _vault_task(), _memory_task(), _correction_task(),
+    async def _archive_task() -> list[dict]:
+        if dossier_id:
+            return await _search_historical_by_keyword(db_path, dossier_id, year=year, limit=20)
+        if year:
+            return await _search_historical_all(db_path, year=year, limit=100)
+        return []
+
+    rows, vault_notes, memory_notes, correction_notes, archive_rows = await asyncio.gather(
+        _sql_task(), _vault_task(), _memory_task(), _correction_task(), _archive_task(),
     )
-    facts["rows"] = rows
-    facts["vault_notes"] = vault_notes
-    facts["memory_notes"] = memory_notes
-    facts["correction_notes"] = correction_notes
-    return facts
 
+    # ── 4. Construction du contexte ──
+    context_parts: list[str] = []
 
-async def _formulate_response(
-    qtype: str,
-    facts: dict,
-    question: str,
-    model: str,
-    settings,
-) -> str:
-    """Formule la réponse finale à partir des faits structurés."""
+    # Corrections (priorité absolue)
+    if correction_notes:
+        context_parts.append("CORRECTIONS UTILISATEUR (priorité absolue) :")
+        for c in correction_notes[:3]:
+            context_parts.append(f"- [{c.created_at}] Q: {c.question} | R: {c.response}")
+        context_parts.append("")
 
-    if qtype == "general":
-        return facts.get("answer", _general_response(question))
+    # SQL
+    if rows:
+        context_parts.append(f"RÉSULTATS SQL ({len(rows)} ligne(s)) :")
+        context_parts.append(_sanitize_rows_for_prompt(rows))
+        context_parts.append("")
+    elif sql:
+        context_parts.append("RÉSULTATS SQL : aucun email trouvé dans la base courante.")
+        context_parts.append("")
 
-    if qtype == "count":
-        total = facts.get("total", 0)
-        sql_count = facts.get("sql_count", 0)
-        archive_count = facts.get("archives_count", 0)
-        if total == 0:
-            return "Aucun email trouvé pour cette recherche."
-        parts = [f"J'ai trouvé **{total}** email" + ("s" if total > 1 else "") + "."]
-        if sql_count > 0 and archive_count > 0:
-            parts.append(f"({sql_count} en base courante + {archive_count} dans les archives)")
-        elif archive_count > 0 and sql_count == 0:
-            parts.append("(tous dans les archives historiques — la base courante est vide pour cette période)")
-        return " ".join(parts)
-
-    if qtype == "identity":
-        answer = facts.get("answer", "")
-        if answer:
-            return answer
-        vault_notes = facts.get("vault_notes", [])
-        if vault_notes:
-            summary = await _summarize_results(
-                question, [], vault_notes, [], [], model, settings,
-            )
-            if summary:
-                return summary
-        return "Je ne trouve pas cette information."
-
-    if qtype == "list":
-        rows = facts.get("rows", []) or []
-        archive_rows = facts.get("archive_rows", []) or []
-        all_rows = rows + archive_rows
-        if not all_rows:
-            return "Aucun email trouvé pour cette recherche."
-        all_rows.sort(
-            key=lambda r: r.get("received_at") or r.get("date") or "",
-            reverse=True,
-        )
-        lines = []
-        count = len(all_rows)
-        lines.append(f"J'ai trouvé **{count}** résultat" + ("s" if count > 1 else "") + " :")
-        lines.append("")
-        for r in all_rows[:15]:
+    # Archives — résumé par catégorie + détail des 30 premiers
+    if archive_rows:
+        from collections import Counter
+        cat_counts = Counter(r.get("category") or "SANS_CAT" for r in archive_rows)
+        context_parts.append(f"ARCHIVES HISTORIQUES ({len(archive_rows)} email(s)) :")
+        context_parts.append("Répartition par catégorie :")
+        for cat, cnt in cat_counts.most_common():
+            context_parts.append(f"  - {cat}: {cnt}")
+        context_parts.append("Détail (30 premiers) :")
+        for r in archive_rows[:30]:
             subject = r.get("subject") or "Sans sujet"
             date = r.get("received_at") or r.get("date") or ""
             cat = r.get("category") or ""
-            line = f"- **{subject}**"
+            line = f"- {subject}"
             if date:
                 line += f" ({date})"
             if cat:
-                line += f" — {cat}"
-            lines.append(line)
-        if count > 15:
-            lines.append(f"\n… et {count - 15} autres.")
-        return "\n".join(lines)
+                line += f" [{cat}]"
+            context_parts.append(line)
+        if len(archive_rows) > 30:
+            context_parts.append(f"… et {len(archive_rows) - 30} autres.")
+        context_parts.append("")
 
-    # qtype == "summary"
-    rows = facts.get("rows", []) or []
-    vault_notes = facts.get("vault_notes", [])
-    memory_notes = facts.get("memory_notes", [])
-    correction_notes = facts.get("correction_notes", [])
+    # Vault
+    if vault_notes:
+        context_parts.append(f"NOTES DU SECOND CERVEAU ({len(vault_notes)} note(s)) :")
+        for note in vault_notes[:3]:
+            fname = note.path.split("/")[-1].replace(".md", "")
+            context_parts.append(f"- {fname}: {note.content[:1500]}")
+        context_parts.append("")
 
-    if correction_notes and _is_identity_query(question):
-        return correction_notes[0].response.strip()
+    # Mémoire
+    if memory_notes:
+        context_parts.append("SOUVENIRS DE CHARLIE :")
+        for mem in memory_notes[:3]:
+            context_parts.append(f"- [{mem.created_at}] {mem.question}: {mem.response[:300]}")
+        context_parts.append("")
 
-    summary = await _summarize_results(
-        question, rows, vault_notes, memory_notes, correction_notes, model, settings,
-    )
-    if summary:
-        return summary
+    context = "\n".join(context_parts)
 
-    if rows:
-        return _sanitize_rows_for_prompt(rows)
-    return "Je n'ai pas trouvé d'informations pour cette question."
-
-
-def _general_response(question: str) -> str:
-    """Réponse codée en dur pour les questions générales (pas de LLM)."""
-    q = _normalize(question)
-    if "version" in q or "quelle version" in q:
-        return f"Je suis Charlie AI version {VERSION}."
-    if any(kw in q for kw in ("salut", "bonjour", "coucou", "hey", "hello")):
-        return "Salut Daniel ! Prêt à enquêter. Qu'est-ce que je peux faire pour toi ?"
-    if any(kw in q for kw in ("ca va", "comment vas-tu", "comment ca va")):
-        return "Ça va super, les neurones chauffent et les dossiers sont à jour. Et toi ?"
-    if "merci" in q:
-        return "Avec plaisir, Daniel ! C'est mon job."
-    if "au revoir" in q or "bye" in q or "a plus" in q:
-        return "À plus, Daniel ! N'hésite pas si tu as besoin de moi."
-    if "tu es qui" in q or "qui es-tu" in q:
-        return f"Je suis Charlie AI version {VERSION}, ton assistant détective personnel."
-    return "Je suis Charlie, ton assistant. Pose-moi une question sur les emails ou les dossiers."
-
-_NEEDS_SUMMARY_KEYWORDS = (
-    "resume", "synthese", "synthetiser",
-    "analyser", "analyse", "detail",
-    "contenu", "explique", "expliquer", "que dit",
-    "donne-moi le contenu", "de quoi parle",
-    "sait", "connait", "connaitre", "quoi",
-    "informations", "info", "dossier", "parle",
-    "contact", "qui", "personne", "nom", "client",
-    "email", "mail", "message", "a recu", "as recu",
-    "filature", "surveillance", "observation", "terrain",
-    "adulte", "infidelite", "tromperie", "concubinage",
-    "disparition", "recherche_personne", "localisation",
-    "harcelement", "intimidation", "stalking",
-    "garde", "pension", "famille", "enfant", "mineur",
-    "vol", "fraude", "delit", "crime", "prejudice",
-    "accident", "assurance", "compagnie", "indemnisation",
-    "testament", "heritage", "succession", "notaire",
-    "entreprise", "societe", "patron", "salarie", "licenciement",
-    "matos", "materiel", "detecteur", "camera",
-    "collaboration", "sous_traitance", "partenaire", "associe",
-    "divorce", "separation", "couple", "concubin",
-    "droit", "visite", "hebergement", "custodie",
-    "rapport", "constat", "photo", "video", "preuve",
-)
-
-_VAULT_KEYWORDS = (
-    "similaire", "historique", "passe", "precedent",
-    "anterieur", "archive", "contexte", "dossier",
-    "affaire", "enquete", "investigation", "correspondance",
-    "filature", "surveillance", "observation", "terrain",
-    "adulte", "infidelite", "tromperie", "concubinage",
-    "disparition", "recherche_personne", "localisation",
-    "harcelement", "intimidation", "stalking",
-    "garde", "pension", "famille", "enfant", "mineur",
-    "vol", "fraude", "delit", "crime", "prejudice",
-    "accident", "assurance", "compagnie", "indemnisation",
-    "testament", "heritage", "succession", "notaire",
-    "entreprise", "societe", "patron", "salarie", "licenciement",
-    "matos", "materiel", "detecteur", "camera",
-    "collaboration", "sous_traitance", "partenaire", "associe",
-    "divorce", "separation", "couple", "concubin",
-    "droit", "visite", "hebergement", "custodie",
-    "rapport", "constat", "photo", "video", "preuve",
-    # Identité / connaissance factuelle (docs Cerveau2)
-    "qui", "personne", "nom", "prenom", "client",
-    "epouse", "mari", "conjoint", "contact",
-)
-
-_DOSSIER_RE = re.compile(
-    # (?i:...) rend case-insensitive UNIQUEMENT le préfixe (dossier/affaire/etc.)
-    # Le groupe de capture reste strictement case-sensitive sur la première lettre :
-    # un vrai dossier_id DOIT commencer par une majuscule (code, nom propre).
-    # Les lettres suivantes peuvent être mixtes (ex: Dutry, Gacaferi).
-    r"(?i:dossier|affaire|projet|enquete|investigation)"
-    r"[\s:]+([A-Z][a-zA-Z0-9]{2,})",
-)
-_HASH_DOSSIER_RE = re.compile(r"#([A-Z][A-Z0-9]{2,})")
-
-
-def _extract_dossier_id(question: str) -> str | None:
-    m = _DOSSIER_RE.search(question)
-    if m:
-        return m.group(1)
-    m = _HASH_DOSSIER_RE.search(question)
-    if m:
-        return m.group(1)
-    return None
-
-
-_YEAR_RE = re.compile(r"\b(20\d{2})\b")
-
-
-def _extract_year(question: str) -> str | None:
-    """Extrait une année (20xx) de la question."""
-    m = _YEAR_RE.search(question)
-    return m.group(1) if m else None
-
-
-def _classify_question(question: str) -> tuple[str, dict]:
-    """Classifie la question pour déterminer le type de recherche nécessaire.
-
-    Retourne (type, entities) où type est l'un de :
-    - "general" : salutation, version, question hors-sujet
-    - "count" : comptage (combien, nombre, total)
-    - "list" : demande de liste (liste, quels, quelles)
-    - "identity" : question identitaire (qui est, nom, contact, personne)
-    - "summary" : résumé, synthèse, analyse, contenu
-    """
+    # ── 5. Réponse directe pour listes/comptages génériques (pas de LLM) ──
     q_norm = _normalize(question)
-    entities: dict = {}
+    is_list_request = any(kw in q_norm for kw in ("liste", "lister", "donne-moi", "donne moi", "quels", "quelles", "lesquels", "lesquelles", "montre-moi", "tous les", "toutes les"))
+    is_count_request = any(kw in q_norm for kw in ("combien", "nombre", "total", "count", "combien de"))
 
-    # Extraire entités communes
-    entities["dossier_id"] = _extract_dossier_id(question)
-    entities["year"] = _extract_year(question)
+    # Si pas de dossier_id précis et on a des archives → réponse directe Python
+    if not dossier_id and archive_rows and (is_list_request or is_count_request):
+        from collections import Counter
+        cat_counts = Counter(r.get("category") or "SANS_CAT" for r in archive_rows)
+        total = len(archive_rows)
+        sql_total = len(rows) if rows else 0
 
-    # ── Type GENERAL (pas de recherche nécessaire) ──
-    general_keywords = (
-        "salut", "bonjour", "coucou", "hey", "hello",
-        "version", "quelle version", "tu es qui", "qui es-tu",
-        "ca va", "comment vas-tu", "merci", "au revoir",
+        if is_count_request:
+            parts = [f"J'ai trouvé **{total}** email{'s' if total > 1 else ''} en {year or 'cette période'}."]
+            if sql_total > 0:
+                parts.append(f"({sql_total} en base courante + {total} dans les archives)")
+            else:
+                parts.append("(tous dans les archives historiques)")
+            response = " ".join(parts)
+        else:
+            # Liste structurée par catégorie
+            lines = [f"Voici les **{total}** emails des archives pour **{year or 'cette période'}**, répartis par type d'enquête :", ""]
+            for cat, cnt in cat_counts.most_common():
+                lines.append(f"- **{cat}** : {cnt} email{'s' if cnt > 1 else ''}")
+            if sql_total > 0:
+                lines.append(f"- **Base courante** : {sql_total} email{'s' if sql_total > 1 else ''}")
+            response = "\n".join(lines)
+
+        await _auto_save_fact(db_path, question, response, dossier_id)
+        return CharlieResult(
+            response_text=response,
+            sql=sql,
+            rows=rows,
+            sql_safe=True,
+            sql_error=None,
+            vault_notes=vault_notes,
+        )
+
+    # ── 6. Appel LLM final pour les questions spécifiques ──
+    is_identity_request = any(kw in q_norm for kw in ("qui est", "nom", "prenom", "contact", "personne", "sappelle", "epouse", "mari", "conjoint"))
+
+    if is_list_request:
+        format_rule = "5. Daniel demande une LISTE. Fais une liste COMPLÈTE et structurée. Ne te limite PAS aux 2-3 premiers éléments."
+    elif is_count_request:
+        format_rule = "5. Daniel demande un COMPTAGE. Donne le nombre total clair et précis."
+    elif is_identity_request:
+        format_rule = "5. Daniel demande une IDENTITÉ. Réponds en une ou deux phrases maximum, directement."
+    else:
+        format_rule = "5. Réponds de manière fluide et directe, en une ou deux phrases maximum."
+
+    final_prompt = f"""Tu es Charlie, l'assistant IA personnel de Daniel Hurchon, détective privé chez Detective.be. Version {VERSION}.
+Tu t'adresses à Daniel comme à un partenaire : direct, chaleureux, sans langue de bois. Utilise "tu".
+
+Question de Daniel : {question}
+
+{context}
+
+RÈGLES :
+1. Si des corrections utilisateur sont fournies ci-dessus, elles priment sur TOUT.
+2. Pour un comptage, additionne les résultats SQL et les archives.
+3. Pour une identité (qui est, nom, contact), cherche dans les notes du second cerveau.
+4. Si aucune source n'a de réponse, dis-le clairement.
+{format_rule}
+6. N'invente jamais d'informations qui ne sont pas dans les sources ci-dessus.
+
+RÉPONSE À DANIEL :"""
+
+    try:
+        response = await complete(
+            model=model,
+            messages=[{"role": "user", "content": final_prompt}],
+            max_tokens=600,
+            temperature=0.2,
+        )
+        response = response.strip() if response else "Je n'ai pas trouvé d'informations."
+    except Exception as e:
+        log.warning("charlie.final_llm_failed", error=str(e))
+        response = "Charlie est momentanément indisponible. Réessaie dans un instant."
+
+    await _auto_save_fact(db_path, question, response, dossier_id)
+
+    return CharlieResult(
+        response_text=response,
+        sql=sql,
+        rows=rows,
+        sql_safe=True,
+        sql_error=None,
+        vault_notes=vault_notes,
     )
-    if any(kw in q_norm for kw in general_keywords):
-        return "general", entities
-
-    # ── Type COUNT (comptage) ──
-    count_keywords = (
-        "combien", "nombre", "total", "count", "combien d'",
-        "combien de", "combien demail", "combien de mail",
-    )
-    if any(kw in q_norm for kw in count_keywords):
-        return "count", entities
-
-    # ── Type IDENTITY (identité, contact, personne) ──
-    identity_keywords = (
-        "qui est", "qui est-ce", "nom", "prenom", "contact",
-        "personne", "client", "sappelle", "epouse", "mari",
-        "conjoint", "femme", "compagne", "compagnon",
-        "fille", "fils", "enfant", "bebe", "pere", "mere",
-        "soeur", "frere", "famille", "oncle", "tante",
-    )
-    if any(kw in q_norm for kw in identity_keywords):
-        return "identity", entities
-
-    # ── Type LIST (liste, énumération) ──
-    list_keywords = (
-        "liste", "lister", "donne-moi", "donne moi",
-        "quels", "quelles", "lesquels", "lesquelles",
-        "montre-moi", "affiche", "tous les", "toutes les",
-    )
-    if any(kw in q_norm for kw in list_keywords):
-        return "list", entities
-
-    # ── Fallback SUMMARY ──
-    return "summary", entities
-
-
-def _normalize(text: str) -> str:
-    return normalize("NFKD", text.lower()).encode("ascii", "ignore").decode("ascii")
-
 
 def _needs_summary(question: str) -> bool:
     q = _normalize(question)
