@@ -29,7 +29,9 @@ async def query_vault(
     if not base_url or not api_secret:
         return []
 
-    payload: dict = {"question": question, "limit": limit}
+    # context_only=True : court-circuite l'appel LLM dans Cerveau2
+    # (Charlie gère la génération côté appelant — le double appel LLM causait des timeouts)
+    payload: dict = {"question": question, "limit": limit, "context_only": True}
     if dossier_id:
         payload["dossier_id"] = dossier_id
 
