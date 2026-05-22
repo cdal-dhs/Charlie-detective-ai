@@ -208,7 +208,46 @@ Resend reste actif **uniquement** pour :
 
 ---
 
-## ⬜ V2b — Feedback loop qualité Daniel
+## ⬜ V2b — Polishing cockpit : latence Charlie + UX inbox
+
+**Pré-requis** : V2a déployé et stable.
+
+### Bug UI — Inbox : filtres boîtes mail non cochés par défaut
+**Comportement actuel** : à l'ouverture de l'inbox, les cases de filtrage des 3 boîtes ne sont pas toutes cochées → l'inbox peut apparaître vide ou partiellement filtrée sans que Daniel l'ait voulu.
+
+**Comportement attendu** :
+- À l'ouverture, les **3 boîtes cochées par défaut**, filtre texte vide → affichage complet trié
+- Daniel peut décocher 1 ou 2 boîtes pour isoler son périmètre
+- L'état des filtres peut être mémorisé en `localStorage` pour la session
+
+**Fichiers concernés** : `app/web/templates/inbox.html` + JavaScript de filtre côté client
+
+**Fix** : s'assurer que les checkboxes sont `checked` par défaut dans le HTML et que le JS de filtrage applique l'état initial sans intervention utilisateur.
+
+---
+
+### Latence Charlie — cible < 5s (vs 5-13s actuel)
+**Contexte** : la latence actuelle est acceptable mais perfectible. Causes principales :
+1. Appel LLM pour génération de réponse (~3-8s selon deepseek-v4-pro)
+2. Requête Cerveau2 + SQL en séquentiel
+
+**Pistes d'amélioration** (à évaluer selon ROI) :
+
+| Piste | Gain estimé | Complexité |
+|---|---|---|
+| Paralléliser SQL + Cerveau2 (`asyncio.gather`) | ~2-3s | Faible |
+| SQL programmatique étendu (list, last, who) | bypass LLM ~80% requêtes simples | Moyen |
+| Basculer LLM vers Claude Haiku 4.5 via OpenRouter | réponse ~1s, coût ~0.001€/req | Faible |
+| Cache réponses fréquentes (TTL 5 min) | gain si questions répétées | Moyen |
+
+**Approche recommandée lundi** :
+- [ ] Paralléliser Cerveau2 + SQL dans `charlie.py` (`asyncio.gather`)
+- [ ] Étendre le SQL programmatique aux questions de type "liste" et "dernier mail"
+- [ ] Tester Claude Haiku 4.5 (`openrouter/anthropic/claude-haiku-4-5`) comme `llm_model_chat` → si qualité OK, adoption permanente
+
+---
+
+## ⬜ V2c — Feedback loop qualité Daniel
 
 **Pré-requis** : V2a stable depuis ≥ 1 semaine, Daniel a approuvé ≥ 10 brouillons.
 
