@@ -91,17 +91,24 @@ RÉPONSE: <ta réponse>
    - **Mode B : recherche par mot-clé spécifique** (nom de client, référence de
      dossier, lieu, adresse, etc.) :
      Tu peux utiliser des LIKE OR sur `subject`, `body_preview`, `body` et `ai_draft`.
+     Si le mot-clé est un nom de DOSSIER (ex: ADF), cherche AUSSI dans `sender`
+     pour attraper les emails du domaine associé (ex: `@groupeadf.com`).
    Inclus `id` et `subject` dans le SELECT pour permettre des liens cliquables.
-9. Quand Daniel demande un résumé ou une synthèse, ta RÉPONSE doit
-   contenir le résumé en langage naturel — pas juste une liste de champs.
-   Analyse le contenu des mails et rédige une synthèse claire et utile.
-10. Si la requête SQL retourne 0 ligne, ta RÉPONSE doit dire explicitement
+9. **Questions de comptage (combien, nombre, total)** :
+   - Utilise `SELECT COUNT(*) as total FROM mail_processed WHERE ...`
+   - Inclus TOUJOURS la condition sur l'année si Daniel la précise :
+     `received_at >= '2026-01-01' AND received_at < '2027-01-01'`
+   - Ta réponse doit être un nombre brut et clair, pas une liste d'emails.
+10. Quand Daniel demande un résumé ou une synthèse, ta RÉPONSE doit
+    contenir le résumé en langage naturel — pas juste une liste de champs.
+    Analyse le contenu des mails et rédige une synthèse claire et utile.
+11. Si la requête SQL retourne 0 ligne, ta RÉPONSE doit dire explicitement
     qu'aucun email n'a été trouvé, sans inventer de résultats.
-11. Quand Daniel parle de "filature" ou "surveillance", cherche dans la
+12. Quand Daniel parle de "filature" ou "surveillance", cherche dans la
     categorie `surveillance` de la base ET interroge le second cerveau (vault Cerveau2)
     qui contient les rapports de terrain, observations et notes d'enquete.
     "Filature" et "surveillance" sont synonymes dans ce contexte.
-12. Lexique métier — synonymes courants du cabinet :
+13. Lexique métier — synonymes courants du cabinet :
     - "adultère" ou "infidélité" → cherche `infidelite`, `adultere`, `tromperie`, `concubinage`
     - "disparition" ou "recherche de personne" → cherche `recherche_personne`,
       `disparition`, `localisation`, `retrouver`
@@ -111,7 +118,7 @@ RÉPONSE: <ta réponse>
     Quand Daniel utilise un terme familier pour un TYPE d'enquête, tu dois
     chercher par `category` exacte correspondante (Mode A). Les synonymes
     ne servent que pour toi, pas pour générer des LIKE OR dans le SQL.
-13. Quand tu présentes des résultats (emails, dossiers, archives), classe-les
+14. Quand tu présentes des résultats (emails, dossiers, archives), classe-les
     TOUJOURS du PLUS RÉCENT au PLUS ANCIEN (`ORDER BY received_at DESC`).
     Le dossier le plus récent doit apparaître en premier, sans exception.
 """
@@ -487,10 +494,13 @@ async def ask_charlie(
         # Les questions identitaires (qui est X, nom de l'épouse, etc.) DOIVENT
         # toujours consulter le vault car la réponse ne se trouve jamais dans
         # SQL — elle est dans les documents du second cerveau.
+        # Quand un dossier est mentionné, on consulte TOUJOURS le vault pour
+        # obtenir le contexte du dossier (contacts, domaines, notes) même
+        # pour les comptages — cela aide à générer une réponse juste.
         is_identity = _is_identity_query(question)
-        need_vault = is_identity or (
+        need_vault = is_identity or dossier_id or (
             not _is_count_query(sql)
-            and (_is_vault_relevant(question, sql) or dossier_id)
+            and _is_vault_relevant(question, sql)
         )
         # S2 : toujours consulter la mémoire en parallèle — pas seulement quand
         # Daniel demande explicitement de se souvenir. La mémoire est une source
@@ -951,6 +961,14 @@ def _sanitize_rows_for_prompt(rows: list[dict]) -> str:
     Ne garde que les champs publics (subject, received_at, category).
     Masque ABSOLUMENT : id, sender, body_preview, body, source_db.
     """
+    if not rows:
+        return "(aucun résultat)"
+    # Détection COUNT(*) : une seule ligne avec une clé "total" ou "count(*)"
+    first = rows[0]
+    if len(rows) == 1 and len(first) == 1:
+        key = next(iter(first.keys()))
+        if key.lower() in ("total", "count(*)", "count"):
+            return f"TOTAL : {first[key]}"
     lines: list[str] = []
     for r in rows[:20]:
         subject = r.get("subject") or "Sans sujet"

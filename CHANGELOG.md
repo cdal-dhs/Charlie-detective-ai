@@ -4,6 +4,17 @@
 
 ---
 
+## [1.13.15] — 2026-05-22
+
+### Corrigé
+- **Charlie ne comprend pas les questions de comptage** : quand Daniel demandait "Combien d'emails j'ai reçu pour le dossier ADF en 2026 ?", Charlie répondait "un seul email... total 0" de manière incohérente.
+  - Le prompt system `CHARLIE_SYSTEM_PROMPT` inclut désormais une section **Questions de comptage** qui force `SELECT COUNT(*) as total` et la condition sur l'année.
+  - Le vault est désormais TOUJOURS interrogé quand un `dossier_id` est détecté, même pour les comptages — cela donne le contexte du dossier (contacts, domaines) au LLM de synthèse.
+  - `_sanitize_rows_for_prompt()` détecte les résultats `COUNT(*)` et les présente proprement au LLM (`TOTAL : X`).
+  - Mode B de recherche étendu : quand un mot-clé est un nom de DOSSIER (ex: ADF), chercher AUSSI dans `sender` pour attraper les emails du domaine associé (ex: `@groupeadf.com`).
+
+---
+
 ## [1.13.14] — 2026-05-22
 
 ### Corrigé
