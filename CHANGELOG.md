@@ -4,6 +4,28 @@
 
 ---
 
+## [1.14.0] — 2026-05-22
+
+### Ajouté
+- **Charlie devient un Orchestrateur Intelligence (V1.14.0)** : le pipeline `question → SQL + vault + mémoire + corrections en mêlée → LLM` est remplacé par une architecture en 3 phases rigoureuses :
+  1. **Classification** (`_classify_question`) : détecte le type (`count`, `list`, `identity`, `summary`, `general`) et les entités (`dossier_id`, `year`) sans consulter aucune source.
+  2. **Exécution spécialisée** (`_execute_plan`) : selon le type, une et une seule séquence de recherche :
+     - `count` → SQL `COUNT(*)` sur `mail_processed` + comptage archives historiques (somme correcte, garde si SQL=0)
+     - `list` → SQL liste + archives, tri du plus récent au plus ancien
+     - `identity` → corrections (priorité absolue) → vault extraction directe → mémoire, **bypass LLM**
+     - `summary` → SQL + vault + mémoire + corrections en parallèle, puis synthèse LLM
+     - `general` → réponse codée en dur, **aucun appel LLM**
+  3. **Formulation** (`_formulate_response`) : construit la réponse finale à partir des faits vérifiés structurés, dans le ton Charlie (direct, chaleureux, "tu").
+- **Réponses codées en dur pour `general`** : "salut", "version", "merci", etc. → pas de latence LLM, pas de coût token.
+- **Garde comptage archives** : si SQL retourne 0 et archives > 0, le total affiché est le nombre d'archives (pas d'addition à 0).
+- **Nouvelles fonctions internes** : `_generate_count_sql`, `_generate_list_sql`, `_generate_summary_sql`, `_execute_plan`, `_formulate_response`, `_general_response`.
+
+### Corrigé
+- **Charlie mélangeait toutes les sources dans un seul prompt LLM** : identités confondues avec comptages, archives ignorées, réponses "total 0" alors que 8 emails ADF existaient en 2026.
+- **Bypass identitaire direct** : quand une correction existe, Charlie répond immédiatement sans passer par le LLM. Quand le vault contient une réponse extraite par regex, même chose.
+
+---
+
 ## [1.13.17] — 2026-05-22
 
 ### Corrigé
