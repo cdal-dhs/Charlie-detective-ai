@@ -625,7 +625,7 @@ async def ask_charlie(
 ) -> CharlieResult:
     """Pipeline Charlie AI V1.14.1 — Prompt unique avec contexte multi-sources."""
     settings = get_settings()
-    model = model or settings.llm_model_default
+    model = model or settings.llm_model_chat
 
     # ── 1. Questions générales (pas de recherche) ──
     general_resp = _general_response(question)
@@ -711,7 +711,7 @@ async def ask_charlie(
         context_parts.append("RÉSULTATS SQL : aucun email trouvé dans la base courante.")
         context_parts.append("")
 
-    # Archives — résumé par catégorie + détail des 30 premiers
+    # Archives — résumé par catégorie + détail des 50 premiers
     if archive_rows:
         from collections import Counter
         cat_counts = Counter(r.get("category") or "SANS_CAT" for r in archive_rows)
@@ -719,8 +719,8 @@ async def ask_charlie(
         context_parts.append("Répartition par catégorie :")
         for cat, cnt in cat_counts.most_common():
             context_parts.append(f"  - {cat}: {cnt}")
-        context_parts.append("Détail (30 premiers) :")
-        for r in archive_rows[:30]:
+        context_parts.append("Détail (50 premiers sujets) :")
+        for r in archive_rows[:50]:
             subject = r.get("subject") or "Sans sujet"
             date = r.get("received_at") or r.get("date") or ""
             cat = r.get("category") or ""
@@ -730,8 +730,8 @@ async def ask_charlie(
             if cat:
                 line += f" [{cat}]"
             context_parts.append(line)
-        if len(archive_rows) > 30:
-            context_parts.append(f"… et {len(archive_rows) - 30} autres.")
+        if len(archive_rows) > 50:
+            context_parts.append(f"… et {len(archive_rows) - 50} autres.")
         context_parts.append("")
 
     # Vault
@@ -751,33 +751,21 @@ async def ask_charlie(
 
     context = "\n".join(context_parts)
 
-    # ── 5. Réponse directe pour listes/comptages génériques (pas de LLM) ──
+    # ── 5. Réponse directe pour COMPTAGES génériques (pas de LLM) ──
     q_norm = _normalize(question)
     is_list_request = any(kw in q_norm for kw in ("liste", "lister", "donne-moi", "donne moi", "quels", "quelles", "lesquels", "lesquelles", "montre-moi", "tous les", "toutes les"))
     is_count_request = any(kw in q_norm for kw in ("combien", "nombre", "total", "count", "combien de"))
 
-    # Si pas de dossier_id précis et on a des archives → réponse directe Python
-    if not dossier_id and archive_rows and (is_list_request or is_count_request):
-        from collections import Counter
-        cat_counts = Counter(r.get("category") or "SANS_CAT" for r in archive_rows)
+    # Comptages sans dossier précis → réponse directe Python (exacte)
+    if not dossier_id and archive_rows and is_count_request:
         total = len(archive_rows)
         sql_total = len(rows) if rows else 0
-
-        if is_count_request:
-            parts = [f"J'ai trouvé **{total}** email{'s' if total > 1 else ''} en {year or 'cette période'}."]
-            if sql_total > 0:
-                parts.append(f"({sql_total} en base courante + {total} dans les archives)")
-            else:
-                parts.append("(tous dans les archives historiques)")
-            response = " ".join(parts)
+        parts = [f"J'ai trouvé **{total}** email{'s' if total > 1 else ''} en {year or 'cette période'}."]
+        if sql_total > 0:
+            parts.append(f"({sql_total} en base courante + {total} dans les archives)")
         else:
-            # Liste structurée par catégorie
-            lines = [f"Voici les **{total}** emails des archives pour **{year or 'cette période'}**, répartis par type d'enquête :", ""]
-            for cat, cnt in cat_counts.most_common():
-                lines.append(f"- **{cat}** : {cnt} email{'s' if cnt > 1 else ''}")
-            if sql_total > 0:
-                lines.append(f"- **Base courante** : {sql_total} email{'s' if sql_total > 1 else ''}")
-            response = "\n".join(lines)
+            parts.append("(tous dans les archives historiques)")
+        response = " ".join(parts)
 
         await _auto_save_fact(db_path, question, response, dossier_id)
         return CharlieResult(
@@ -793,7 +781,7 @@ async def ask_charlie(
     is_identity_request = any(kw in q_norm for kw in ("qui est", "nom", "prenom", "contact", "personne", "sappelle", "epouse", "mari", "conjoint"))
 
     if is_list_request:
-        format_rule = "5. Daniel demande une LISTE. Fais une liste COMPLÈTE et structurée. Ne te limite PAS aux 2-3 premiers éléments."
+        format_rule = "5. Daniel demande une LISTE de DOSSIERS/AFFAIRES. Lis les sujets des emails ci-dessus et extrais les NOMS DE DOSSIERS ou d'affaires identifiables (ex: ADF, Zaventem, client spécifique). Regroupe les emails par dossier apparent. Ne liste pas juste les catégories — donne les NOMS."
     elif is_count_request:
         format_rule = "5. Daniel demande un COMPTAGE. Donne le nombre total clair et précis."
     elif is_identity_request:
@@ -825,10 +813,26 @@ RÉPONSE À DANIEL :"""
             max_tokens=600,
             temperature=0.2,
         )
-        response = response.strip() if response else "Je n'ai pas trouvé d'informations."
+        response = response.strip() if response else ""
     except Exception as e:
         log.warning("charlie.final_llm_failed", error=str(e))
-        response = "Charlie est momentanément indisponible. Réessaie dans un instant."
+        response = ""
+
+    # Garde : si le LLM retourne vide mais qu'on a des données → réponse de secours
+    if not response:
+        if is_count_request and (rows or archive_rows):
+            sql_cnt = int(next(iter(rows[0].values()))) if rows and len(rows) == 1 and len(rows[0]) == 1 else 0
+            arc_cnt = len(archive_rows)
+            total = sql_cnt + arc_cnt
+            if sql_cnt == 0 and arc_cnt > 0:
+                total = arc_cnt
+            response = f"J'ai trouvé **{total}** email{'s' if total > 1 else ''} pour {dossier_id or 'cette recherche'} en {year or 'cette période'}."
+            if arc_cnt > 0 and sql_cnt == 0:
+                response += " (tous dans les archives historiques)"
+        elif is_list_request and archive_rows:
+            response = f"J'ai trouvé **{len(archive_rows)}** email{'s' if len(archive_rows) > 1 else ''} dans les archives pour {dossier_id or 'cette période'}."
+        else:
+            response = "Je n'ai pas trouvé d'informations."
 
     await _auto_save_fact(db_path, question, response, dossier_id)
 
