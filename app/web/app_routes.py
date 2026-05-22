@@ -314,7 +314,7 @@ async def download_attachment(
     ) as cursor:
         row = await cursor.fetchone()
     if not row:
-        raise HTTPException(status_code=404, detail="Attachment not found")
+        raise HTTPException(status_code=404, detail="Pièce jointe introuvable en base")
     storage_path, filename = row
     settings = get_settings()
     path = Path(storage_path)
@@ -322,7 +322,17 @@ async def download_attachment(
     if not path.is_absolute():
         path = settings.data_dir / path
     if not path.exists():
-        raise HTTPException(status_code=404, detail="File not found on disk")
+        log.warning(
+            "attachment.file_missing",
+            attachment_id=attachment_id,
+            storage_path=storage_path,
+            resolved_path=str(path),
+            data_dir=str(settings.data_dir),
+        )
+        raise HTTPException(
+            status_code=404,
+            detail=f"Fichier non disponible sur le disque (supprimé ou migration perdue). Path attendu : {path}",
+        )
     return FileResponse(
         path,
         media_type="application/octet-stream",

@@ -25,6 +25,9 @@ async def main() -> None:
     await migrate(settings.db_agent_state)
     await init_memory_table(settings.db_agent_state)
 
+    # Garantir l'existence du dossier attachments (évite la perte silencieuse de PJ)
+    (settings.data_dir / "attachments").mkdir(parents=True, exist_ok=True)
+
     # Copier SOUL.md vers data/ au boot si absent (permet persistance + édition)
     soul_src = Path(__file__).parent / "prompts" / "SOUL.md"
     soul_dst = settings.data_dir / "SOUL.md"
