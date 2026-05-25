@@ -6,6 +6,16 @@
 
 ---
 
+## [1.16.10] — 2026-05-25
+
+### Corrigé
+- **Cerveau2 — bypass extraction directe déplacé dans `ask_charlie()`** : le bypass LLM des notes brutes Cerveau2 était intégré dans `_summarize_results()`, une fonction jamais appelée par `ask_charlie()` (orpheline). Conséquence : les questions de localisation d'entreprise passaient toujours par le LLM final DeepSeek (40+ secondes) et retombaient sur la réponse vide de Cerveau2.
+  - Déplacement du bypass identité + dossier/ville + entreprise/siège directement dans `ask_charlie()`, **après** les recherches parallèles et **avant** le vault_answer bypass.
+  - Suppression de la garde `not has_sql` : l'extraction directe fonctionne même quand des résultats SQL existent — Cerveau2 est la source de vérité pour les faits structurés (siège, identité, ville).
+  - La latence passe de **40+ secondes** à **<1 seconde** sur les questions structurées.
+
+---
+
 ## [1.16.9] — 2026-05-25
 
 ### Corrigé

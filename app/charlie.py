@@ -966,6 +966,44 @@ async def ask_charlie(
             vault_notes=vault_notes,
         )
 
+    # ── 5. Bypass LLM extraction directe depuis notes Cerveau2 (brutes, 0 ms, 100% déterministe) ──
+    direct_answer: str | None = None
+    if vault_notes:
+        q_lower = question.lower()
+
+        # 5a. Identité
+        if _is_identity_query(question):
+            direct_answer = _extract_identity_answer(vault_notes, question)
+            if direct_answer:
+                log.info("charlie.identity_direct_extract", question=question[:60], answer=direct_answer[:80])
+
+        # 5b. Dossier par ville
+        if not direct_answer and ("dossier" in q_lower or "enquête" in q_lower) and any(v in q_lower for v in ("bruxelles", "brussels", "brussel", "waterloo", "namur", "liège", "anvers", "gent", "gand")):
+            ville_match = re.search(r"(?:à|a|sur|dans|en|pres de|proche de)\s+([A-Za-zÀ-Ÿ-]+)", question, re.IGNORECASE)
+            if ville_match:
+                direct_answer = _extract_dossier_par_ville(vault_notes, ville_match.group(1).strip())
+                if direct_answer:
+                    log.info("charlie.dossier_ville_direct", question=question[:60], answer=direct_answer[:80])
+
+        # 5c. Entreprise / siège / localisation
+        if not direct_answer and any(kw in q_lower for kw in ("siege", "adresse", "localisation", "ou se trouve", "où se trouve", "situe", "situer", "domicilie")):
+            entreprise = _extract_entreprise_name(question)
+            if entreprise:
+                direct_answer = _extract_entreprise_info(vault_notes, entreprise)
+                if direct_answer:
+                    log.info("charlie.entreprise_info_direct", question=question[:60], answer=direct_answer[:80])
+
+    if direct_answer:
+        await _auto_save_fact(db_path, question, direct_answer, dossier_id)
+        return CharlieResult(
+            response_text=direct_answer,
+            sql=sql,
+            rows=rows,
+            sql_safe=True,
+            sql_error=None,
+            vault_notes=vault_notes,
+        )
+
     # ── 6. Bypass LLM si Cerveau2 a déjà répondu de manière utile ──
     _BAD_VAULT = (
         "je ne trouve pas", "pas trouvé", "aucune information", "je ne trouve",
