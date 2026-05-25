@@ -6,6 +6,18 @@
 
 ---
 
+## [1.16.9] — 2026-05-25
+
+### Corrigé
+- **Cerveau2 — extraction directe entreprise / siège / localisation** : généralisation du bypass LLM pour toute question de localisation d'entreprise.
+  - Ajout de `_extract_entreprise_name()` : détecte le nom d'entreprise dans la question via regex (patterns : "siège de X", "adresse de X", "localisation de X", "entreprise X", code en majuscules).
+  - Ajout de `_extract_entreprise_info()` : parse le YAML frontmatter (`nom:`, `siege:`, `ville:`, `adresse:`, `pays:`) et le markdown inline (`**Siège** :`, `**Adresse** :`) des notes Cerveau2, sans aucun LLM.
+  - Bypass intégré dans `_summarize_results()` quand la question contient "siège", "adresse", "localisation", "où se trouve", "situé" et qu'un nom d'entreprise est extrait.
+  - Réponse directe déterministe (ex: "Pour **ADF Group**, son siège est à **Bruxelles**, adresse : Avenue Louise 500, 1050 Bruxelles, pays : Belgique.").
+  - Log dédié : `charlie.entreprise_info_direct`.
+
+---
+
 ## [1.16.8] — 2026-05-25
 
 ### Corrigé

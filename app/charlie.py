@@ -1177,6 +1177,124 @@ def _extract_dossier_par_ville(vault_notes: list[VaultNote], ville: str) -> str 
     return "\n".join(lines)
 
 
+def _extract_entreprise_name(question: str) -> str | None:
+    """Extrait un nom d'entreprise potentiel depuis une question en français.
+
+    Patterns cibles :
+    - "siège de ADF Group" → ADF Group
+    - "ADF Group" (majuscules consécutives ou nom suivi de 'sarl', 'sa', 'bvba')
+    - "entreprise XXXX"
+    """
+    q = question
+    # Pattern "siège de / adresse de / localisation de XXXX"
+    m = re.search(r"(?:siège|adresse|localisation|où se trouve|domiciliée|domicilié)\s+(?:de|d')?\s*([A-Z][A-Za-z0-9\s&\.\-]{2,}?)(?:\s+(?:sa|sarl|bvba|nv|sprl|vba|bvba|asbl|vzw|scs|sca|scrl))?(?=\?|\.|,|$|\s+(?:à|a|en|dans|et|ou|qui|dont))", q, re.IGNORECASE)
+    if m:
+        return m.group(1).strip()
+    # Pattern "entreprise XXXX"
+    m = re.search(r"entreprise\s+([A-Z][A-Za-z0-9\s&\.\-]{2,}?)(?:\s+(?:sa|sarl|bvba|nv|sprl|vba|bvba|asbl|vzw|scs|sca|scrl))?(?=\?|\.|,|$|\s+(?:à|a|en|dans|et|ou|qui|dont))", q, re.IGNORECASE)
+    if m:
+        return m.group(1).strip()
+    # Fallback : code en majuscules isolé (3+ lettres) pas dans la liste de garde
+    for m in re.finditer(r"\b([A-Z]{3,}(?:\s+[A-Z][a-z]+)?)\b", q):
+        code = m.group(1)
+        if code not in ("SQL", "OK", "HTTP", "API", "URL", "HTML", "XML", "JSON", "CDAL", "DPDH", "AI", "VPS", "SMTP", "IMAP", "DNS", "CEO", "CFO", "COO", "SARL", "SA", "SCRL", "BVBA", "SPRL"):
+            return code
+    return None
+
+
+def _extract_entreprise_info(vault_notes: list[VaultNote], entreprise: str) -> str | None:
+    """Extraction directe d'informations sur une entreprise depuis le vault, sans LLM.
+
+    Cherche dans le YAML frontmatter et le corps markdown :
+    - nom / entreprise / société
+    - siège / ville / adresse / pays
+    Retourne un message formaté ou None.
+    """
+    ent_norm = entreprise.lower().strip()
+    # Variantes possibles (ex: ADF, ADF Group)
+    variants = {ent_norm}
+    parts = ent_norm.split()
+    if len(parts) > 1:
+        variants.add(parts[0])  # acronyme potentiel
+
+    matches: list[dict] = []
+    for note in vault_notes:
+        content = note.content
+        content_lower = content.lower()
+
+        # Vérifie si l'entreprise est mentionnée dans la note
+        found = any(v in content_lower for v in variants)
+        if not found:
+            continue
+
+        info: dict = {"path": note.path, "nom": entreprise}
+
+        # Extraction YAML frontmatter — patterns courants
+        for field in ("nom", "entreprise", "societe", "société", "client", "raison_sociale"):
+            m = re.search(rf"{field}\s*[:=]\s*\"?([^\"\n]+)\"?", content, re.IGNORECASE)
+            if m:
+                info["nom"] = m.group(1).strip()
+                break
+
+        for field in ("siege", "siège", "ville", "adresse", "pays", "country"):
+            m = re.search(rf"{field}\s*[:=]\s*\"?([^\"\n]+)\"?", content, re.IGNORECASE)
+            if m:
+                info[field] = m.group(1).strip()
+
+        # Extraction markdown inline
+        # **Siège** : Bruxelles
+        m = re.search(r"\*\*Siège\*\*\s*[:=]\s*([^\n]+)", content, re.IGNORECASE)
+        if m:
+            info["siege"] = m.group(1).strip()
+        m = re.search(r"\*\*Adresse\*\*\s*[:=]\s*([^\n]+)", content, re.IGNORECASE)
+        if m:
+            info["adresse"] = m.group(1).strip()
+        m = re.search(r"\*\*Ville\*\*\s*[:=]\s*([^\n]+)", content, re.IGNORECASE)
+        if m:
+            info["ville"] = m.group(1).strip()
+
+        # Si on a au moins une info localisation
+        if any(k in info for k in ("siege", "siège", "ville", "adresse", "pays", "country")):
+            matches.append(info)
+
+    if not matches:
+        return None
+
+    # Dédoublonne par nom
+    seen: set[str] = set()
+    unique: list[dict] = []
+    for info in matches:
+        nom = info.get("nom", entreprise)
+        if nom not in seen:
+            seen.add(nom)
+            unique.append(info)
+
+    if len(unique) == 1:
+        info = unique[0]
+        parts_msg: list[str] = []
+        siege = info.get("siege") or info.get("siège") or info.get("ville")
+        if siege:
+            parts_msg.append(f"son siège est à **{siege}**")
+        if info.get("adresse"):
+            parts_msg.append(f"adresse : {info['adresse']}")
+        if info.get("pays") or info.get("country"):
+            parts_msg.append(f"pays : {info.get('pays') or info.get('country')}")
+        if parts_msg:
+            return f"Pour **{info.get('nom', entreprise)}**, {', '.join(parts_msg)}."
+        return f"J'ai trouvé **{info.get('nom', entreprise)}** dans le vault, mais sans détail de localisation."
+
+    # Plusieurs entreprises trouvées
+    lines = [f"J'ai trouvé **{len(unique)}** entreprises correspondant à **{entreprise}** :", ""]
+    for info in unique:
+        nom = info.get("nom", entreprise)
+        siege = info.get("siege") or info.get("siège") or info.get("ville")
+        line = f"- **{nom}**"
+        if siege:
+            line += f" — siège à {siege}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
 def _extract_identity_answer(vault_notes: list[VaultNote], question: str) -> str | None:
     """Extraction directe d'une réponse identitaire depuis le vault, sans LLM.
 
@@ -1490,6 +1608,16 @@ async def _summarize_results(
             direct = _extract_dossier_par_ville(vault_notes, ville)
             if direct:
                 log.info("charlie.dossier_ville_direct", question=question[:60], answer=direct[:80])
+                return direct
+
+    # Bypass LLM pour les questions "siège / adresse / localisation d'entreprise"
+    if not has_sql and vault_notes and any(kw in q_lower for kw in ("siege", "adresse", "localisation", "ou se trouve", "où se trouve", "situe", "situer", "domicilie")):
+        # Extraire le nom d'entreprise potentiel
+        entreprise = _extract_entreprise_name(question)
+        if entreprise:
+            direct = _extract_entreprise_info(vault_notes, entreprise)
+            if direct:
+                log.info("charlie.entreprise_info_direct", question=question[:60], answer=direct[:80])
                 return direct
 
     # Prompt spécifique si SQL vide mais vault a trouvé la réponse
