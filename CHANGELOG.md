@@ -6,6 +6,17 @@
 
 ---
 
+## [1.16.8] — 2026-05-25
+
+### Corrigé
+- **Cerveau2 — extraction directe dossier par ville** : ajout de `_extract_dossier_par_ville()` dans `app/charlie.py` pour parser le YAML frontmatter et le corps markdown des notes Cerveau2 sans passer par aucun LLM.
+  - Cherche `dossier: "[[NOM/_index]]"` dans le frontmatter YAML et `**Dossier** : NOM` dans le corps markdown.
+  - Détecte la ville cherchée (avec variantes : Bruxelles/Brussels/Brussel/BXL, etc.) dans le contenu de la note.
+  - Bypass complet du LLM : réponse directe en 0 ms, 100% déterministe.
+  - Fonctionne aussi pour les listes de dossiers quand plusieurs correspondent.
+
+---
+
 ## [1.16.7] — 2026-05-25
 
 ### Corrigé

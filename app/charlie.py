@@ -1117,6 +1117,66 @@ def _extract_emails_from_notes(notes: list) -> list[str]:
     return sorted(emails)
 
 
+def _extract_dossier_par_ville(vault_notes: list[VaultNote], ville: str) -> str | None:
+    """Extraction directe d'un dossier par ville depuis le vault Cerveau2, sans LLM.
+
+    Parse le YAML frontmatter et le corps markdown pour trouver un dossier
+    associé à la ville cherchée. Retourne un message formaté ou None.
+    """
+    import json
+    ville_norm = ville.lower().strip()
+    # Variantes de la ville
+    variants = {ville_norm}
+    if ville_norm == "bruxelles":
+        variants |= {"brussels", "brussel", "bxl", "brux"}
+    elif ville_norm == "brussels":
+        variants |= {"bruxelles", "brussel", "bxl", "brux"}
+    elif ville_norm == "brussel":
+        variants |= {"bruxelles", "brussels", "bxl", "brux"}
+
+    matches: list[tuple[str, str]] = []
+    for note in vault_notes:
+        content = note.content
+        dossier_name: str | None = None
+
+        # 1. Cherche dans le frontmatter YAML : dossier: "[[NOM/_index]]"
+        m = re.search(r'dossier:\s*"?\[\[([^\]]+)/_index\]\]"?', content)
+        if m:
+            dossier_name = m.group(1)
+
+        # 2. Cherche dans le corps markdown : **Dossier** : NOM
+        if not dossier_name:
+            m = re.search(r'\*\*Dossier\*\*\s*:\s*(\S+)', content)
+            if m:
+                dossier_name = m.group(1)
+
+        if not dossier_name:
+            continue
+
+        # 3. Vérifie si la ville est mentionnée quelque part dans la note
+        content_lower = content.lower()
+        if any(v in content_lower for v in variants):
+            matches.append((dossier_name, note.path))
+
+    if not matches:
+        return None
+
+    # Dédoublonne et formate
+    seen: set[str] = set()
+    unique: list[tuple[str, str]] = []
+    for d, p in matches:
+        if d not in seen:
+            seen.add(d)
+            unique.append((d, p))
+
+    if len(unique) == 1:
+        return f"Le dossier **{unique[0][0]}** se déroule à **{ville.capitalize()}**."
+    lines = [f"J'ai trouvé **{len(unique)}** dossiers se déroulant à **{ville.capitalize()}** :", ""]
+    for d, p in unique:
+        lines.append(f"- **{d}**")
+    return "\n".join(lines)
+
+
 def _extract_identity_answer(vault_notes: list[VaultNote], question: str) -> str | None:
     """Extraction directe d'une réponse identitaire depuis le vault, sans LLM.
 
@@ -1420,6 +1480,17 @@ async def _summarize_results(
         if direct:
             log.info("charlie.identity_direct_extract", question=question[:60], answer=direct[:80])
             return direct
+
+    # Bypass LLM pour les questions "dossier à VILLE" : extraction directe du vault
+    q_lower = question.lower()
+    if not has_sql and vault_notes and ("dossier" in q_lower or "enquête" in q_lower) and any(v in q_lower for v in ("bruxelles", "brussels", "brussel", "waterloo", "namur", "liège", "anvers", "gent", "gand")):
+        ville_match = re.search(r"(?:à|a|sur|dans|en|pres de|proche de)\s+([A-Za-zÀ-Ÿ-]+)", question, re.IGNORECASE)
+        if ville_match:
+            ville = ville_match.group(1).strip()
+            direct = _extract_dossier_par_ville(vault_notes, ville)
+            if direct:
+                log.info("charlie.dossier_ville_direct", question=question[:60], answer=direct[:80])
+                return direct
 
     # Prompt spécifique si SQL vide mais vault a trouvé la réponse
     if not has_sql and vault_notes:
