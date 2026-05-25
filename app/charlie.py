@@ -764,15 +764,21 @@ async def ask_charlie(
             log.warning("charlie.sql_exec_failed", sql=sql, error=str(e))
             return []
 
+    vault_answer: str | None = None
+
     async def _vault_task() -> list:
+        nonlocal vault_answer
         lim = 8 if (is_identity_request or is_list_request or is_dossier_list) else settings.cerveau2_limit
-        return await query_vault(
+        notes, ans = await query_vault(
             question=question,
             base_url=settings.cerveau2_base_url,
             api_secret=settings.cerveau2_api_secret,
             dossier_id=dossier_id,
             limit=lim,
+            context_only=False,
         )
+        vault_answer = ans
+        return notes
 
     async def _memory_task() -> list:
         return await query_memory(db_path, question=question, dossier_id=dossier_id, limit=3)
@@ -960,7 +966,30 @@ async def ask_charlie(
             vault_notes=vault_notes,
         )
 
-    # ── 6. Appel LLM final pour les questions spécifiques ──
+    # ── 6. Bypass LLM si Cerveau2 a déjà répondu (context_only=False) ──
+    if vault_answer and not is_count_request:
+        # Cerveau2 a répondu en direct — on enrichit éventuellement avec les emails SQL/archives
+        enriched = vault_answer.strip()
+        if rows or archive_rows:
+            enriched += "\n\n_(Sources complémentaires : "
+            sources: list[str] = []
+            if rows:
+                sources.append(f"{len(rows)} email(s) base courante")
+            if archive_rows:
+                sources.append(f"{len(archive_rows)} archive(s)")
+            enriched += " + ".join(sources) + ")_"
+        log.info("charlie.vault_answer_used", question=question[:60], answer_len=len(enriched))
+        await _auto_save_fact(db_path, question, enriched, dossier_id)
+        return CharlieResult(
+            response_text=enriched,
+            sql=sql,
+            rows=rows,
+            sql_safe=True,
+            sql_error=None,
+            vault_notes=vault_notes,
+        )
+
+    # ── 7. Appel LLM final pour les questions spécifiques ──
     if is_list_request:
         format_rule = "7. Daniel demande une LISTE. Si le second cerveau a des notes sur ces dossiers, liste-les en priorité. Sinon, extrait les noms de dossiers identifiables depuis les emails. Ne liste pas les catégories — donne les NOMS (ex: ADF, Zaventem, ODM)."
     elif is_count_request:
@@ -970,12 +999,17 @@ async def ask_charlie(
     else:
         format_rule = "7. Réponds de manière fluide et directe, en une ou deux phrases maximum."
 
+    # Si Cerveau2 a répondu mais c'est un comptage, on injecte sa réponse dans le contexte
+    vault_context = context
+    if vault_answer:
+        vault_context = f"RÉPONSE DU SECOND CERVEAU (Cerveau2-Det) :\n{vault_answer.strip()}\n\n---\n\n{context}"
+
     final_prompt = f"""Tu es Charlie, l'assistant IA personnel de Daniel Hurchon, détective privé chez Detective.be. Version {VERSION}.
 Tu t'adresses à Daniel comme à un partenaire : direct, chaleureux, sans langue de bois. Utilise "tu".
 
 Question de Daniel : {question}
 
-{context}
+{vault_context}
 
 RÈGLES :
 1. Si des corrections utilisateur sont fournies, elles priment sur TOUT.

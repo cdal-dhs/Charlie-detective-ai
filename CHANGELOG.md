@@ -4,6 +4,20 @@
 
 ---
 
+---
+
+## [1.16.6] — 2026-05-25
+
+### Corrigé
+- **Cerveau2 — LLM direct au lieu de contexte brut** : le bug majeur où Charlie répondait "Je n'ai pas trouvé d'informations" alors que Cerveau2 contenait la réponse est corrigé.
+  - `query_vault()` dans `app/cerveau_client.py` : ajout du paramètre `context_only` (défaut `True`). Quand `context_only=False`, Cerveau2 utilise **son propre LLM** pour répondre directement — retourne `(notes, answer)`.
+  - **Chat Charlie** (`app/charlie.py`) : `_vault_task()` appelle désormais `query_vault(..., context_only=False)`. Si Cerveau2 retourne un `answer`, Charlie **l'utilise directement** comme réponse (bypass LLM) pour toutes les questions sauf comptage.
+  - **Générateur de brouillons** (`app/pipeline/generator.py`) : garde `context_only=True` car il a besoin uniquement des notes brutes pour le prompt RAG.
+  - Fallback : si Cerveau2 retourne une réponse mais qu'il y a aussi des emails SQL/archives, la réponse est enrichie avec un lien vers les sources complémentaires.
+  - Pour les comptages, le `vault_answer` est injecté dans le contexte du prompt final au lieu de bypasser.
+
+---
+
 ## [1.16.5] — 2026-05-25
 
 ### Ajouté

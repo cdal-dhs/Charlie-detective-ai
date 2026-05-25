@@ -20,23 +20,25 @@ async def query_vault(
     api_secret: str,
     dossier_id: str | None = None,
     limit: int = 3,
-) -> list[VaultNote]:
-    """Interroge le vault Cerveau2-Det et retourne les notes pertinentes.
+    context_only: bool = True,
+) -> tuple[list[VaultNote], str | None]:
+    """Interroge le vault Cerveau2-Det.
 
-    Retourne [] si la configuration est absente ou si le service est indisponible
-    (dégradation silencieuse — le générateur fonctionne avec le RAG local seul).
+    Retourne ``(notes, answer)`` où ``answer`` est la réponse générée par le LLM
+    interne de Cerveau2 quand ``context_only=False``.  Quand ``context_only=True``
+    (défaut pour le générateur de brouillons), ``answer`` vaut ``None``.
+
+    Dégradation silencieuse : retourne ``([], None)`` si le service est indisponible.
     """
     if not base_url or not api_secret:
-        return []
+        return [], None
 
-    # context_only=True : court-circuite l'appel LLM dans Cerveau2
-    # (Charlie gère la génération côté appelant — le double appel LLM causait des timeouts)
-    payload: dict = {"question": question, "limit": limit, "context_only": True}
+    payload: dict = {"question": question, "limit": limit, "context_only": context_only}
     if dossier_id:
         payload["dossier_id"] = dossier_id
 
     try:
-        async with httpx.AsyncClient(timeout=12.0) as client:
+        async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.post(
                 f"{base_url.rstrip('/')}/query",
                 json=payload,
@@ -48,18 +50,25 @@ async def query_vault(
         status = data.get("status", "")
         if status == "zone_rouge":
             log.info("cerveau.zone_rouge_blocked")
-            return []
+            return [], None
 
         notes = [
             VaultNote(path=item["path"], content=item["content"])
             for item in data.get("context", [])
         ]
-        log.info("cerveau.query_ok", status=status, notes=len(notes))
-        return notes
+        answer = data.get("answer") if not context_only else None
+        log.info(
+            "cerveau.query_ok",
+            status=status,
+            notes=len(notes),
+            has_answer=bool(answer),
+            context_only=context_only,
+        )
+        return notes, answer
 
     except Exception as e:
-        log.warning("cerveau.query_failed", error=str(e))
-        return []
+        log.warning("cerveau.query_failed", error=str(e), context_only=context_only)
+        return [], None
 
 
 async def feed_correspondance(

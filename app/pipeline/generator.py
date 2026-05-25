@@ -114,11 +114,12 @@ async def generate_draft(
     )
     log.info("generator.retrieved", rag=len(pairs))
 
-    vault_notes = await query_vault(
+    vault_notes, _vault_answer = await query_vault(
         question=f"{incoming_subject}\n{incoming_body[:500]}",
         base_url=settings.cerveau2_base_url,
         api_secret=settings.cerveau2_api_secret,
         limit=settings.cerveau2_limit,
+        context_only=True,
     )
     log.info("generator.vault", notes=len(vault_notes))
 
