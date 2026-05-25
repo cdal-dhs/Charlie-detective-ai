@@ -202,8 +202,7 @@ _FORMES_JURIDIQUES_RE = re.compile(
 )
 _ENTREPRISE_NAME_RE = re.compile(
     r"\b([A-Z][A-Za-z0-9\s\&\.\-]{1,40}?(?:\s+(?:SA|S\.A\.|SRL|S\.R\.L\.|BVBA|SPRL|NV|SCRL|ASBL|SCS|"
-    r"SCA|SE|VBA|GIE|\bGroup\b|\bGROUP\b|\bInternational\b|\bBelgium\b|\bEurope\b)))\b",
-    re.IGNORECASE,
+    r"SCA|SE|VBA|GIE|Group|GROUP|International|Belgium|Europe)))\b",
 )
 _TVA_BE_RE = re.compile(r"\bBE\s*0?\d{3}[\.\s]?\d{3}[\.\s]?\d{3}\b", re.IGNORECASE)
 _ADRESSE_BE_RE = re.compile(
