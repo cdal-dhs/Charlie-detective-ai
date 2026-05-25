@@ -4,6 +4,27 @@
 
 ---
 
+## [1.16.0] — 2026-05-25
+
+### Ajouté
+- **V2a — Bascule Drafts IMAP natifs** : remplacement de la livraison Resend (brouillon → CDAL par email) par un dépôt direct en **Brouillons IMAP** de la boîte qui a reçu le mail client.
+  - Nouveau module `app/delivery/imap_draft.py` — fonction `append_draft()` :
+    - Construction email RFC 2822 via `email.message.EmailMessage` (text/plain, UTF-8).
+    - Découverte auto du dossier Drafts via `LIST` (priorité : `Drafts` → `INBOX.Drafts` → `Brouillons` → contient "draft" ou "brouillon").
+    - IMAP `APPEND` avec flag `\Draft`.
+    - Logging structuré (`imap_draft.ok`, `imap_draft.failed`, `imap_draft.folder_found`, `imap_draft.login_failed`, `imap_draft.append_failed`).
+    - Déconnexion propre dans `finally` (suppression silencieuse des exceptions).
+  - **Sujet du brouillon** : `DEMANDE D'Approbation - Reponse Demande Client : [sujet original]`.
+  - **Corps** : bandeau contextuel (`⚠️ BROUILLON IA — À RELIRE AVANT ENVOI` + lien cockpit) suivi du texte généré par Charlie.
+  - **Expéditeur** : adresse de la boîte source (ex: `contact@detectivebelgique.be`).
+  - **Destinataire** : adresse du client (expéditeur du mail entrant).
+
+### Modifié
+- `app/workers/imap_poller.py` (ligne ~846) : `append_draft()` est désormais appelée en premier ; `notify_draft()` ne sert plus que de **fallback Resend** si APPEND IMAP échoue (timeout, auth, dossier introuvable).
+- Resend conserve un rôle réduit : alertes système + fallback IMAP uniquement.
+
+---
+
 ## [1.14.4] — 2026-05-22
 
 ### Ajouté

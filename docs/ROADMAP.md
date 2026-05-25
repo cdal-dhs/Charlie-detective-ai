@@ -174,14 +174,14 @@ if not draft_ok:
 
 ### Tâches lundi
 
-- [ ] **1. Créer `app/delivery/imap_draft.py`** — fonction `append_draft()` avec :
+- [x] **1. Créer `app/delivery/imap_draft.py`** — fonction `append_draft()` avec :
   - Construction email RFC 2822 (`email.message`, text/plain + UTF-8)
   - Découverte auto du dossier Drafts via `LIST`
   - IMAP APPEND avec flag `\Draft`
   - Logging structuré (`imap_draft.ok`, `imap_draft.failed`, `imap_draft.folder_found`)
   - Timeout 15s, propagation propre des exceptions
 
-- [ ] **2. Modifier `app/workers/imap_poller.py`** :
+- [x] **2. Modifier `app/workers/imap_poller.py`** :
   - Remplacer l'appel `notify_draft()` par `append_draft()` + fallback Resend si échec
   - Garder import `notify_draft` (utilisé pour les alertes système)
 
@@ -191,7 +191,7 @@ if not draft_ok:
   - Vérifier le sujet, le corps, le flag `\Draft`
   - Vérifier que le lien cockpit est correct
 
-- [ ] **4. Bump version** : `1.15.1 → 1.16.0` (changement livraison = minor bump)
+- [x] **4. Bump version** : `1.15.1 → 1.16.0` (changement livraison = minor bump)
 
 - [ ] **5. Déployer sur VPS** et surveiller les logs du premier vrai mail
 
