@@ -50,6 +50,9 @@ log = structlog.get_logger()
 AGENT_FLAG = "AgentProcessed"
 IMAP_RETRY_ATTEMPTS = 3
 
+# Emails système auto-générés à ignorer (ne pas insérer en DB)
+_SYSTEM_SENDERS = ("noreply@resend.digitalhs.biz",)
+
 # Expéditeurs qui ne peuvent JAMAIS être un vrai client
 _SERVICE_SENDERS = (
     "infomaniak", "ovh", "stripe", "paypal", "amazon", "microsoft",
@@ -167,6 +170,12 @@ def _is_known_sender(db_path: Path, sender: str) -> bool:
         return found
     except Exception:
         return False
+
+
+def _is_system_email(sender: str) -> bool:
+    """Emails auto-générés (magic links, notifs système) à ignorer."""
+    sender_norm = sender.lower().strip()
+    return any(s in sender_norm for s in _SYSTEM_SENDERS)
 
 
 def _normalize_contact_key(email: str | None, tel: str | None, nom: str, dossier_id: str | None) -> str:
@@ -616,6 +625,21 @@ async def _process_single_mail(
     received_at = msg.get("Date", "")
     message_id = msg.get("Message-ID", "")
     body = _get_body_text(msg)
+
+    # Skip système : emails auto-générés (magic links Resend, etc.)
+    if _is_system_email(sender):
+        log.info(
+            "poller.system_email_skipped",
+            mailbox=mailbox.name,
+            uid=uid,
+            sender=sender,
+            subject=subject,
+        )
+        if not settings.dry_run:
+            store_resp = await client.store(uid, "+FLAGS", f"({AGENT_FLAG})")
+            if store_resp.result != "OK":
+                log.warning("poller.flag_failed", mailbox=mailbox.name, uid=uid, response=store_resp)
+        return "skipped"
 
     log.info(
         "poller.new_mail",

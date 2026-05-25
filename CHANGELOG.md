@@ -4,6 +4,14 @@
 
 ---
 
+## [1.16.5] — 2026-05-25
+
+### Ajouté
+- **Skip emails système — magic links Resend** : les emails auto-générés par `noreply@resend.digitalhs.biz` (magic links de connexion cockpit) sont désormais **ignorés** et ne sont plus insérés dans `mail_processed`.
+  - Constante `_SYSTEM_SENDERS` et fonction `_is_system_email()` dans `app/workers/imap_poller.py`.
+  - Le flag IMAP `AgentProcessed` est quand même posé pour éviter de retraiter le mail à chaque cycle.
+  - Retourne `"skipped"` dans les stats du cycle poller.
+
 ---
 
 ## [1.16.4] — 2026-05-25
