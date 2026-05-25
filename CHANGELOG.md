@@ -6,6 +6,20 @@
 
 ---
 
+## [1.16.12] — 2026-05-25
+
+### Ajouté
+- **Extraction fiche entreprise depuis emails entrants (poller IMAP)** : `_extract_and_feed_entreprise()` dans `app/workers/imap_poller.py` parse chaque email entrant (et chaque pièce jointe extractable) avec des regex déterministes pour extraire :
+  - Nom d'entreprise + forme juridique
+  - Numéro TVA belge
+  - Adresse postale complète
+  - Emails corporate et téléphones
+  - Garde anti-signature Daniel (ignore DétectiveBelgique, Chaussée Bara, 0779.433.503)
+- Envoi proactif des fiches entreprise à Cerveau2 : le poller crée une note `type: fiche_entreprise` via `feed_document()` à chaque email entrant contenant des coordonnées d'entreprise. Complète l'extraction côté serveur Cerveau2 v0.5.0 (double alimentation, redondance utile).
+- Extraction entreprise aussi depuis les pièces jointes extractables (PDF, DOCX, TXT).
+
+---
+
 ## [1.16.11] — 2026-05-25
 
 ### Corrigé

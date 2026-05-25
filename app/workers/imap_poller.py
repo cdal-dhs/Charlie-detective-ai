@@ -194,6 +194,163 @@ def _normalize_contact_key(email: str | None, tel: str | None, nom: str, dossier
     return f"contact-{hashlib.md5(key.encode(), usedforsecurity=False).hexdigest()[:12]}"
 
 
+# ── Regex extraction entreprise (pas de LLM, instantané) ──
+_FORMES_JURIDIQUES_RE = re.compile(
+    r"\b(?:SA|S\.A\.|SRL|S\.R\.L\.|BVBA|B\.V\.B\.A\.|SPRL|S\.P\.R\.L\.|ASBL|A\.S\.B\.L\.|"
+    r"SCS|S\.C\.S\.|SCA|S\.C\.A\.|SCRL|S\.C\.R\.L\.|NV|N\.V\.|VBA|V\.B\.A\.|GIE|G\.I\.E\.|SE)\b",
+    re.IGNORECASE,
+)
+_ENTREPRISE_NAME_RE = re.compile(
+    r"\b([A-Z][A-Za-z0-9\s\&\.\-]{1,40}?(?:\s+(?:SA|S\.A\.|SRL|S\.R\.L\.|BVBA|SPRL|NV|SCRL|ASBL|SCS|"
+    r"SCA|SE|VBA|GIE|\bGroup\b|\bGROUP\b|\bInternational\b|\bBelgium\b|\bEurope\b)))\b",
+    re.IGNORECASE,
+)
+_TVA_BE_RE = re.compile(r"\bBE\s*0?\d{3}[\.\s]?\d{3}[\.\s]?\d{3}\b", re.IGNORECASE)
+_ADRESSE_BE_RE = re.compile(
+    r"(?:\b(?:rue|avenue|av\.|chaussée|ch(?:aus)?sée|chaussee|boulevard|blvd|bd|place|pl|allée|quai|"
+    r"chemin|route|impasse|passage)\b[\s\w\-\.]+?\d+.*?\b\d{4}\b.*?[A-Za-zÀ-Ÿ\-]+)",
+    re.IGNORECASE,
+)
+_CP_VILLE_RE = re.compile(r"\b(\d{4})\s+([A-Za-zÀ-Ÿ\-]{3,})\b")
+_EMAIL_RE = re.compile(r"[\w\.-]+@[\w\.-]+\.[a-z]{2,}")
+_TEL_BE_RE = re.compile(r"(?:\+32|0032|0)(?:\s*\d){8,9}")
+_DANIEL_SIG = ("detectivebelgique", "daniel hurchon", "0779.433.503", "chaussée bara")
+
+
+def _is_daniel_sig(text: str) -> bool:
+    t = text.lower()
+    return any(m in t for m in _DANIEL_SIG)
+
+
+def _extract_entreprise_from_text(text: str) -> dict | None:
+    """Extraction regex d'infos entreprise depuis texte brut."""
+    if not text or len(text) < 30:
+        return None
+    m = _ENTREPRISE_NAME_RE.search(text)
+    if not m:
+        return None
+    nom = m.group(1).strip()
+    nom = re.sub(r"\s+", " ", nom)
+    if _is_daniel_sig(nom):
+        return None
+
+    tva = None
+    tva_m = _TVA_BE_RE.search(text)
+    if tva_m:
+        tva = tva_m.group(0).upper().replace(" ", "").replace(".", "")
+
+    adresse = None
+    for addr_m in _ADRESSE_BE_RE.finditer(text):
+        candidate = addr_m.group(0).strip()
+        if not _is_daniel_sig(candidate):
+            adresse = re.sub(r"\s+", " ", candidate)
+            break
+    if not adresse:
+        cp_m = _CP_VILLE_RE.search(text)
+        if cp_m:
+            cp, ville = cp_m.groups()
+            if not _is_daniel_sig(f"{cp} {ville}"):
+                adresse = f"{cp} {ville}"
+
+    emails = []
+    for em in _EMAIL_RE.finditer(text):
+        e = em.group(0)
+        if _is_daniel_sig(e):
+            continue
+        e_lower = e.lower()
+        domain = e_lower.split("@")[-1].replace(".", "").replace("-", "")
+        nom_norm = nom.lower().replace(" ", "").replace("-", "")
+        if nom_norm in domain:
+            emails.insert(0, e)
+        else:
+            emails.append(e)
+    emails = list(dict.fromkeys(emails))
+
+    tels = []
+    for tm in _TEL_BE_RE.finditer(text):
+        raw = tm.group(0)
+        digits = re.sub(r"\D", "", raw)
+        if digits.endswith("433503"):
+            continue
+        tels.append(raw.strip())
+    tels = list(dict.fromkeys(tels))
+
+    if not any((tva, adresse, emails, tels)):
+        return None
+    return {"nom": nom, "tva": tva, "adresse": adresse, "emails": emails, "telephones": tels}
+
+
+async def _extract_and_feed_entreprise(
+    text: str,
+    subject: str,
+    dossier_id: str | None,
+    marque: str,
+    date_str: str,
+    base_url: str,
+    api_secret: str,
+    source_label: str = "email",
+) -> None:
+    """Extrait les infos entreprise et crée/merge une fiche dans Cerveau2."""
+    info = _extract_entreprise_from_text(text)
+    if not info:
+        return
+
+    nom = info["nom"]
+    slug = re.sub(r"[^a-z0-9]+", "-", nom.lower()).strip("-")[:60]
+    doc_id = f"entreprise-{slug}"
+
+    lines = [
+        f"# {nom}",
+        "",
+        f"**Dossier** : {dossier_id or 'non assigné'}",
+        f"**Source** : {source_label} du {date_str} — {subject}",
+        "",
+        "## Coordonnées",
+    ]
+    if info.get("tva"):
+        lines.append(f"- **TVA** : {info['tva']}")
+    if info.get("adresse"):
+        lines.append(f"- **Adresse** : {info['adresse']}")
+    if info.get("emails"):
+        lines.append(f"- **Emails** : {', '.join(info['emails'])}")
+    if info.get("telephones"):
+        lines.append(f"- **Téléphones** : {', '.join(info['telephones'])}")
+
+    body = "\n".join(lines)
+    metadata = {
+        "source": f"extraction_{source_label}",
+        "nom": nom,
+        "tva": info.get("tva"),
+        "adresse": info.get("adresse"),
+        "emails": info.get("emails"),
+        "telephones": info.get("telephones"),
+    }
+
+    asyncio.create_task(
+        feed_document(
+            doc_id=doc_id,
+            type="fiche_entreprise",
+            dossier_id=dossier_id,
+            marque=marque,
+            date=date_str,
+            titre=f"Entreprise — {nom}",
+            body=body,
+            metadata=metadata,
+            zone="jaune",
+            langue="fr",
+            base_url=base_url,
+            api_secret=api_secret,
+        )
+    )
+    log.info(
+        "poller.entreprise_extracted",
+        nom=nom,
+        dossier_id=dossier_id,
+        doc_id=doc_id,
+        source=source_label,
+    )
+
+
 async def _extract_and_feed_contact(
     text: str,
     subject: str,
@@ -789,6 +946,20 @@ async def _process_single_mail(
             )
         )
 
+        # --- Extraction fiche entreprise depuis le body (regex, pas de LLM) ---
+        asyncio.create_task(  # noqa: RUF006
+            _extract_and_feed_entreprise(
+                text=body,
+                subject=subject,
+                dossier_id=dossier_id,
+                marque=_marque,
+                date_str=date_str,
+                base_url=settings.cerveau2_base_url,
+                api_secret=settings.cerveau2_api_secret,
+                source_label="email",
+            )
+        )
+
         # --- Extraction fiche contact depuis le body (tous sauf newsletter/phishing) ---
         asyncio.create_task(  # noqa: RUF006
             _extract_and_feed_contact(
@@ -861,6 +1032,21 @@ async def _process_single_mail(
                 size=len(att_data),
                 doc_id=att_id,
             )
+
+            # --- Extraction fiche entreprise depuis la pièce jointe ---
+            if att_extractable:
+                asyncio.create_task(  # noqa: RUF006
+                    _extract_and_feed_entreprise(
+                        text=att_text,
+                        subject=att_filename,
+                        dossier_id=dossier_id,
+                        marque=_marque,
+                        date_str=date_str,
+                        base_url=settings.cerveau2_base_url,
+                        api_secret=settings.cerveau2_api_secret,
+                        source_label=f"pièce jointe [{att_filename}]",
+                    )
+                )
 
             # --- Extraction fiche contact depuis la pièce jointe (si texte extractable) ---
             if att_extractable:
