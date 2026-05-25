@@ -4,6 +4,15 @@
 
 ---
 
+## [1.16.3] — 2026-05-25
+
+### Corrigé
+- **Extraction IMAP — body incomplet sur formulaires web** : certains formulaires WordPress envoient un `text/plain` tronqué (champs du formulaire sans le message client) avec un `text/html` complet. `_get_body_text()` prenait uniquement la première partie `text/plain`, ce qui masquait la question du client.
+  - Refonte de `_get_body_text()` dans `app/workers/imap_poller.py` : concatène toutes les parties `text/plain` inline, extrait aussi le `text/html`, et **fallback sur HTML détaggé** si celui-ci est significativement plus long que le texte plain (seuil : < 200 caractères texte vs HTML > 2× plus long).
+  - Ignore les pièces jointes explicites (`Content-Disposition: attachment`) lors du walk MIME.
+
+---
+
 ## [1.16.2] — 2026-05-25
 
 ### Corrigé

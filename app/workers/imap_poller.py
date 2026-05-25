@@ -74,27 +74,46 @@ def _decode_header(value: str) -> str:
 
 
 def _get_body_text(msg: Message) -> str:
-    """Extraire le texte plain d'un email, ou HTML détaggé en fallback."""
+    """Extraire le texte plain d'un email, ou HTML détaggé en fallback.
+
+    Certains formulaires web envoient un text/plain incomplet (champs
+    manquants) avec un text/html complet. On concatène toutes les parties
+    inline, et on fallback sur HTML si celui-ci est significativement plus riche.
+    """
+    text_parts: list[str] = []
+    html_parts: list[str] = []
+
     if msg.is_multipart():
         for part in msg.walk():
-            if part.get_content_type() == "text/plain":
-                payload = part.get_payload(decode=True)
-                if payload:
-                    return payload.decode("utf-8", errors="replace")
-        for part in msg.walk():
-            if part.get_content_type() == "text/html":
-                payload = part.get_payload(decode=True)
-                if payload:
-                    raw_html = payload.decode("utf-8", errors="replace")
-                    return html.unescape(re.sub(r"<[^>]+>", "", raw_html))
+            content_type = part.get_content_type()
+            disposition = part.get("Content-Disposition", "")
+            # Ignorer les pièces jointes explicites
+            if disposition and disposition.lower().startswith("attachment"):
+                continue
+            payload = part.get_payload(decode=True)
+            if not payload:
+                continue
+            decoded = payload.decode("utf-8", errors="replace")
+            if content_type == "text/plain":
+                text_parts.append(decoded)
+            elif content_type == "text/html":
+                html_parts.append(html.unescape(re.sub(r"<[^>]+>", "", decoded)))
     else:
         payload = msg.get_payload(decode=True)
         if payload:
-            text = payload.decode("utf-8", errors="replace")
+            decoded = payload.decode("utf-8", errors="replace")
             if msg.get_content_type() == "text/html":
-                return html.unescape(re.sub(r"<[^>]+>", "", text))
-            return text
-    return ""
+                html_parts.append(html.unescape(re.sub(r"<[^>]+>", "", decoded)))
+            else:
+                text_parts.append(decoded)
+
+    body_plain = "\n".join(text_parts).strip()
+    body_html = "\n".join(html_parts).strip()
+
+    # Fallback HTML si le text/plain est anormalement court (formulaire WP incomplet)
+    if len(body_plain) < 200 and len(body_html) > len(body_plain) * 2:
+        return body_html
+    return body_plain if body_plain else body_html
 
 
 def _log_telemetry(
