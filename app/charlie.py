@@ -986,7 +986,7 @@ async def ask_charlie(
                     log.info("charlie.dossier_ville_direct", question=question[:60], answer=direct_answer[:80])
 
         # 5c. Entreprise / siège / localisation
-        if not direct_answer and any(kw in q_lower for kw in ("siege", "adresse", "localisation", "ou se trouve", "où se trouve", "situe", "situer", "domicilie")):
+        if not direct_answer and any(kw in _normalize(question) for kw in ("siege", "adresse", "localisation", "ou se trouve", "situe", "situer", "domicilie")):
             entreprise = _extract_entreprise_name(question)
             if entreprise:
                 direct_answer = _extract_entreprise_info(vault_notes, entreprise)
@@ -1223,17 +1223,23 @@ def _extract_entreprise_name(question: str) -> str | None:
     - "ADF Group" (majuscules consécutives ou nom suivi de 'sarl', 'sa', 'bvba')
     - "entreprise XXXX"
     """
-    q = question
-    # Pattern "siège de / adresse de / localisation de XXXX"
-    m = re.search(r"(?:siège|adresse|localisation|où se trouve|domiciliée|domicilié)\s+(?:de|d')?\s*([A-Z][A-Za-z0-9\s&\.\-]{2,}?)(?:\s+(?:sa|sarl|bvba|nv|sprl|vba|bvba|asbl|vzw|scs|sca|scrl))?(?=\?|\.|,|$|\s+(?:à|a|en|dans|et|ou|qui|dont))", q, re.IGNORECASE)
+    q_norm = _normalize(question)
+    keywords = ("siege", "adresse", "localisation", "ou se trouve", "domiciliee", "domicilie", "entreprise")
+    if not any(kw in q_norm for kw in keywords):
+        return None
+
+    # Cherche "de/d' XXXX" dans la question originale (conserve les majuscules)
+    m = re.search(
+        r"(?:de|d')\s+([A-Z][A-Za-z0-9\s&\.\-]{2,}?)(?=\?|\.|,|$|\s+(?:sa|sarl|bvba|nv|sprl|asbl|scs|sca|scrl|à|a|en|dans|et|ou|qui|dont))",
+        question, re.IGNORECASE,
+    )
     if m:
-        return m.group(1).strip()
-    # Pattern "entreprise XXXX"
-    m = re.search(r"entreprise\s+([A-Z][A-Za-z0-9\s&\.\-]{2,}?)(?:\s+(?:sa|sarl|bvba|nv|sprl|vba|bvba|asbl|vzw|scs|sca|scrl))?(?=\?|\.|,|$|\s+(?:à|a|en|dans|et|ou|qui|dont))", q, re.IGNORECASE)
-    if m:
-        return m.group(1).strip()
-    # Fallback : code en majuscules isolé (3+ lettres) pas dans la liste de garde
-    for m in re.finditer(r"\b([A-Z]{3,}(?:\s+[A-Z][a-z]+)?)\b", q):
+        name = m.group(1).strip()
+        if len(name) >= 2:
+            return name
+
+    # Fallback : acronyme en majuscules isolé (3+ lettres)
+    for m in re.finditer(r"\b([A-Z]{3,})\b", question):
         code = m.group(1)
         if code not in ("SQL", "OK", "HTTP", "API", "URL", "HTML", "XML", "JSON", "CDAL", "DPDH", "AI", "VPS", "SMTP", "IMAP", "DNS", "CEO", "CFO", "COO", "SARL", "SA", "SCRL", "BVBA", "SPRL"):
             return code
@@ -1243,31 +1249,40 @@ def _extract_entreprise_name(question: str) -> str | None:
 def _extract_entreprise_info(vault_notes: list[VaultNote], entreprise: str) -> str | None:
     """Extraction directe d'informations sur une entreprise depuis le vault, sans LLM.
 
-    Cherche dans le YAML frontmatter et le corps markdown :
+    Cherche dans le YAML frontmatter, le corps markdown et le texte brut des emails :
     - nom / entreprise / société
     - siège / ville / adresse / pays
+    - emails, téléphones, contacts (fallback si pas d'adresse postale)
     Retourne un message formaté ou None.
     """
     ent_norm = entreprise.lower().strip()
-    # Variantes possibles (ex: ADF, ADF Group)
     variants = {ent_norm}
     parts = ent_norm.split()
     if len(parts) > 1:
-        variants.add(parts[0])  # acronyme potentiel
+        variants.add(parts[0])
 
-    matches: list[dict] = []
+    DANIEL_SIGNATURE_MARKERS = ("detectivebelgique", "daniel hurchon", "0779.433.503", "chaussée bara")
+
+    def _is_daniel_signature(text: str) -> bool:
+        t = text.lower()
+        return any(m in t for m in DANIEL_SIGNATURE_MARKERS)
+
+    matches_loc: list[dict] = []
+    contact_emails: set[str] = set()
+    contact_phones: set[str] = set()
+    contact_names: set[str] = set()
+
     for note in vault_notes:
         content = note.content
         content_lower = content.lower()
 
-        # Vérifie si l'entreprise est mentionnée dans la note
         found = any(v in content_lower for v in variants)
         if not found:
             continue
 
         info: dict = {"path": note.path, "nom": entreprise}
 
-        # Extraction YAML frontmatter — patterns courants
+        # --- Extraction YAML frontmatter ---
         for field in ("nom", "entreprise", "societe", "société", "client", "raison_sociale"):
             m = re.search(rf"{field}\s*[:=]\s*\"?([^\"\n]+)\"?", content, re.IGNORECASE)
             if m:
@@ -1279,8 +1294,7 @@ def _extract_entreprise_info(vault_notes: list[VaultNote], entreprise: str) -> s
             if m:
                 info[field] = m.group(1).strip()
 
-        # Extraction markdown inline
-        # **Siège** : Bruxelles
+        # --- Extraction markdown inline ---
         m = re.search(r"\*\*Siège\*\*\s*[:=]\s*([^\n]+)", content, re.IGNORECASE)
         if m:
             info["siege"] = m.group(1).strip()
@@ -1291,46 +1305,99 @@ def _extract_entreprise_info(vault_notes: list[VaultNote], entreprise: str) -> s
         if m:
             info["ville"] = m.group(1).strip()
 
+        # --- Extraction texte brut (emails, signatures, correspondances) ---
+        # Emails du domaine ou mentionnant l'entreprise
+        for email_match in re.finditer(r"[\w\.-]+@[\w\.-]+\.[a-z]{2,}", content):
+            email = email_match.group(0)
+            e_lower = email.lower()
+            if any(v in e_lower for v in variants) or ent_norm.replace(" ", "") in e_lower.replace("-", "").replace(".", ""):
+                contact_emails.add(email)
+            # Si l'entreprise est ADF Group, tout @groupeadf.com est pertinent
+            if "groupeadf" in e_lower and "adf" in ent_norm:
+                contact_emails.add(email)
+
+        # Téléphones belges / internationaux
+        for phone_match in re.finditer(r"(?:\+32|0)(?:\s*\d){8,9}", content):
+            raw = phone_match.group(0)
+            digits = re.sub(r"\D", "", raw)
+            if len(digits) >= 9 and not digits.endswith("433503"):  # exclure numéro Daniel
+                contact_phones.add(raw.strip())
+
+        # Noms de contact : lignes "M./Mme XXX" ou signatures
+        for name_match in re.finditer(r"(?:M\.|Mme|Mr|Mrs|Dr)\s+([A-Z][a-zA-Z\-]+(?:\s+[A-Z][a-zA-Z\-]+)?)", content):
+            contact_names.add(name_match.group(0).strip())
+
+        # Adresse postale en texte brut — plusieurs patterns
+        raw_address = None
+        for pattern in (
+            r"Siège\s*Social\s*[:=]\s*([^\n]+)",
+            r"-?\s*Siège\s*[:=]\s*([^\n]+)",
+            r"Adresse\s*[:=]\s*([^\n]+)",
+            r"(?:situé|domicilié|domiciliée)\s+(?:au|a|en|à)\s+([^\n]{3,60})",
+        ):
+            m = re.search(pattern, content, re.IGNORECASE)
+            if m:
+                candidate = m.group(1).strip()
+                if not _is_daniel_signature(candidate):
+                    raw_address = candidate
+                    break
+
+        if raw_address:
+            info["siege"] = raw_address
+
         # Si on a au moins une info localisation
         if any(k in info for k in ("siege", "siège", "ville", "adresse", "pays", "country")):
-            matches.append(info)
+            matches_loc.append(info)
 
-    if not matches:
-        return None
+    # --- Priorité 1 : adresse postale trouvée ---
+    if matches_loc:
+        seen: set[str] = set()
+        unique: list[dict] = []
+        for info in matches_loc:
+            nom = info.get("nom", entreprise)
+            if nom not in seen:
+                seen.add(nom)
+                unique.append(info)
 
-    # Dédoublonne par nom
-    seen: set[str] = set()
-    unique: list[dict] = []
-    for info in matches:
-        nom = info.get("nom", entreprise)
-        if nom not in seen:
-            seen.add(nom)
-            unique.append(info)
+        if len(unique) == 1:
+            info = unique[0]
+            parts_msg: list[str] = []
+            siege = info.get("siege") or info.get("siège") or info.get("ville")
+            if siege:
+                parts_msg.append(f"son siège est à **{siege}**")
+            if info.get("adresse"):
+                parts_msg.append(f"adresse : {info['adresse']}")
+            if info.get("pays") or info.get("country"):
+                parts_msg.append(f"pays : {info.get('pays') or info.get('country')}")
+            if parts_msg:
+                return f"Pour **{info.get('nom', entreprise)}**, {', '.join(parts_msg)}."
+            return f"J'ai trouvé **{info.get('nom', entreprise)}** dans le vault, mais sans détail de localisation."
 
-    if len(unique) == 1:
-        info = unique[0]
+        lines = [f"J'ai trouvé **{len(unique)}** entreprises correspondant à **{entreprise}** :", ""]
+        for info in unique:
+            nom = info.get("nom", entreprise)
+            siege = info.get("siege") or info.get("siège") or info.get("ville")
+            line = f"- **{nom}**"
+            if siege:
+                line += f" — siège à {siege}"
+            lines.append(line)
+        return "\n".join(lines)
+
+    # --- Priorité 2 : contacts trouvés (emails, téléphones) sans adresse postale ---
+    if contact_emails or contact_phones:
         parts_msg: list[str] = []
-        siege = info.get("siege") or info.get("siège") or info.get("ville")
-        if siege:
-            parts_msg.append(f"son siège est à **{siege}**")
-        if info.get("adresse"):
-            parts_msg.append(f"adresse : {info['adresse']}")
-        if info.get("pays") or info.get("country"):
-            parts_msg.append(f"pays : {info.get('pays') or info.get('country')}")
-        if parts_msg:
-            return f"Pour **{info.get('nom', entreprise)}**, {', '.join(parts_msg)}."
-        return f"J'ai trouvé **{info.get('nom', entreprise)}** dans le vault, mais sans détail de localisation."
+        if contact_emails:
+            parts_msg.append(f"emails : {', '.join(sorted(contact_emails)[:3])}")
+        if contact_phones:
+            parts_msg.append(f"téléphones : {', '.join(sorted(contact_phones)[:2])}")
+        if contact_names:
+            parts_msg.append(f"contacts : {', '.join(sorted(contact_names)[:2])}")
+        return (
+            f"Je n'ai pas l'adresse postale du siège de **{entreprise}** dans nos données, "
+            f"mais j'ai trouvé des coordonnées dans les correspondances : {', '.join(parts_msg)}."
+        )
 
-    # Plusieurs entreprises trouvées
-    lines = [f"J'ai trouvé **{len(unique)}** entreprises correspondant à **{entreprise}** :", ""]
-    for info in unique:
-        nom = info.get("nom", entreprise)
-        siege = info.get("siege") or info.get("siège") or info.get("ville")
-        line = f"- **{nom}**"
-        if siege:
-            line += f" — siège à {siege}"
-        lines.append(line)
-    return "\n".join(lines)
+    return None
 
 
 def _extract_identity_answer(vault_notes: list[VaultNote], question: str) -> str | None:

@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.cerveau_client import VaultNote
-from app.charlie import _extract_dossier_id, _is_vault_relevant, ask_charlie
+from app.charlie import _extract_dossier_id, _extract_entreprise_name, _extract_entreprise_info, _is_vault_relevant, ask_charlie
 
 
 def test_extract_dossier_id_from_dossier_colon():
@@ -121,3 +121,71 @@ async def test_ask_charlie_passes_dossier_id_to_vault():
     mock_vault.assert_awaited_once()
     call_kwargs = mock_vault.await_args.kwargs
     assert call_kwargs["dossier_id"] == "ADF"
+
+
+# ── Tests _extract_entreprise_name ──
+
+def test_extract_entreprise_name_with_accent():
+    assert _extract_entreprise_name("où se trouve le siège de ADF Group ?") == "ADF Group"
+
+
+def test_extract_entreprise_name_without_accent():
+    assert _extract_entreprise_name("ou se trouve le siege de ADF Group ?") == "ADF Group"
+
+
+def test_extract_entreprise_name_acronym():
+    assert _extract_entreprise_name("Quelle est l'adresse de BPost ?") == "BPost"
+
+
+def test_extract_entreprise_name_no_keyword():
+    assert _extract_entreprise_name("Combien de mails aujourd'hui ?") is None
+
+
+# ── Tests _extract_entreprise_info ──
+
+def test_extract_entreprise_info_yaml_frontmatter():
+    notes = [
+        VaultNote(path="fiches/adf.md", content="---\nnom: ADF Group\nsiege: Bruxelles\n---\n# ADF\n")
+    ]
+    result = _extract_entreprise_info(notes, "ADF Group")
+    assert result is not None
+    assert "Bruxelles" in result
+
+
+def test_extract_entreprise_info_markdown_inline():
+    notes = [
+        VaultNote(path="fiches/adf.md", content="# ADF Group\n**Siège** : Waterloo\n**Adresse** : Chaussée Bara 213")
+    ]
+    result = _extract_entreprise_info(notes, "ADF Group")
+    assert result is not None
+    assert "Waterloo" in result
+
+
+def test_extract_entreprise_info_ignores_daniel_signature():
+    notes = [
+        VaultNote(
+            path="emails/adf.md",
+            content="Correspondance ADF Group\nSiège Social : Chaussée Bara 213, 1410 Waterloo\nDétectiveBelgique — Daniel Hurchon — 0779.433.503",
+        )
+    ]
+    result = _extract_entreprise_info(notes, "ADF Group")
+    assert result is None  # La signature de Daniel doit être ignorée
+
+
+def test_extract_entreprise_info_fallback_emails():
+    notes = [
+        VaultNote(
+            path="emails/adf.md",
+            content="Mail de contact ADF Group\nDe : john.doe@groupeadf.com\nTél : +32 2 123 45 67\nM. John Doe",
+        )
+    ]
+    result = _extract_entreprise_info(notes, "ADF Group")
+    assert result is not None
+    assert "groupeadf.com" in result
+    assert "john.doe" in result
+
+
+def test_extract_entreprise_info_no_match():
+    notes = [VaultNote(path="fiches/xyz.md", content="# XYZ\nSiège : Namur")]
+    result = _extract_entreprise_info(notes, "ADF Group")
+    assert result is None

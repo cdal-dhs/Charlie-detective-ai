@@ -6,6 +6,20 @@
 
 ---
 
+## [1.16.11] — 2026-05-25
+
+### Corrigé
+- **Bypass entreprise — accent-insensitive + extraction emails/téléphones** : le bypass d'extraction directe d'infos entreprise ne se déclenchait pas sur les questions sans accent (ex: "ou se trouve le siege" au lieu de "où se trouve le siège").
+  - Ligne 989 (`ask_charlie`) : remplacement de `question.lower()` par `_normalize(question)` pour la détection des mots-clés, aligné avec `_extract_entreprise_name()` qui utilise déjà `_normalize()`.
+- **`_extract_entreprise_info()` — parsing élargi aux correspondances emails** : Cerveau2 ne contient souvent pas de fiche structurée YAML pour une entreprise, mais uniquement des emails (type: correspondance) avec signatures, domaines, coordonnées.
+  - Ajout extraction d'emails (`@groupeadf.com`, etc.), numéros de téléphone, et noms de contact depuis le texte brut des notes.
+  - Ajout garde anti-signature Daniel : ignore les blocs contenant "DétectiveBelgique", "Daniel Hurchon", "0779.433.503", "Chaussée Bara" pour éviter de retourner l'adresse de Daniel comme siège de l'entreprise.
+  - Fallback intelligent : si aucune adresse postale n'est trouvée mais des emails/téléphones sont présents, Charlie répond avec les coordonnées de contact extraites (ex: "Je n'ai pas l'adresse postale du siège de **ADF Group**, mais j'ai trouvé des coordonnées dans les correspondances : emails : john.doe@groupeadf.com, téléphones : +32 2 123 45 67, contacts : M. John Doe.").
+  - Patterns d'adresse postale élargis : "Siège Social :", "- Siège :", "situé au/a/en/à ...".
+- **Tests unitaires** : ajout de 9 tests dans `tests/test_charlie_vault.py` couvrant `_extract_entreprise_name` (avec/sans accents, acronymes, mots-clés manquants) et `_extract_entreprise_info` (YAML, markdown inline, signature Daniel ignorée, fallback emails, no-match).
+
+---
+
 ## [1.16.10] — 2026-05-25
 
 ### Corrigé
