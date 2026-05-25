@@ -4,6 +4,15 @@
 
 ---
 
+## [1.16.2] — 2026-05-25
+
+### Corrigé
+- **Brouillon IMAP — message original manquant** : le brouillon déposé dans les Drafts de Daniel ne contenait que la réponse proposée par Charlie, pas le message original du client. Daniel devait aller dans le cockpit pour relire la demande.
+  - `_build_draft_body()` dans `app/delivery/imap_draft.py` inclut désormais le **message original complet** (expéditeur, sujet, corps) suivi de la proposition de réponse.
+- **Cockpit — body tronqué** : suppression de `max-h-80` sur le bloc "Contenu de l'email original" dans `conversation.html` pour afficher le body complet sans scroll caché.
+
+---
+
 ## [1.16.1] — 2026-05-25
 
 ### Modifié

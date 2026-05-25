@@ -79,6 +79,16 @@ def _build_draft_body(
     if mail_id and base_url:
         lines.append(f"Dossier cockpit : {base_url.rstrip('/')}/app/conversation/{mail_id}")
     lines.append("────────────────────────────────────────")
+    lines.append("")
+    lines.append("=== MESSAGE ORIGINAL DU CLIENT ===")
+    lines.append(f"De : {incoming.sender}")
+    lines.append(f"Sujet : {incoming.subject}")
+    lines.append("")
+    lines.append(incoming.body)
+    lines.append("")
+    lines.append("────────────────────────────────────────")
+    lines.append("=== PROPOSITION DE REPONSE ===")
+    lines.append("")
     lines.append(gen.draft)
     return "\n".join(lines)
 
