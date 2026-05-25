@@ -6,6 +6,16 @@
 
 ---
 
+## [1.16.7] — 2026-05-25
+
+### Corrigé
+- **Cerveau2 — garde anti-faux-négatif** : le LLM interne de Cerveau2 peut parfois répondre "je ne trouve pas" même quand les notes contiennent la réponse (comportement non déterministe du LLM distant).
+  - Ajout de `_BAD_VAULT` dans `app/charlie.py` : liste de patterns détectant les réponses vides/negatives de Cerveau2 ("je ne trouve pas", "pas trouvé", "aucune information", etc.).
+  - Si Cerveau2 retourne une réponse "bad", Charlie **ne bypass pas** et laisse son propre LLM (DeepSeek V4 Pro) travailler avec les notes brutes comme contexte.
+  - Log dédié : `charlie.vault_answer_bad` pour tracker les faux-négatifs de Cerveau2.
+
+---
+
 ## [1.16.6] — 2026-05-25
 
 ### Corrigé

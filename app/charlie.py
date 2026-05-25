@@ -966,9 +966,15 @@ async def ask_charlie(
             vault_notes=vault_notes,
         )
 
-    # ── 6. Bypass LLM si Cerveau2 a déjà répondu (context_only=False) ──
-    if vault_answer and not is_count_request:
-        # Cerveau2 a répondu en direct — on enrichit éventuellement avec les emails SQL/archives
+    # ── 6. Bypass LLM si Cerveau2 a déjà répondu de manière utile ──
+    _BAD_VAULT = (
+        "je ne trouve pas", "pas trouvé", "aucune information", "je ne trouve",
+        "pas d'information", "aucune donnée", "aucun résultat",
+        "ne trouve pas d'information", "pas explicitement identifié",
+    )
+    vault_has_bad = vault_answer and any(p in vault_answer.lower() for p in _BAD_VAULT)
+    if vault_answer and not is_count_request and not vault_has_bad:
+        # Cerveau2 a répondu en direct et de manière utile
         enriched = vault_answer.strip()
         if rows or archive_rows:
             enriched += "\n\n_(Sources complémentaires : "
@@ -988,6 +994,8 @@ async def ask_charlie(
             sql_error=None,
             vault_notes=vault_notes,
         )
+    if vault_has_bad:
+        log.info("charlie.vault_answer_bad", question=question[:60], answer_preview=vault_answer[:120])
 
     # ── 7. Appel LLM final pour les questions spécifiques ──
     if is_list_request:
