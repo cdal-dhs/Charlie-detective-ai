@@ -4,6 +4,18 @@
 
 ---
 
+## [1.16.1] — 2026-05-25
+
+### Modifié
+- **Workflow V2a — livraison double** : les brouillons sont désormais livrés sur **DEUX canaux en parallèle** (au lieu d'un fallback) :
+  1. **Draft IMAP** dans la boîte source : sujet `PROPOSITION REPONSE : [sujet original]`
+  2. **Email Resend** à `cdal@digitalhs.biz` : sujet `PROPOSITION REPOSNE DETECTIVE - {mail_id}`
+- `app/workers/imap_poller.py` : `append_draft()` et `notify_draft()` appelés séparément, pas de fallback mutuel.
+- `app/delivery/imap_draft.py` : sujet du brouillon IMAP simplifié (`PROPOSITION REPONSE` au lieu de `DEMANDE D'Approbation...`).
+- `app/delivery/resend_notifier.py` : sujet Resend réécrit pour CDAL (`PROPOSITION REPOSNE DETECTIVE - {mail_id}`).
+
+---
+
 ## [1.16.0] — 2026-05-25
 
 ### Ajouté

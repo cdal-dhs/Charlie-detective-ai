@@ -843,10 +843,8 @@ async def _process_single_mail(
             received_at=received_at,
             message_id=message_id,
         )
-        draft_ok = await append_draft(incoming, mailbox, gen, mail_id=mail_id)
-        if not draft_ok:
-            # Fallback Resend si APPEND IMAP échoue
-            await notify_draft(incoming, mailbox, gen, mail_id=mail_id)
+        await append_draft(incoming, mailbox, gen, mail_id=mail_id)
+        await notify_draft(incoming, mailbox, gen, mail_id=mail_id)
         if verified_draft:
             await notify_slack_draft(
                 draft_id=mail_id,

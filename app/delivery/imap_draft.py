@@ -102,9 +102,7 @@ async def append_draft(
     msg = EmailMessage()
     msg["From"] = mailbox.user
     msg["To"] = incoming.sender
-    msg["Subject"] = (
-        f"DEMANDE D'Approbation - Reponse Demande Client : {incoming.subject}"
-    )
+    msg["Subject"] = f"PROPOSITION REPONSE : {incoming.subject}"
     msg.set_content(body_text)
     message_bytes = msg.as_bytes()
 

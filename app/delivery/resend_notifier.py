@@ -98,7 +98,7 @@ async def notify_draft(
     payload = {
         "from": settings.resend_from,
         "to": [settings.draft_recipient],
-        "subject": f"TRIAL DETECTIVE AI : {incoming.subject}",
+        "subject": f"PROPOSITION REPOSNE DETECTIVE - {mail_id}",
         "html": _format_html(incoming, mailbox, gen, mail_id, base_url),
         "headers": {
             "X-Detective-Agent-Mailbox": mailbox.name,
