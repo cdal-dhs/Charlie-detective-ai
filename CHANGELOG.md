@@ -4,6 +4,16 @@
 
 ---
 
+---
+
+## [1.16.4] — 2026-05-25
+
+### Ajouté
+- **Whitelist phishing — FALCO comptabilité** : ajout de `mailer.falco-app.be` dans `_KNOWN_LEGIT_DOMAINS` (`app/pipeline/prefilter.py`) pour éviter que les emails du logiciel de comptabilité FALCO soient classés comme `phishing` ou `spam`.
+  - Nouvelle fonction `_is_known_legit_sender()` utilisée comme garde anti-faux-positif dans `is_phishing()` (exception 3).
+
+---
+
 ## [1.16.3] — 2026-05-25
 
 ### Corrigé

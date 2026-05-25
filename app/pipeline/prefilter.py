@@ -186,6 +186,16 @@ def _is_own_domain(sender: str) -> bool:
     return any(d in sender.lower() for d in own_domains)
 
 
+# Domaines d'outils métiers connus (compta, banque, logiciels internes)
+_KNOWN_LEGIT_DOMAINS = (
+    "mailer.falco-app.be",   # Logiciel de comptabilité FALCO
+)
+
+
+def _is_known_legit_sender(sender: str) -> bool:
+    return any(d in sender.lower() for d in _KNOWN_LEGIT_DOMAINS)
+
+
 def is_phishing(msg: Message) -> bool:
     subject = (msg.get("Subject", "") or "").lower()
     body_snippet = _get_body_snippet(msg)
@@ -197,6 +207,10 @@ def is_phishing(msg: Message) -> bool:
 
     # Exception 2 : mails auto-générés par le propre domaine
     if _is_own_domain(sender):
+        return False
+
+    # Exception 3 : outils métiers connus (FALCO compta, etc.)
+    if _is_known_legit_sender(sender):
         return False
 
     # Mots-clés forts dans sujet ou corps
