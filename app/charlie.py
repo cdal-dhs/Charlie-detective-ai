@@ -963,6 +963,45 @@ async def ask_charlie(
             max_links=5,
         )
 
+    # ── 3.6 COURT-CIRCUIT CORRECTIONS — si une correction Cerveau2 ou locale
+    #    match la question, on retourne DIRECTEMENT la corrected_response sans LLM.
+    #    C'est la règle absolue : la correction de Daniel prime sur tout.
+    def _norm_q(q: str) -> str:
+        return "".join(c for c in normalize("NFD", q.lower()) if c.isalnum())
+
+    asked_norm = _norm_q(question)
+
+    # 1. Corrections locales (DB Charlie)
+    for c in (correction_notes or []):
+        if c.question and _norm_q(c.question) == asked_norm:
+            log.info("charlie.correction_shortcut.local", question=question[:60])
+            return CharlieResult(
+                answer=c.response,
+                sql="",
+                rows=[],
+                vault_notes=[],
+                correction_notes=correction_notes,
+            )
+
+    # 2. Corrections Cerveau2
+    for vc in (vault_correction_notes or []):
+        vc_question = ""
+        vc_corrected = ""
+        for line in vc.content.splitlines():
+            if line.strip().startswith("question:"):
+                vc_question = line.split(":", 1)[1].strip().strip('"')
+            if line.strip().startswith("corrected_response:"):
+                vc_corrected = line.split(":", 1)[1].strip().strip('"')
+        if vc_question and _norm_q(vc_question) == asked_norm and vc_corrected:
+            log.info("charlie.correction_shortcut.vault", question=question[:60], path=vc.path)
+            return CharlieResult(
+                answer=vc_corrected,
+                sql="",
+                rows=[],
+                vault_notes=vault_notes,
+                correction_notes=vault_correction_notes,
+            )
+
     # ── 4. Construction du contexte ──
     context_parts: list[str] = []
 
