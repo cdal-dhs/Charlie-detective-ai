@@ -13,6 +13,7 @@ from fastapi.templating import Jinja2Templates
 
 from app import __version__
 from app.charlie import BOX_ABBR, ask_charlie
+from app.cerveau_client import push_correction
 from app.charlie_memory import save_feedback
 from app.config import get_settings
 from app.pipeline.generator import generate_draft
@@ -749,6 +750,22 @@ async def charlie_feedback(
         return HTMLResponse(
             '<span class="text-xs text-red-400">Erreur lors de l\'enregistrement.</span>'
         )
+
+    # Pousse la correction vers Cerveau2 (fire-and-forget, dégradation silencieuse)
+    corrected = corrected_response if corrected_response else response
+    if corrected:
+        try:
+            await push_correction(
+                question=question,
+                corrected_response=corrected,
+                original_response=response,
+                dossier_id=dossier_id,
+                tags=["feedback", feedback],
+                base_url=settings.cerveau2_base_url,
+                api_secret=settings.cerveau2_api_secret,
+            )
+        except Exception as e:
+            log.warning("charlie.cerveau2_push_failed", error=str(e), dossier_id=dossier_id)
 
     ip = request.client.host if request.client else None
     await audit_log(

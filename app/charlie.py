@@ -11,7 +11,13 @@ from unicodedata import normalize
 import aiosqlite
 import structlog
 
-from app.cerveau_client import VaultNote, query_dossiers, query_vault
+from app.cerveau_client import (
+    VaultNote,
+    get_vault_note,
+    query_corrections_vault,
+    query_dossiers,
+    query_vault,
+)
 from app.charlie_memory import (
     is_correction,
     is_memory_query,
@@ -701,6 +707,114 @@ def _general_response(question: str) -> str | None:
     return None
 
 
+async def _resolve_links(
+    notes: list[VaultNote],
+    base_url: str,
+    api_secret: str,
+    max_links: int = 5,
+) -> list[VaultNote]:
+    """Résout les liens [[slug]] trouvés dans les notes pour enrichir le contexte.
+
+    Scanne le contenu et le frontmatter des notes, déduplique les slugs,
+    récupère les notes liées depuis Cerveau2 et les retourne.
+    """
+    if not notes or not base_url or not api_secret:
+        return []
+
+    link_pattern = re.compile(r"\[\[([^\]\n]+?)\]\]")
+    seen_slugs: set[str] = set()
+    slugs_to_fetch: list[str] = []
+    existing_paths = {n.path for n in notes}
+
+    def _slug_to_paths(slug: str) -> list[str]:
+        slug = slug.strip().rstrip("/")
+        if "/" in slug and slug.endswith(".md"):
+            return [slug]
+        if "/" in slug:
+            return [f"{slug}.md", slug]
+        return [
+            f"04_entities/societes/{slug}.md",
+            f"04_entities/personnes/{slug}.md",
+            f"04_entities/lieux/{slug}.md",
+            f"02_dossiers/{slug}/_index.md",
+            f"03_doctrine/{slug}.md",
+            f"{slug}.md",
+        ]
+
+    def _extract_frontmatter(text: str) -> dict:
+        if not text.startswith("---"):
+            return {}
+        parts = text.split("---", 2)
+        if len(parts) < 3:
+            return {}
+        fm_text = parts[1].strip()
+        fm: dict = {}
+        for line in fm_text.splitlines():
+            if ":" in line:
+                k, v = line.split(":", 1)
+                k = k.strip()
+                v = v.strip().strip('"').strip("'")
+                if v.startswith("[") and v.endswith("]"):
+                    try:
+                        import json
+
+                        fm[k] = json.loads(v.replace("'", '"'))
+                    except Exception:
+                        fm[k] = [x.strip().strip('"').strip("'") for x in v[1:-1].split(",")]
+                else:
+                    fm[k] = v
+        return fm
+
+    for note in notes:
+        for match in link_pattern.finditer(note.content):
+            slug = match.group(1).strip()
+            if slug and slug not in seen_slugs:
+                seen_slugs.add(slug)
+                for cp in _slug_to_paths(slug):
+                    if cp not in existing_paths:
+                        slugs_to_fetch.append(cp)
+                        break
+
+        fm = _extract_frontmatter(note.content)
+        for key in ("employeur", "adresse_principale", "related", "dossier", "lieu", "personne", "entities"):
+            val = fm.get(key, "")
+            if isinstance(val, str):
+                for match in link_pattern.finditer(val):
+                    slug = match.group(1).strip()
+                    if slug and slug not in seen_slugs:
+                        seen_slugs.add(slug)
+                        for cp in _slug_to_paths(slug):
+                            if cp not in existing_paths:
+                                slugs_to_fetch.append(cp)
+                                break
+            elif isinstance(val, list):
+                for item in val:
+                    if isinstance(item, str):
+                        for match in link_pattern.finditer(item):
+                            slug = match.group(1).strip()
+                            if slug and slug not in seen_slugs:
+                                seen_slugs.add(slug)
+                                for cp in _slug_to_paths(slug):
+                                    if cp not in existing_paths:
+                                        slugs_to_fetch.append(cp)
+                                        break
+
+    if not slugs_to_fetch:
+        return []
+
+    unique_slugs = list(dict.fromkeys(slugs_to_fetch))[:max_links]
+    coros = [get_vault_note(p, base_url, api_secret) for p in unique_slugs]
+    linked = await asyncio.gather(*coros, return_exceptions=True)
+
+    results: list[VaultNote] = []
+    for note_or_err in linked:
+        if isinstance(note_or_err, VaultNote):
+            results.append(note_or_err)
+
+    log.info("charlie.links_resolved", original=len(notes), linked=len(results), slugs=unique_slugs)
+    return results
+
+
 async def ask_charlie(
     question: str,
     db_path: Path,
@@ -788,6 +902,15 @@ async def ask_charlie(
             return await query_corrections(db_path, dossier_id=dossier_id, limit=3)
         return []
 
+    async def _vault_correction_task() -> list[VaultNote]:
+        return await query_corrections_vault(
+            question=question,
+            base_url=settings.cerveau2_base_url,
+            api_secret=settings.cerveau2_api_secret,
+            dossier_id=dossier_id,
+            limit=3,
+        )
+
     async def _archive_task() -> list[dict]:
         lim = 500 if is_count_request else 50
         if dossier_id:
@@ -806,18 +929,50 @@ async def ask_charlie(
             since=since,
         )
 
-    rows, vault_notes, memory_notes, correction_notes, archive_rows, dossier_list = await asyncio.gather(
-        _sql_task(), _vault_task(), _memory_task(), _correction_task(), _archive_task(), _dossiers_task(),
+    (
+        rows,
+        vault_notes,
+        memory_notes,
+        correction_notes,
+        vault_correction_notes,
+        archive_rows,
+        dossier_list,
+    ) = await asyncio.gather(
+        _sql_task(),
+        _vault_task(),
+        _memory_task(),
+        _correction_task(),
+        _vault_correction_task(),
+        _archive_task(),
+        _dossiers_task(),
     )
+
+    # ── 3.5 Résolution des liens (nuage de liaison) ──
+    linked_notes: list[VaultNote] = []
+    if vault_notes:
+        linked_notes = await _resolve_links(
+            vault_notes,
+            settings.cerveau2_base_url,
+            settings.cerveau2_api_secret,
+            max_links=5,
+        )
 
     # ── 4. Construction du contexte ──
     context_parts: list[str] = []
 
     # Corrections (priorité absolue)
     if correction_notes:
-        context_parts.append("CORRECTIONS UTILISATEUR (priorité absolue) :")
+        context_parts.append("CORRECTIONS UTILISATEUR LOCALES (priorité absolue) :")
         for c in correction_notes[:3]:
             context_parts.append(f"- [{c.created_at}] Q: {c.question} | R: {c.response}")
+        context_parts.append("")
+
+    if vault_correction_notes:
+        context_parts.append("CORRECTIONS CERVEAU2 (priorité absolue) :")
+        for vc in vault_correction_notes[:3]:
+            fname = vc.path.split("/")[-1].replace(".md", "")
+            context_parts.append(f"[{fname}]\n{vc.content[:2000]}")
+            context_parts.append("")
         context_parts.append("")
 
     # Vault — source principale (SECOND CERVEAU)
@@ -826,6 +981,15 @@ async def ask_charlie(
         for note in vault_notes:
             fname = note.path.split("/")[-1].replace(".md", "")
             context_parts.append(f"[{fname}]\n{note.content[:2000]}")
+            context_parts.append("")
+        context_parts.append("")
+
+    # Nuage de liaison — documents liés par [[wikilinks]]
+    if linked_notes:
+        context_parts.append(f"NUAGE DE LIAISON — documents liés ({len(linked_notes)} lien(s)) :")
+        for note in linked_notes:
+            fname = note.path.split("/")[-1].replace(".md", "")
+            context_parts.append(f"[LIEN] [{fname}]\n{note.content[:1500]}")
             context_parts.append("")
         context_parts.append("")
 
@@ -1224,7 +1388,7 @@ def _extract_entreprise_name(question: str) -> str | None:
     - "entreprise XXXX"
     """
     q_norm = _normalize(question)
-    keywords = ("siege", "adresse", "localisation", "ou se trouve", "domiciliee", "domicilie", "entreprise")
+    keywords = ("siege", "adresse", "localisation", "ou se trouve", "domiciliee", "domicilie", "entreprise", "situe", "situee", "situer", "ou se situe")
     if not any(kw in q_norm for kw in keywords):
         return None
 
@@ -1241,7 +1405,7 @@ def _extract_entreprise_name(question: str) -> str | None:
     # Fallback : acronyme en majuscules isolé (3+ lettres)
     for m in re.finditer(r"\b([A-Z]{3,})\b", question):
         code = m.group(1)
-        if code not in ("SQL", "OK", "HTTP", "API", "URL", "HTML", "XML", "JSON", "CDAL", "DPDH", "AI", "VPS", "SMTP", "IMAP", "DNS", "CEO", "CFO", "COO", "SARL", "SA", "SCRL", "BVBA", "SPRL"):
+        if code not in ("SQL", "OK", "HTTP", "API", "URL", "HTML", "XML", "JSON", "DPDH", "AI", "VPS", "SMTP", "IMAP", "DNS", "CEO", "CFO", "COO", "SARL", "SA", "SCRL", "BVBA", "SPRL"):
             return code
     return None
 
@@ -1333,7 +1497,7 @@ def _extract_entreprise_info(vault_notes: list[VaultNote], entreprise: str) -> s
             r"Siège\s*Social\s*[:=]\s*([^\n]+)",
             r"-?\s*Siège\s*[:=]\s*([^\n]+)",
             r"Adresse\s*[:=]\s*([^\n]+)",
-            r"(?:situé|domicilié|domiciliée)\s+(?:au|a|en|à)\s+([^\n]{3,60})",
+            r"(?:situé|domicilié|domiciliée|résidant|réside)\s+(?:au|a|en|à)\s+([^\n]{3,60})",
         ):
             m = re.search(pattern, content, re.IGNORECASE)
             if m:

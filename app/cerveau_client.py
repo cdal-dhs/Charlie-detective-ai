@@ -71,6 +71,32 @@ async def query_vault(
         return [], None
 
 
+async def get_vault_note(
+    path: str,
+    base_url: str,
+    api_secret: str,
+) -> VaultNote | None:
+    """Récupère une note du vault par son chemin relatif.
+
+    Retourne ``None`` si le service est indisponible ou la note n'existe pas.
+    """
+    if not base_url or not api_secret:
+        return None
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{base_url.rstrip('/')}/notes/{path}",
+                headers={"Authorization": f"Bearer {api_secret}"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        return VaultNote(path=data["path"], content=data["content"])
+    except Exception as e:
+        log.warning("cerveau.get_note_failed", path=path, error=str(e))
+        return None
+
+
 async def feed_correspondance(
     *,
     message_id: str,
@@ -267,6 +293,93 @@ async def query_dossiers(
             return result
     except Exception as e:
         log.warning("cerveau.query_dossiers_failed", error=str(e))
+        return []
+
+
+async def push_correction(
+    *,
+    question: str,
+    corrected_response: str,
+    original_response: str = "",
+    dossier_id: str | None = None,
+    tags: list[str] | None = None,
+    base_url: str,
+    api_secret: str,
+) -> dict | None:
+    """Envoie une correction utilisateur à Cerveau2 POST /corrections.
+
+    Retourne {"status": "ok", "path": ...} ou None si indisponible.
+    """
+    if not base_url or not api_secret:
+        return None
+
+    payload = {
+        "question": question,
+        "corrected_response": corrected_response,
+        "original_response": original_response,
+        "dossier_id": dossier_id,
+        "tags": tags or [],
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{base_url.rstrip('/')}/corrections",
+                json=payload,
+                headers={"Authorization": f"Bearer {api_secret}"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            log.info("cerveau.correction_pushed", path=data.get("path"), dossier=dossier_id)
+            return data
+    except Exception as e:
+        log.warning("cerveau.correction_push_failed", error=str(e), dossier=dossier_id)
+        return None
+
+
+async def query_corrections_vault(
+    question: str,
+    base_url: str,
+    api_secret: str,
+    dossier_id: str | None = None,
+    limit: int = 5,
+) -> list[VaultNote]:
+    """Recherche les corrections enregistrées dans Cerveau2 GET /corrections.
+
+    Retourne une liste de VaultNote compatibles avec le reste du pipeline.
+    """
+    if not base_url or not api_secret:
+        return []
+
+    params: dict = {"q": question, "limit": limit}
+    if dossier_id:
+        params["dossier_id"] = dossier_id
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{base_url.rstrip('/')}/corrections",
+                params=params,
+                headers={"Authorization": f"Bearer {api_secret}"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            items = data.get("items", [])
+            log.info("cerveau.corrections_queried", q=question[:60], hits=len(items))
+            return [
+                VaultNote(
+                    path=item["path"],
+                    content=(
+                        f"Question : {item['question']}\n\n"
+                        f"Réponse corrigée : {item['corrected_response']}\n\n"
+                        f"Réponse originale : {item['original_response']}\n\n"
+                        f"---\n{item['content']}"
+                    ),
+                )
+                for item in items
+            ]
+    except Exception as e:
+        log.warning("cerveau.corrections_query_failed", error=str(e))
         return []
 
 
