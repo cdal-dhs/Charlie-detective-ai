@@ -904,9 +904,8 @@ async def ask_charlie(
         return await query_memory(db_path, question=question, dossier_id=dossier_id, limit=3)
 
     async def _correction_task() -> list:
-        if dossier_id:
-            return await query_corrections(db_path, dossier_id=dossier_id, limit=3)
-        return []
+        # Corrections locales — JAMAIS filtrées par dossier (globales)
+        return await query_corrections(db_path, limit=3)
 
     async def _vault_correction_task() -> list[VaultNote]:
         # Pas de filtre dossier_id : les corrections sont globales
@@ -971,9 +970,26 @@ async def ask_charlie(
 
     asked_norm = _norm_q(question)
 
+    def _q_match(a: str, b: str) -> bool:
+        """Match fuzzy entre deux questions normalisées."""
+        a_norm = _norm_q(a)
+        b_norm = _norm_q(b)
+        if a_norm == b_norm:
+            return True
+        # Sous-chaîne si la question est assez longue (>= 15 chars)
+        if len(a_norm) >= 15 and (a_norm in b_norm or b_norm in a_norm):
+            return True
+        # Similarité par mots : au moins 3 mots en commun ET ratio >= 0.7
+        a_words = {w for w in a_norm.split() if len(w) >= 3}
+        b_words = {w for w in b_norm.split() if len(w) >= 3}
+        common = a_words & b_words
+        if len(common) >= 3 and len(common) / max(len(a_words), len(b_words)) >= 0.7:
+            return True
+        return False
+
     # 1. Corrections locales (DB Charlie)
     for c in (correction_notes or []):
-        if c.question and _norm_q(c.question) == asked_norm:
+        if c.question and _q_match(c.question, question):
             log.info("charlie.correction_shortcut.local", question=question[:60])
             return CharlieResult(
                 answer=c.response,
@@ -992,7 +1008,7 @@ async def ask_charlie(
                 vc_question = line.split(":", 1)[1].strip().strip('"')
             if line.strip().startswith("corrected_response:"):
                 vc_corrected = line.split(":", 1)[1].strip().strip('"')
-        if vc_question and _norm_q(vc_question) == asked_norm and vc_corrected:
+        if vc_question and _q_match(vc_question, question) and vc_corrected:
             log.info("charlie.correction_shortcut.vault", question=question[:60], path=vc.path)
             return CharlieResult(
                 answer=vc_corrected,
