@@ -713,6 +713,32 @@ def _general_response(question: str) -> str | None:
     return None
 
 
+def _extract_frontmatter(text: str) -> dict:
+    """Parse le frontmatter YAML d'un fichier Markdown."""
+    if not text.startswith("---"):
+        return {}
+    parts = text.split("---", 2)
+    if len(parts) < 3:
+        return {}
+    fm_text = parts[1].strip()
+    fm: dict = {}
+    for line in fm_text.splitlines():
+        if ":" in line:
+            k, v = line.split(":", 1)
+            k = k.strip()
+            v = v.strip().strip('"').strip("'")
+            if v.startswith("[") and v.endswith("]"):
+                try:
+                    import json
+
+                    fm[k] = json.loads(v.replace("'", '"'))
+                except Exception:
+                    fm[k] = [x.strip().strip('"').strip("'") for x in v[1:-1].split(",")]
+            else:
+                fm[k] = v
+    return fm
+
+
 async def _resolve_links(
     notes: list[VaultNote],
     base_url: str,
@@ -747,30 +773,6 @@ async def _resolve_links(
             f"{slug}.md",
         ]
 
-    def _extract_frontmatter(text: str) -> dict:
-        if not text.startswith("---"):
-            return {}
-        parts = text.split("---", 2)
-        if len(parts) < 3:
-            return {}
-        fm_text = parts[1].strip()
-        fm: dict = {}
-        for line in fm_text.splitlines():
-            if ":" in line:
-                k, v = line.split(":", 1)
-                k = k.strip()
-                v = v.strip().strip('"').strip("'")
-                if v.startswith("[") and v.endswith("]"):
-                    try:
-                        import json
-
-                        fm[k] = json.loads(v.replace("'", '"'))
-                    except Exception:
-                        fm[k] = [x.strip().strip('"').strip("'") for x in v[1:-1].split(",")]
-                else:
-                    fm[k] = v
-        return fm
-
     for note in notes:
         for match in link_pattern.finditer(note.content):
             slug = match.group(1).strip()
@@ -782,7 +784,12 @@ async def _resolve_links(
                         break
 
         fm = _extract_frontmatter(note.content)
-        for key in ("employeur", "adresse_principale", "related", "dossier", "lieu", "personne", "entities"):
+        for key in (
+            "employeur", "adresse_principale", "related", "dossier", "lieu", "personne", "entities",
+            "epouse", "mari", "conjoint", "compagne", "compagnon",
+            "fille", "fils", "enfant", "pere", "mere", "parent",
+            "soeur", "frere", "cousin", "cousine", "oncle", "tante",
+        ):
             val = fm.get(key, "")
             if isinstance(val, str):
                 for match in link_pattern.finditer(val):
@@ -889,11 +896,14 @@ async def ask_charlie(
     async def _vault_task() -> list:
         nonlocal vault_answer
         lim = 8 if (is_identity_request or is_list_request or is_dossier_list) else settings.cerveau2_limit
+        # Pour les questions identitaires, ne pas filtrer par dossier_id
+        # car les fiches personnes/entités ne sont pas liées à un dossier
+        vault_dossier_id = None if is_identity_request else dossier_id
         notes, ans = await query_vault(
             question=question,
             base_url=settings.cerveau2_base_url,
             api_secret=settings.cerveau2_api_secret,
-            dossier_id=dossier_id,
+            dossier_id=vault_dossier_id,
             limit=lim,
             context_only=False,
         )
@@ -961,6 +971,10 @@ async def ask_charlie(
             settings.cerveau2_api_secret,
             max_links=5,
         )
+    # Injecter les notes liées dans le pool principal pour que tous les bypass
+    # (identité, entreprise, ville) y aient accès sans modification.
+    if linked_notes:
+        vault_notes = vault_notes + linked_notes
 
     # ── 3.6 COURT-CIRCUIT CORRECTIONS — si une correction Cerveau2 ou locale
     #    match la question, on retourne DIRECTEMENT la corrected_response sans LLM.
@@ -1666,6 +1680,53 @@ def _extract_identity_answer(vault_notes: list[VaultNote], question: str) -> str
 
     if not relation:
         return None
+
+    # --- NOUVEAU : parser le frontmatter pour suivre les wikilinks relationnels ---
+    relation_keys = {
+        "épouse": {"epouse", "femme"}, "femme": {"epouse", "femme"},
+        "mari": {"mari", "conjoint", "compagnon"},
+        "conjoint": {"conjoint", "epouse", "mari", "compagne", "compagnon"},
+        "compagne": {"compagne", "epouse", "conjoint"}, "compagnon": {"compagnon", "mari", "conjoint"},
+        "fille": {"fille", "enfant"}, "fils": {"fils", "enfant"}, "enfant": {"enfant", "fille", "fils"},
+        "père": {"pere", "parent"}, "mère": {"mere", "parent"}, "parent": {"parent", "pere", "mere"},
+        "sœur": {"soeur"}, "frère": {"frere"},
+    }
+    expected_keys = relation_keys.get(relation, {relation.lower()})
+    link_pattern = re.compile(r"\[\[([^\]\n]+?)\]\]")
+
+    for note in vault_notes:
+        fm = _extract_frontmatter(note.content)
+        for key, val in fm.items():
+            if key.lower() not in expected_keys:
+                continue
+            # Extraire le(s) slug(s) du wikilink
+            slugs: list[str] = []
+            if isinstance(val, str):
+                for m in link_pattern.finditer(val):
+                    slugs.append(m.group(1).strip())
+            elif isinstance(val, list):
+                for item in val:
+                    if isinstance(item, str):
+                        for m in link_pattern.finditer(item):
+                            slugs.append(m.group(1).strip())
+            for slug in slugs:
+                # Chercher dans les notes (y compris liées) la fiche correspondante
+                for linked in vault_notes:
+                    if slug in linked.path or linked.path.endswith(f"{slug}.md"):
+                        # Extraire prenom + nom du frontmatter
+                        lfm = _extract_frontmatter(linked.content)
+                        prenom = lfm.get("prenom", "")
+                        nom = lfm.get("nom", "")
+                        if prenom or nom:
+                            full = f"{prenom} {nom}".strip()
+                            return f"La {relation} de {target_person or 'CDAL'} est **{full}**."
+                        # Fallback : titre H1
+                        hm = re.search(r"^#\s+(.+)$", linked.content, re.MULTILINE)
+                        if hm:
+                            return f"La {relation} de {target_person or 'CDAL'} est **{hm.group(1).strip()}**."
+                        # Fallback : nom de fichier
+                        fname = linked.path.split("/")[-1].replace(".md", "").replace("-", " ").title()
+                        return f"La {relation} de {target_person or 'CDAL'} est **{fname}**."
 
     # Concaténer tout le contenu des notes
     all_text = "\n".join(n.content for n in vault_notes)
