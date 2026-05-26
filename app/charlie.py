@@ -908,6 +908,50 @@ async def ask_charlie(
             context_only=False,
         )
         vault_answer = ans
+
+        # --- FALLBACK DIRECT : pour les questions identitaires, si la recherche
+        # sémantique ne remonte pas la fiche personne, on la demande directement
+        # par son chemin. Cela contourne les problèmes d'indexation sqlite-vec.
+        if is_identity_request and settings.cerveau2_base_url and settings.cerveau2_api_secret:
+            # Extraire le nom cible (ex: "CDAL", "Christophe", "Sarah")
+            q_words = [w for w in re.findall(r"[A-Za-zÀ-ÿ]+", question) if len(w) >= 3]
+            candidate_slugs: set[str] = set()
+            for w in q_words:
+                w_lower = w.lower()
+                # CDAL → christophe-dalla-valle (surnom connu)
+                if w_lower == "cdal":
+                    candidate_slugs.add("04_entities/personnes/christophe-dalla-valle.md")
+                    candidate_slugs.add("04_entities/personnes/sarah-dalla-valle.md")
+                # Christophe → christophe-dalla-valle
+                elif w_lower == "christophe":
+                    candidate_slugs.add("04_entities/personnes/christophe-dalla-valle.md")
+                # Sarah → sarah-dalla-valle
+                elif w_lower == "sarah":
+                    candidate_slugs.add("04_entities/personnes/sarah-dalla-valle.md")
+                # Daniel → daniel-hurchon
+                elif w_lower == "daniel":
+                    candidate_slugs.add("04_entities/personnes/daniel-hurchon.md")
+                # DigitalHS → digitalhs-llc
+                elif w_lower in ("digitalhs", "digital", "hs"):
+                    candidate_slugs.add("04_entities/societes/digitalhs-llc.md")
+                # Slug générique
+                else:
+                    slug = w_lower.replace(" ", "-")
+                    candidate_slugs.add(f"04_entities/personnes/{slug}.md")
+                    candidate_slugs.add(f"04_entities/societes/{slug}.md")
+
+            existing_paths = {n.path for n in notes}
+            coros = [
+                get_vault_note(p, settings.cerveau2_base_url, settings.cerveau2_api_secret)
+                for p in candidate_slugs if p not in existing_paths
+            ]
+            if coros:
+                fetched = await asyncio.gather(*coros, return_exceptions=True)
+                for item in fetched:
+                    if isinstance(item, VaultNote):
+                        notes.append(item)
+                        log.info("charlie.vault_direct_fetch", path=item.path)
+
         return notes
 
     async def _memory_task() -> list:
