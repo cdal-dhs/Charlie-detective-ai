@@ -91,7 +91,13 @@ RÉPONSE: <ta réponse>
    7. Quand Daniel demande le contenu, le détail ou un résumé d'un dossier,
    utilise la colonne `body` (contenu complet) dans ton SELECT, pas `body_preview`.
    Inclus aussi `ai_draft` si pertinent.
-8. **DEUX modes de recherche — ne les confonds pas :**
+8. **CORRECTIONS UTILISATEUR (RÈGLE ABSOLUE)** :
+   - Si le contexte contient une section "CORRECTIONS CERVEAU2" ou "CORRECTIONS LOCALES",
+     tu DOIS utiliser EXCLUSIVEMENT la `corrected_response` pour répondre.
+   - Ignore complètement l'`original_response` et toute autre source contradictoire.
+   - La correction prime sur TOUT : vault, SQL, mémoire, et ton propre raisonnement.
+   - Ne JAMAIS dire "je n'ai pas trouvé" si une correction est présente.
+9. **DEUX modes de recherche — ne les confonds pas :**
    - **Mode A : recherche par TYPE d'enquête** (filature, adultère, disparition,
      garde d'enfant, contrôle de résidence, harcèlement, etc.) :
      Utilise UNIQUEMENT `category = 'xxx'` exacte. Ne mets JAMAIS de LIKE OR
@@ -103,7 +109,7 @@ RÉPONSE: <ta réponse>
      Si le mot-clé est un nom de DOSSIER (ex: ADF), cherche AUSSI dans `sender`
      pour attraper les emails du domaine associé (ex: `@groupeadf.com`).
    Inclus `id` et `subject` dans le SELECT pour permettre des liens cliquables.
-9. **Questions de comptage (combien, nombre, total)** :
+10. **Questions de comptage (combien, nombre, total)** :
    - Utilise `SELECT COUNT(*) as total FROM mail_processed WHERE ...`
    - Inclus TOUJOURS la condition de date si Daniel la précise, avec `processed_at` (ISO) :
      Exemple : `processed_at >= '2026-05-20'` ou `processed_at >= '2026-01-01' AND processed_at < '2027-01-01'`
@@ -962,16 +968,27 @@ async def ask_charlie(
 
     # Corrections (priorité absolue)
     if correction_notes:
-        context_parts.append("CORRECTIONS UTILISATEUR LOCALES (priorité absolue) :")
+        context_parts.append("CORRECTIONS UTILISATEUR LOCALES (priorité absolue — utiliser EXCLUSIVEMENT) :")
         for c in correction_notes[:3]:
-            context_parts.append(f"- [{c.created_at}] Q: {c.question} | R: {c.response}")
+            context_parts.append(f"- Q: {c.question}\n  RÉPONSE CORRECTE: {c.response}")
         context_parts.append("")
 
     if vault_correction_notes:
-        context_parts.append("CORRECTIONS CERVEAU2 (priorité absolue) :")
+        context_parts.append("CORRECTIONS CERVEAU2 (priorité absolue — utiliser EXCLUSIVEMENT la corrected_response) :")
         for vc in vault_correction_notes[:3]:
             fname = vc.path.split("/")[-1].replace(".md", "")
-            context_parts.append(f"[{fname}]\n{vc.content[:2000]}")
+            # Extraire corrected_response du frontmatter pour ne pas noyer le LLM
+            corrected = ""
+            question = ""
+            for line in vc.content.splitlines():
+                if line.strip().startswith("corrected_response:"):
+                    corrected = line.split(":", 1)[1].strip().strip('"')
+                if line.strip().startswith("question:"):
+                    question = line.split(":", 1)[1].strip().strip('"')
+            if corrected:
+                context_parts.append(f"[{fname}] Question: {question}\nCORRECTED_RESPONSE: {corrected}")
+            else:
+                context_parts.append(f"[{fname}]\n{vc.content[:2000]}")
             context_parts.append("")
         context_parts.append("")
 
