@@ -909,11 +909,11 @@ async def ask_charlie(
         return []
 
     async def _vault_correction_task() -> list[VaultNote]:
+        # Pas de filtre dossier_id : les corrections sont globales
         return await query_corrections_vault(
             question=question,
             base_url=settings.cerveau2_base_url,
             api_secret=settings.cerveau2_api_secret,
-            dossier_id=dossier_id,
             limit=3,
         )
 
