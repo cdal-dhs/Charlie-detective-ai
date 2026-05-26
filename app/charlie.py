@@ -88,7 +88,10 @@ RÉPONSE: <ta réponse>
 7. Quand tu listes des emails, inclus TOUJOURS les colonnes `id` et `subject`
    dans ton SELECT (ainsi que les autres colonnes utiles).
    Cela permet de créer des liens cliquables vers la conversation.
-   7. Quand Daniel demande le contenu, le détail ou un résumé d'un dossier,
+   7b. Si Daniel demande des emails en attente, en pending ou urgent,
+   inclus aussi `status` et `priority` dans ton SELECT pour que je
+   puisse indiquer clairement le statut de chaque email.
+   7c. Quand Daniel demande le contenu, le détail ou un résumé d'un dossier,
    utilise la colonne `body` (contenu complet) dans ton SELECT, pas `body_preview`.
    Inclus aussi `ai_draft` si pertinent.
 8. **CORRECTIONS UTILISATEUR (RÈGLE ABSOLUE)** :
@@ -691,6 +694,47 @@ def _build_count_sql(question: str, dossier_id: str | None) -> str | None:
     return f"SELECT COUNT(*) as total FROM mail_processed WHERE {where}"
 
 
+def _build_status_sql(question: str, dossier_id: str | None) -> str | None:
+    """Génère SQL de liste pour les questions de statut email (pending, urgent, etc.).
+
+    Retourne None si la question ne concerne pas un statut de demande client.
+    """
+    q = _normalize(question)
+
+    # Racines courtes = fuzzy / tolérance aux fautes de frappe
+    is_pending = any(kw in q for kw in ("pending", "attente", "a repondre", "a traiter", "non traite"))
+    is_demande = any(kw in q for kw in ("demand", "client", "clients", "requete"))
+    is_urgent = any(kw in q for kw in ("urgent", "urgente", "prioritaire", "important"))
+
+    # "en attente" / "à traiter" / "pending" suffisent même sans "demande" explicite
+    if not is_demande and not is_pending and not any(kw in q for kw in ("email", "mail", "message")):
+        return None
+
+    where_clauses: list[str] = []
+    if is_demande:
+        where_clauses.append("category = 'demande_client'")
+    if is_pending:
+        where_clauses.append("status = 'pending'")
+    if is_urgent:
+        where_clauses.append("priority = 'high'")
+    if dossier_id:
+        where_clauses.append(f"(subject LIKE '%{dossier_id}%' OR body LIKE '%{dossier_id}%')")
+
+    # Par défaut "demandes clients" sans filtre statut → ne pas tout retourner
+    if is_demande and not is_pending and not is_urgent and not dossier_id:
+        where_clauses.append("status = 'pending'")
+
+    if not where_clauses:
+        return None
+
+    date_filter = _extract_date_filter(question)
+    if date_filter:
+        where_clauses.append(date_filter)
+
+    where = " AND ".join(f"({c})" for c in where_clauses)
+    return f"SELECT id, subject, received_at, category, status, priority FROM mail_processed WHERE {where} ORDER BY processed_at DESC LIMIT 20"
+
+
 def _normalize(text: str) -> str:
     return normalize("NFKD", text.lower()).encode("ascii", "ignore").decode("ascii")
 
@@ -861,6 +905,8 @@ async def ask_charlie(
     # ── 2. Génération SQL ──
     # Fallback programmatique pour les comptages simples (pas besoin de LLM)
     sql = _build_count_sql(question, dossier_id) if is_count_request else ""
+    if not sql:
+        sql = _build_status_sql(question, dossier_id) or ""
 
     if not sql:
         try:
@@ -1401,6 +1447,25 @@ RÉPONSE À DANIEL :"""
             if len(archive_rows) > 25:
                 lines.append(f"… et {len(archive_rows) - 25} autres.")
             response = "\n".join(lines)
+        elif rows:
+            # Secours quand le LLM dit "pas trouvé" malgré des résultats SQL
+            lines = [f"J'ai trouvé **{len(rows)}** résultat{'s' if len(rows) > 1 else ''} :", ""]
+            for r in rows[:20]:
+                subject = r.get("subject") or "Sans sujet"
+                date = r.get("received_at") or r.get("processed_at") or ""
+                cat = r.get("category") or ""
+                status = r.get("status") or ""
+                line = f"- {subject}"
+                if date:
+                    line += f" ({date})"
+                if cat:
+                    line += f" [{cat}]"
+                if status:
+                    line += f" ({status})"
+                lines.append(line)
+            if len(rows) > 20:
+                lines.append(f"… et {len(rows) - 20} autres.")
+            response = "\n".join(lines)
         else:
             response = "Je n'ai pas trouvé d'informations."
 
@@ -1900,7 +1965,7 @@ async def _auto_save_fact(
 
 def _sanitize_rows_for_prompt(rows: list[dict]) -> str:
     """Convertit les rows en texte anonymisé pour le prompt LLM.
-    Ne garde que les champs publics (subject, received_at, category).
+    Ne garde que les champs publics (subject, received_at, category, status, priority).
     Masque ABSOLUMENT : id, sender, body_preview, body, source_db.
     """
     if not rows:
@@ -1916,9 +1981,15 @@ def _sanitize_rows_for_prompt(rows: list[dict]) -> str:
         subject = r.get("subject") or "Sans sujet"
         received = r.get("received_at") or r.get("date") or ""
         cat = r.get("category") or ""
+        status = r.get("status") or ""
+        priority = r.get("priority") or ""
         line = f"- Sujet: {subject}"
         if cat:
             line += f" | Catégorie: {cat}"
+        if status:
+            line += f" | Statut: {status}"
+        if priority:
+            line += f" | Priorité: {priority}"
         if received:
             line += f" | Date: {received}"
         lines.append(line)

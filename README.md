@@ -180,23 +180,28 @@ DETECTIVE_BE/
 
 ## Statut
 
-✅ **Production active** — `detective.digitalhs.biz` — V1.14.2
+✅ **Production active** — `detective.digitalhs.biz` — **V1.16.13**
 
 - **Pipeline IMAP** : polling 3 boîtes, classification 8 catégories, priorité intelligente
 - **Génération brouillon** : style Daniel, multilingue FR/NL/EN, fallback OpenRouter
 - **Cockpit web** : inbox filtrable, conversation avec viewer pièces jointes (badge, liste, preview, download)
-- **Chat AI Charlie** : SQL + Cerveau2 vault + archives historiques + mémoire courte, garde anti-réponse vide (V1.14.2)
+- **Chat AI Charlie** :
+  - SQL programmatique bypass LLM (comptages + statuts pending/urgent, V1.16.13)
+  - Cerveau2 vault + **fallback direct** sur les fiches entités non indexées (V1.16.12)
+  - **Nuage de liaison familial** (`épouse`, `mari`, `conjoint`, etc. via wikilinks YAML, V1.16.12)
+  - Archives historiques (boite1/2/3) + mémoire courte
+  - Garde anti-réponse vide + garde anti-"pas trouvé" malgré données présentes (V1.16.13)
 - **Slack Bot Charlie AI** : @mention + DM sur #detective
 - **Cerveau2 vault** : ingestion 100% emails + pièces jointes, recherche sans troncation, insensible aux accents, blindé injection
 - **Dashboard admin** : stats, settings LLM, audit logs
 
-Voir `docs/ROADMAP.md` pour la roadmap V2 (auto-amélioration, mémoire long terme, semantic search).
+Voir `docs/ROADMAP.md` pour la roadmap V2 (Drafts IMAP, auto-amélioration, mémoire long terme, semantic search).
 
 ---
 
 ## Versions
 
-Version source de vérité : **`app/_version.py`** (`VERSION = "1.14.2"`).
+Version source de vérité : **`app/_version.py`** (`VERSION = "1.16.13"`).
 
 Le badge affiché dans le cockpit est lu dynamiquement depuis `app/_version.py`. **Tolérance zéro** sur la désynchronisation.
 
