@@ -147,7 +147,8 @@ DETECTIVE_BE/
 │   │   ├── rag.py               # Embed + retrieve sqlite-vec
 │   │   └── generator.py         # Assemblage prompt + appel LLM
 │   ├── delivery/
-│   │   ├── resend_notifier.py   # Email brouillon → CDAL
+│   │   ├── resend_notifier.py   # Email brouillon → CDAL (fallback)
+│   │   ├── imap_draft.py        # Dépôt brouillon IMAP Drafts (V2a)
 │   │   ├── slack_notifier.py    # Notifications webhook Slack
 │   │   └── slack_bot.py         # Slack Bot Charlie AI interactif
 │   ├── llm/router.py            # Wrapper LiteLLM avec fallback
@@ -168,6 +169,7 @@ DETECTIVE_BE/
 ├── scripts/
 │   ├── bootstrap_embeddings.py
 │   ├── extract_personality.py
+│   ├── manual_draft_deposit.py  # Dépôt manuel brouillon IMAP (V2a)
 │   └── deploy-to-vps.sh         # Deploy one-shot Mac → VPS
 ├── deploy/
 │   └── detective-agent.service  # systemd unit (legacy)
@@ -180,11 +182,12 @@ DETECTIVE_BE/
 
 ## Statut
 
-✅ **Production active** — `detective.digitalhs.biz` — **V1.16.13**
+✅ **Production active** — `detective.digitalhs.biz` — **V1.17.0**
 
 - **Pipeline IMAP** : polling 3 boîtes, classification 8 catégories, priorité intelligente
 - **Génération brouillon** : style Daniel, multilingue FR/NL/EN, fallback OpenRouter
-- **Cockpit web** : inbox filtrable, conversation avec viewer pièces jointes (badge, liste, preview, download)
+- **Livraison V2a — Drafts IMAP** : dépôt direct des brouillons dans la boîte source avec flag `\Draft` + fallback Resend (V1.17.0)
+- **Cockpit web** : inbox filtrable, conversation avec viewer pièces jointes (badge, liste, preview, download), bloc Charlie remonté à droite avec `Email #id` en évidence (V1.17.0)
 - **Chat AI Charlie** :
   - SQL programmatique bypass LLM (comptages + statuts pending/urgent, V1.16.13)
   - Cerveau2 vault + **fallback direct** sur les fiches entités non indexées (V1.16.12)
@@ -195,13 +198,13 @@ DETECTIVE_BE/
 - **Cerveau2 vault** : ingestion 100% emails + pièces jointes, recherche sans troncation, insensible aux accents, blindé injection
 - **Dashboard admin** : stats, settings LLM, audit logs
 
-Voir `docs/ROADMAP.md` pour la roadmap V2 (Drafts IMAP, auto-amélioration, mémoire long terme, semantic search).
+Voir `docs/ROADMAP.md` pour la roadmap V2b/V2c (feedback loop qualité Daniel, latence Charlie).
 
 ---
 
 ## Versions
 
-Version source de vérité : **`app/_version.py`** (`VERSION = "1.16.13"`).
+Version source de vérité : **`app/_version.py`** (`VERSION = "1.17.0"`).
 
 Le badge affiché dans le cockpit est lu dynamiquement depuis `app/_version.py`. **Tolérance zéro** sur la désynchronisation.
 
