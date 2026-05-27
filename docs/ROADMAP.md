@@ -185,15 +185,13 @@ if not draft_ok:
   - Remplacer l'appel `notify_draft()` par `append_draft()` + fallback Resend si échec
   - Garder import `notify_draft` (utilisé pour les alertes système)
 
-- [ ] **3. Test sur boîte de dev** :
-  - Envoyer un mail test à l'une des 3 boîtes depuis une adresse externe
-  - Vérifier que le brouillon apparaît dans les Brouillons d'Infomaniak
-  - Vérifier le sujet, le corps, le flag `\Draft`
-  - Vérifier que le lien cockpit est correct
+- [x] **3. Test sur boîte de dev** :
+  - ~~Test dev~~ → bugs découverts sur email 121 en production (sujet faux, fallback inconditionnel, corps pollué)
+  - Corrigés en v1.16.14 et redéployés
 
 - [x] **4. Bump version** : `1.15.1 → 1.16.0` (changement livraison = minor bump)
 
-- [ ] **5. Déployer sur VPS** et surveiller les logs du premier vrai mail
+- [x] **5. Déployer sur VPS** et surveiller les logs du premier vrai mail
 
 ### Resend — rôle post-V2a
 Resend reste actif **uniquement** pour :
