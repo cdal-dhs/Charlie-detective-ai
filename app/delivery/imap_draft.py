@@ -80,15 +80,6 @@ def _build_draft_body(
         lines.append(f"Dossier cockpit : {base_url.rstrip('/')}/app/conversation/{mail_id}")
     lines.append("────────────────────────────────────────")
     lines.append("")
-    lines.append("=== MESSAGE ORIGINAL DU CLIENT ===")
-    lines.append(f"De : {incoming.sender}")
-    lines.append(f"Sujet : {incoming.subject}")
-    lines.append("")
-    lines.append(incoming.body)
-    lines.append("")
-    lines.append("────────────────────────────────────────")
-    lines.append("=== PROPOSITION DE REPONSE ===")
-    lines.append("")
     lines.append(gen.draft)
     return "\n".join(lines)
 
@@ -112,7 +103,7 @@ async def append_draft(
     msg = EmailMessage()
     msg["From"] = mailbox.user
     msg["To"] = incoming.sender
-    msg["Subject"] = f"PROPOSITION REPONSE : {incoming.subject}"
+    msg["Subject"] = f"DEMANDE D'Approbation - Reponse Demande Client : {incoming.subject}"
     msg.set_content(body_text)
     message_bytes = msg.as_bytes()
 
