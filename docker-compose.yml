@@ -40,3 +40,5 @@ networks:
 
 volumes:
   hf_cache:
+  torch_cache:
+  torch_hf_cache:
