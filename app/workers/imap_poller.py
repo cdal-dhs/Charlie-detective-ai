@@ -685,16 +685,19 @@ def _is_verified_demande_client(category: str, msg: Message) -> bool:
 
 
 def _build_search_criteria(settings) -> str:
-    """Construit le critère SEARCH IMAP : UNKEYWORD AgentProcessed + SINCE si configuré."""
-    criteria = ["UNKEYWORD", AGENT_FLAG]
+    """Construit le critère SEARCH IMAP : UNKEYWORD AgentProcessed.
+
+    Le critère SINCE a été retiré (v1.17.2) car le serveur IMAP Infomaniak
+    rejette silencieusement le format RFC 3501, causant un retour de 0 résultats.
+    L'idempotence est assurée par le flag AgentProcessed + le check _mail_exists.
+    """
     if settings.process_since_date:
-        try:
-            dt = datetime.strptime(settings.process_since_date, "%Y-%m-%d")
-            since_str = dt.strftime("%d-%b-%Y")
-            criteria += ["SINCE", since_str]
-        except ValueError:
-            log.warning("config.invalid_process_since_date", value=settings.process_since_date)
-    return " ".join(criteria)
+        log.warning(
+            "imap.search.since_ignored",
+            reason="Infomaniak silently rejects SINCE date format in SEARCH. "
+            "Relying on UNKEYWORD AgentProcessed + DB idempotence instead.",
+        )
+    return f"UNKEYWORD {AGENT_FLAG}"
 
 
 async def _process_mailbox(mailbox: MailboxConfig) -> None:

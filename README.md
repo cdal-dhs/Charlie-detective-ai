@@ -182,12 +182,12 @@ DETECTIVE_BE/
 
 ## Statut
 
-✅ **Production active** — `detective.digitalhs.biz` — **V1.17.0**
+✅ **Production active** — `detective.digitalhs.biz` — **V1.17.2**
 
 - **Pipeline IMAP** : polling 3 boîtes, classification 8 catégories, priorité intelligente
 - **Génération brouillon** : style Daniel, multilingue FR/NL/EN, fallback OpenRouter
-- **Livraison V2a — Drafts IMAP** : dépôt direct des brouillons dans la boîte source avec flag `\Draft` + fallback Resend (V1.17.0)
-- **Cockpit web** : inbox filtrable, conversation avec viewer pièces jointes (badge, liste, preview, download), bloc Charlie remonté à droite avec `Email #id` en évidence (V1.17.0)
+- **Livraison V2a — Drafts IMAP** : dépôt direct des brouillons dans la boîte source avec flag `\Draft` + fallback Resend (V1.17.2)
+- **Cockpit web** : inbox filtrable, conversation avec viewer pièces jointes (badge, liste, preview, download), bloc Charlie remonté à droite avec `Email #id` en évidence (V1.17.2)
 - **Chat AI Charlie** :
   - SQL programmatique bypass LLM (comptages + statuts pending/urgent, V1.16.13)
   - Cerveau2 vault + **fallback direct** sur les fiches entités non indexées (V1.16.12)
@@ -204,7 +204,7 @@ Voir `docs/ROADMAP.md` pour la roadmap V2b/V2c (feedback loop qualité Daniel, l
 
 ## Versions
 
-Version source de vérité : **`app/_version.py`** (`VERSION = "1.17.0"`).
+Version source de vérité : **`app/_version.py`** (`VERSION = "1.17.2"`).
 
 Le badge affiché dans le cockpit est lu dynamiquement depuis `app/_version.py`. **Tolérance zéro** sur la désynchronisation.
 
