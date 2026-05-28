@@ -81,6 +81,13 @@ def _build_draft_body(
     lines.append("────────────────────────────────────────")
     lines.append("")
     lines.append(gen.draft)
+    lines.append("")
+    lines.append("────────────────────────────────────────")
+    lines.append("=== MESSAGE ORIGINAL DU CLIENT ===")
+    lines.append(f"De : {incoming.sender}")
+    lines.append(f"Sujet : {incoming.subject}")
+    lines.append("")
+    lines.append(incoming.body)
     return "\n".join(lines)
 
 
