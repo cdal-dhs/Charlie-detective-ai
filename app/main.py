@@ -40,18 +40,15 @@ async def main() -> None:
 
     init_slack_bot()
 
-    # Précharger l'embedder sentence-transformers dans un thread pour ne pas bloquer
-    # l'event loop quand le poller traite le premier demande_client.
-    from app.pipeline.rag import _get_embedder
-    await asyncio.to_thread(_get_embedder)
-    log.info("agent.embedder_ready")
-
     stop_event = asyncio.Event()
 
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, stop_event.set)
 
+    # Démarrer le serveur web et les pollers IMMÉDIATEMENT pour que le conteneur
+    # soit accessible web sans attendre le chargement de l'embedder (peut prendre
+    # 10+ min sur le VPS Hostinger à cause de torch / Triton JIT compilation).
     poller_tasks = [
         asyncio.create_task(poll_mailbox(mb, stop_event), name=f"poller-{mb.name}")
         for mb in settings.mailboxes()
@@ -61,12 +58,26 @@ async def main() -> None:
     disk_task = asyncio.create_task(watch_disk(stop_event), name="disk-watcher")
     att_task = asyncio.create_task(run_attachment_cleanup(stop_event), name="attachment-cleanup")
 
+    # Précharger l'embedder en background — le poller continuera de fonctionner.
+    # Si un demande_client arrive avant que l'embedder soit prêt, le traitement
+    # de ce mail sera retardé mais les autres mails continueront de passer.
+    from app.pipeline.rag import _get_embedder
+
+    async def _preload_embedder() -> None:
+        await asyncio.to_thread(_get_embedder)
+        log.info("agent.embedder_ready")
+
+    embedder_task = asyncio.create_task(_preload_embedder(), name="embedder-preload")
+
     await stop_event.wait()
     log.info("agent.stop_requested")
 
-    for task in [*poller_tasks, web_task, soul_task, disk_task, att_task]:
+    for task in [*poller_tasks, web_task, soul_task, disk_task, att_task, embedder_task]:
         task.cancel()
-    await asyncio.gather(*poller_tasks, web_task, soul_task, disk_task, att_task, return_exceptions=True)
+    await asyncio.gather(
+        *poller_tasks, web_task, soul_task, disk_task, att_task, embedder_task,
+        return_exceptions=True,
+    )
     log.info("agent.stopped")
 
 

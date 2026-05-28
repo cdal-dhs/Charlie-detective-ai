@@ -3,11 +3,14 @@ services:
     build: .
     container_name: detective-agent
     restart: unless-stopped
+    init: true
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
       - ./.env.production:/app/.env:ro
       - hf_cache:/root/.cache/huggingface
+      - torch_cache:/root/.triton
+      - torch_hf_cache:/root/.cache/torch
       # Dev mount : permet de modifier le code sans rebuild Docker
       - ./app:/app/app:ro
     environment:
