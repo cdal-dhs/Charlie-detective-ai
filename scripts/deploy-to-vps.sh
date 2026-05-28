@@ -32,6 +32,29 @@ if [[ -n "$UNPUSHED" ]]; then
     git push origin main
 fi
 
+# --- Détection déploiement léger (code Python uniquement) ---
+# Si seuls des fichiers sous app/ changent, le volume ./app:/app/app:ro
+# dans docker-compose.yml rend le rebuild Docker inutile.
+CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD)
+LIGHT_DEPLOY=true
+for f in $CHANGED_FILES; do
+    if [[ "$f" == pyproject.toml ]] || [[ "$f" == Dockerfile* ]] || [[ "$f" == docker-compose.yml ]] || [[ "$f" == scripts/* ]] || [[ "$f" == requirements* ]]; then
+        LIGHT_DEPLOY=false
+        break
+    fi
+done
+if [[ "$LIGHT_DEPLOY" == true ]]; then
+    echo ">>> 🚀 Déploiement LÉGER détecté (code Python uniquement)"
+    echo "    Fichiers modifiés :"
+    echo "$CHANGED_FILES" | sed 's/^/      - /'
+    echo ">>> Pull + restart sur le VPS (pas de rebuild Docker) ..."
+    ssh "${VPS_USER}@${VPS_HOST}" "cd ${VPS_DIR} && git pull origin main && docker compose restart"
+    echo ""
+    echo "✅ Déploiement léger terminé !"
+    echo "   Le conteneur redémarre avec le nouveau code (volume app/ monté)."
+    exit 0
+fi
+
 # Vérifier que les répertoires montés dans docker-compose.yml existent (INC-001)
 echo ">>> Vérification des répertoires montés (docker-compose.yml) ..."
 MOUNTED_DIRS=$(grep -o '\- \./[^:]*' docker-compose.yml | sed 's/- \.\///' | sort -u || true)
@@ -90,17 +113,19 @@ echo ">>> Syncing .env as .env.production ..."
 rsync -avz ./.env "${VPS_USER}@${VPS_HOST}:${VPS_DIR}/.env.production"
 
 # --- Architecture check ---
-# Le VPS Hostinger est amd64 (x86_64). Le Mac M4 Max est arm64 (aarch64).
-# Une image arm64 ne peut pas tourner sur amd64 → redémarrages en boucle.
-# Sans torch, le build sur le VPS est rapide (< 3 min).
+# ⚠️  Le VPS Hostinger est x86_64 (amd64). Il N'EST JAMAIS sous ARM64.
+#    Le Mac M4 Max est ARM64 (aarch64). Une image ARM64 ne peut PAS
+#    tourner sur un VPS x86_64 → crash en boucle immédiat.
+#    Quand les architectures diffèrent, on build sur le VPS directement.
 echo ">>> Vérification de l'architecture ..."
 LOCAL_ARCH=$(docker version --format '{{.Client.Arch}}' 2>/dev/null || uname -m)
 VPS_ARCH=$(ssh "${VPS_USER}@${VPS_HOST}" 'docker version --format "{{.Server.Arch}}" 2>/dev/null || uname -m')
 echo "   Local : $LOCAL_ARCH | VPS : $VPS_ARCH"
 
 if [[ "$LOCAL_ARCH" != "$VPS_ARCH" ]]; then
-    echo "   ⚠️ ARCHITECTURE MISMATCH détectée ($LOCAL_ARCH ≠ $VPS_ARCH)"
-    echo "   → Build sur le VPS directement (plus sûr, rapide sans torch)"
+    echo "   ⚠️  MISMATCH ARCHITECTURE ($LOCAL_ARCH ≠ $VPS_ARCH)"
+    echo "      Le VPS est x86_64 (amd64) — JAMAIS ARM64."
+    echo "   → Build natif sur le VPS (obligatoire quand architectures différentes)"
     ssh "${VPS_USER}@${VPS_HOST}" "cd ${VPS_DIR} && docker compose build --no-cache && docker compose up -d --force-recreate"
 else
     # --- 5. Build en LOCAL puis push vers VPS ---
