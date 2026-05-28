@@ -1,5 +1,12 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.18.2] — 2026-05-28
+
+### Fixé
+- **Date/heure du message original** ajoutée dans les brouillons de réponse (Resend email + IMAP Drafts). Auparavant, seuls l'expéditeur et le sujet étaient affichés — la date manquait absolument.
+
+---
+
 ## [1.18.1] — 2026-05-28 (hotfix critique)
 
 ### Fixé

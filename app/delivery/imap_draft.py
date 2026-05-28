@@ -84,6 +84,7 @@ def _build_draft_body(
     lines.append("")
     lines.append("────────────────────────────────────────")
     lines.append("=== MESSAGE ORIGINAL DU CLIENT ===")
+    lines.append(f"Date : {incoming.received_at or '-'}")
     lines.append(f"De : {incoming.sender}")
     lines.append(f"Sujet : {incoming.subject}")
     lines.append("")
