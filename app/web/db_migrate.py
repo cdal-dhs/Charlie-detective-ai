@@ -145,6 +145,20 @@ async def _create_tables(db: aiosqlite.Connection) -> None:
     await db.execute(
         "CREATE INDEX IF NOT EXISTS idx_email_attachment_mail_id ON email_attachment(mail_processed_id)"
     )
+    await db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS agent_telemetry (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_type TEXT NOT NULL,
+            mailbox_name TEXT,
+            details TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_telemetry_event ON agent_telemetry(event_type, created_at)"
+    )
 
 
 async def _add_mail_processed_columns(db: aiosqlite.Connection) -> None:

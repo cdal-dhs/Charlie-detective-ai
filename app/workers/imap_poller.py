@@ -1108,6 +1108,12 @@ async def _process_single_mail(
         draft_ok = await append_draft(
             incoming, mailbox, gen, mail_id=mail_id, imap_client=client
         )
+        _log_telemetry(
+            db_path=settings.db_agent_state,
+            event_type="draft_deposited" if draft_ok else "draft_failed",
+            mailbox_name=mailbox.name,
+            details=f"mail_id={mail_id} sender={sender} subject={subject[:60]}",
+        )
         if not draft_ok:
             await notify_draft(incoming, mailbox, gen, mail_id=mail_id)
             await alert_imap_draft_failure(

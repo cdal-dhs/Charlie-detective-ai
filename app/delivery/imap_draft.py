@@ -37,6 +37,34 @@ def _parse_list_line(line: bytes) -> str | None:
     return None
 
 
+async def _verify_draft_present(
+    client: aioimaplib.IMAP4,
+    drafts_folder: str,
+    subject_marker: str,
+) -> bool:
+    """Vérifie qu'au moins un message avec le sujet_marker est présent dans Drafts.
+
+    SELECT + SEARCH SUBJECT — Infomaniak met parfois 1-2s à indexer.
+    On utilise un marqueur ASCII simple ("DEMANDE") pour éviter les problèmes
+    d'encodage IMAP avec les accents.
+    """
+    try:
+        sel = await client.select(drafts_folder)
+        if sel.result != "OK":
+            return False
+        # Marqueur ASCII commun à tous les brouillons (évite accents IMAP)
+        search_resp = await client.search('SUBJECT "DEMANDE"')
+        if search_resp.result != "OK":
+            return False
+        # lines typique : [b'1 2 3'] ou [b'']
+        for line in search_resp.lines or []:
+            if line.strip():
+                return True
+        return False
+    except Exception:
+        return False
+
+
 async def _find_drafts_folder(client: aioimaplib.IMAP4) -> str | None:
     """Interroge LIST pour trouver le dossier Drafts / Brouillons."""
     list_resp = await client.list("", "*")
@@ -159,13 +187,35 @@ async def append_draft(
             )
             return False
 
-        log.info(
-            "imap_draft.ok",
-            mailbox=mailbox.name,
-            folder=drafts_folder,
-            sender=incoming.sender,
-            subject=msg["Subject"],
+        # Vérification post-dépôt : confirmer que le brouillon est indexé dans Drafts
+        verified = await _verify_draft_present(
+            client, drafts_folder, msg["Subject"]
         )
+        if verified:
+            log.info(
+                "imap_draft.ok",
+                mailbox=mailbox.name,
+                folder=drafts_folder,
+                sender=incoming.sender,
+                subject=msg["Subject"],
+                verified=True,
+            )
+        else:
+            log.warning(
+                "imap_draft.unverified",
+                mailbox=mailbox.name,
+                folder=drafts_folder,
+                sender=incoming.sender,
+                subject=msg["Subject"],
+                note="APPEND a réussi mais SEARCH n'a pas retrouvé le sujet immédiatement",
+            )
+
+        # Si on a emprunté la connexion du poller, il faut re-sélectionner INBOX
+        # pour que le prochain fetch du poller fonctionne.
+        if not own_client:
+            with contextlib.suppress(Exception):
+                await client.select("INBOX")
+
         return True
 
     except Exception as exc:
