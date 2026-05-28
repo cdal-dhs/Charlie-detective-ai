@@ -40,6 +40,12 @@ async def main() -> None:
 
     init_slack_bot()
 
+    # Précharger l'embedder sentence-transformers dans un thread pour ne pas bloquer
+    # l'event loop quand le poller traite le premier demande_client.
+    from app.pipeline.rag import _get_embedder
+    await asyncio.to_thread(_get_embedder)
+    log.info("agent.embedder_ready")
+
     stop_event = asyncio.Event()
 
     loop = asyncio.get_running_loop()

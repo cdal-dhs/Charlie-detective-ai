@@ -1,5 +1,13 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.17.3] — 2026-05-28
+
+### Fixé
+- **Embedder préchargé au boot** : `SentenceTransformer` est chargé dans un thread séparé (`asyncio.to_thread`) au démarrage de l'agent, avant le poller. Évite le blocage de l'event loop asyncio pendant plusieurs minutes quand le premier `demande_client` déclenche le chargement du modèle.
+- **Poller batch limité + yield** : maximum 200 emails traités par cycle de polling ; `await asyncio.sleep(0)` ajouté dans la boucle pour céder le contrôle à uvicorn/web server. Évite que le traitement d'un gros backlog (ex: suppression du SINCE) ne rende le cockpit web inaccessible.
+
+---
+
 ## [1.17.2] — 2026-05-28
 
 ### Fixé

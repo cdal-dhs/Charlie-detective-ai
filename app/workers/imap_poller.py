@@ -723,6 +723,18 @@ async def _process_mailbox(mailbox: MailboxConfig) -> None:
         uids = search_resp.lines[0].split() if search_resp.lines else []
         log.info("poller.found", mailbox=mailbox.name, count=len(uids))
 
+        # Limiter le traitement par cycle pour ne pas bloquer l'event loop
+        # quand le backlog est important (ex: suppression du critère SINCE).
+        MAX_PER_CYCLE = 200
+        if len(uids) > MAX_PER_CYCLE:
+            log.warning(
+                "poller.backlog_limited",
+                mailbox=mailbox.name,
+                total=len(uids),
+                cycle_max=MAX_PER_CYCLE,
+            )
+            uids = uids[:MAX_PER_CYCLE]
+
         cycle_stats: dict[str, int] = {}
         for uid_bytes in uids:
             uid = uid_bytes.decode()
@@ -731,6 +743,8 @@ async def _process_mailbox(mailbox: MailboxConfig) -> None:
                 cycle_stats[cat] = cycle_stats.get(cat, 0) + 1
             except Exception:
                 log.exception("poller.mail_error", mailbox=mailbox.name, uid=uid)
+            # Céder le contrôle à l'event loop pour que uvicorn/web restent réactifs
+            await asyncio.sleep(0)
 
         if cycle_stats:
             log.info(
