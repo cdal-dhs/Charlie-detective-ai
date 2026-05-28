@@ -49,7 +49,9 @@ class Settings(BaseSettings):
     resend_from: str = "agent@digitalhs.biz"
     draft_recipient: str = "cdal@digitalhs.biz"
 
-    embedding_model: str = "intfloat/multilingual-e5-large"
+    embedding_model: str = "openai/text-embedding-3-small"
+    embedding_api_base: str = "https://openrouter.ai/api/v1"
+    embedding_api_key: str = ""  # utilise openrouter_api_key si vide
     rag_top_k: int = 5
 
     poll_interval_seconds: int = 300

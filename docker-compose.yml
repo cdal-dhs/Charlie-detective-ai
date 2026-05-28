@@ -8,9 +8,6 @@ services:
       - ./data:/app/data
       - ./logs:/app/logs
       - ./.env.production:/app/.env:ro
-      - hf_cache:/root/.cache/huggingface
-      - torch_cache:/root/.triton
-      - torch_hf_cache:/root/.cache/torch
       # Dev mount : permet de modifier le code sans rebuild Docker
       - ./app:/app/app:ro
     environment:
@@ -38,7 +35,3 @@ networks:
     external: true
     name: root_default
 
-volumes:
-  hf_cache:
-  torch_cache:
-  torch_hf_cache:

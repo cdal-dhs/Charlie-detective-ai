@@ -2,9 +2,9 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
+import litellm
 import sqlite_vec
 import structlog
-from sentence_transformers import SentenceTransformer
 
 from app.config import get_settings
 
@@ -19,33 +19,31 @@ class RetrievedPair:
     metadata: dict
 
 
-_embedder: SentenceTransformer | None = None
+def _embed(texts: list[str]) -> list[list[float]]:
+    settings = get_settings()
+    key = settings.embedding_api_key or settings.openrouter_api_key or None
+    response = litellm.embedding(
+        model=settings.embedding_model,
+        input=texts,
+        api_base=settings.embedding_api_base or None,
+        api_key=key,
+        encoding_format="float",
+    )
+    return [
+        item.embedding if hasattr(item, "embedding") else item["embedding"]
+        for item in response.data
+    ]
 
 
-def _get_embedder() -> SentenceTransformer:
-    global _embedder
-    if _embedder is None:
-        settings = get_settings()
-        log.info("rag.load_embedder", model=settings.embedding_model)
-        try:
-            import torch
-            # Limite la JIT Triton à 1 thread pour ne pas saturer l'event loop asyncio
-            torch.set_num_threads(1)
-        except Exception:
-            pass
-        _embedder = SentenceTransformer(settings.embedding_model)
-    return _embedder
-
-
+# TODO: les préfixes query:/passage: sont spécifiques au modèle E5.
+# Les embeddings existants dans la DB ont été générés AVEC ces préfixes.
+# Ne PAS les retirer sans re-booter le bootstrap sur TOUTES les DB.
 def embed(text: str) -> list[float]:
-    """e5 attend un préfixe 'query: ' pour les requêtes et 'passage: ' pour les documents."""
-    model = _get_embedder()
-    return model.encode(f"query: {text}", normalize_embeddings=True).tolist()
+    return _embed([f"query: {text}"])[0]
 
 
 def embed_passage(text: str) -> list[float]:
-    model = _get_embedder()
-    return model.encode(f"passage: {text}", normalize_embeddings=True).tolist()
+    return _embed([f"passage: {text}"])[0]
 
 
 def _connect(db_path: Path) -> sqlite3.Connection:
@@ -57,13 +55,7 @@ def _connect(db_path: Path) -> sqlite3.Connection:
 
 
 def retrieve(db_path: Path, query_text: str, top_k: int = 5) -> list[RetrievedPair]:
-    """TODO S3 : ajuster aux vrais noms de tables/colonnes après inspection des DB
-    existantes. Présume une table `pairs_vec` (rowid → embedding) jointable à une
-    table `pairs` (incoming, response, brand, lang, date).
-
-    Dégradation silencieuse : si la table n'existe pas ou si sqlite-vec est
-    indisponible, retourne [] pour ne pas bloquer la génération du brouillon.
-    """
+    """Dégradation silencieuse si la table n'existe pas ou si l'API embedding échoue."""
     try:
         qvec = embed(query_text)
         conn = _connect(db_path)

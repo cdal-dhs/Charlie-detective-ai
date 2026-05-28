@@ -130,12 +130,24 @@ def _extract_pairs(conn: sqlite3.Connection, brand: str, default_lang: str) -> l
 
 
 def _ensure_vec_table(conn: sqlite3.Connection, dim: int) -> None:
+    # Supprimer toutes les entrées pairs* du schéma via writable_schema (contourne les locks sqlite-vec)
+    existing = conn.execute("SELECT name FROM sqlite_master WHERE name LIKE 'pairs%'").fetchall()
+    if existing:
+        conn.execute("PRAGMA writable_schema=ON")
+        try:
+            conn.execute("DELETE FROM sqlite_master WHERE name LIKE 'pairs%'")
+        finally:
+            conn.execute("PRAGMA writable_schema=OFF")
+        conn.commit()
+        # VACUUM pour éliminer les pages orphelines des shadow tables
+        conn.execute("VACUUM")
+
     conn.execute(
-        f"CREATE VIRTUAL TABLE IF NOT EXISTS pairs_vec USING vec0(embedding float[{dim}])"
+        f"CREATE VIRTUAL TABLE pairs_vec USING vec0(embedding float[{dim}])"
     )
     conn.execute(
         """
-        CREATE TABLE IF NOT EXISTS pairs (
+        CREATE TABLE pairs (
             rowid INTEGER PRIMARY KEY,
             incoming TEXT NOT NULL,
             response TEXT NOT NULL,
@@ -145,6 +157,8 @@ def _ensure_vec_table(conn: sqlite3.Connection, dim: int) -> None:
         )
         """
     )
+    # Commit critique : sqlite-vec doit avoir ses shadow tables committées avant insertion
+    conn.commit()
 
 
 def _connect(db_path: Path) -> sqlite3.Connection:
