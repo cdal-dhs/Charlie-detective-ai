@@ -42,6 +42,20 @@ def _format_html(
     return (
         '<html><body style="font-family:-apple-system,Helvetica,Arial,sans-serif;'
         'max-width:780px;background:#fff;color:#000;margin:20px;">\n'
+        '<div style="margin:0 0 16px;text-align:center;">\n'
+        '  <p style="font-size:14px;font-weight:bold;color:#333;margin:0;'
+        'letter-spacing:0.3px;">\n'
+        '    === PROPOSITION BROUILLON REPONSE PAR Charlie Assistant AI '
+        '- Detective.be ===\n'
+        '  </p>\n'
+        '</div>\n\n'
+        '<h2 style="margin:0 0 16px;font-size:18px;">Brouillon généré</h2>\n'
+        '<pre style="white-space:pre-wrap;background:#fff;border:1px solid #ccc;'
+        'padding:12px;border-radius:6px;font-family:inherit;font-size:14px;color:#000;">\n'
+        f'{html.escape(gen.draft)}\n'
+        '</pre>\n\n'
+        f'{cockpit_link}\n\n'
+        '<hr style="border:none;border-top:1px solid #ddd;margin:28px 0;">\n'
         '<h2 style="margin:0 0 16px;font-size:18px;">Message original</h2>\n'
         '<table style="font-size:14px;border-collapse:collapse;'
         'margin-bottom:16px;width:100%;">\n'
@@ -55,19 +69,6 @@ def _format_html(
         '<pre style="white-space:pre-wrap;background:#f6f8fa;border:1px solid #d0d7de;'
         'padding:12px;border-radius:6px;font-family:inherit;font-size:14px;color:#000;">\n'
         f'{html.escape(incoming.body)}\n'
-        '</pre>\n\n'
-        f'{cockpit_link}\n\n'
-        '<div style="margin:28px 0;text-align:center;">\n'
-        '  <p style="font-size:14px;font-weight:bold;color:#333;margin:0;'
-        'letter-spacing:0.3px;">\n'
-        '    === PROPOSITION BROUILLON REPONSE PAR Charlie Assiatnt AI '
-        '- Detective.be ===\n'
-        '  </p>\n'
-        '</div>\n\n'
-        '<h2 style="margin:0 0 16px;font-size:18px;">Brouillon généré</h2>\n'
-        '<pre style="white-space:pre-wrap;background:#fff;border:1px solid #ccc;'
-        'padding:12px;border-radius:6px;font-family:inherit;font-size:14px;color:#000;">\n'
-        f'{html.escape(gen.draft)}\n'
         '</pre>\n\n'
         '<hr style="border:none;border-top:1px solid #ddd;margin:28px 0;">\n'
         '<table style="font-size:12px;color:#555;border-collapse:collapse;'
@@ -98,7 +99,7 @@ async def notify_draft(
     payload = {
         "from": settings.resend_from,
         "to": [settings.draft_recipient],
-        "subject": f"PROPOSITION REPOSNE DETECTIVE - {mail_id}",
+        "subject": f"PROPOSITION REPONSE DETECTIVE - {mail_id}",
         "html": _format_html(incoming, mailbox, gen, mail_id, base_url),
         "headers": {
             "X-Detective-Agent-Mailbox": mailbox.name,

@@ -1,5 +1,14 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.17.4] — 2026-05-28
+
+### Fixé
+- **Ordre email Resend** : la proposition de réponse (brouillon Charlie) apparaît désormais **en haut** de l'email, et le message original du client **en dessous** — comme dans les brouillons IMAP. Daniel lit d'abord ce qu'il doit approuver, puis le contexte complet.
+- **Sujet Resend** : correction faute de frappe `REPOSNE` → `REPONSE`.
+- **Bandeau Resend** : correction faute de frappe `Assiatnt` → `Assistant`.
+
+---
+
 ## [1.17.3] — 2026-05-28
 
 ### Fixé
