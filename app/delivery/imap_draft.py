@@ -97,10 +97,16 @@ async def append_draft(
     mailbox: MailboxConfig,
     gen: GenerationResult,
     mail_id: int | None,
+    imap_client: aioimaplib.IMAP4 | None = None,
 ) -> bool:
     """Dépose le brouillon dans les Drafts IMAP de la boîte source.
 
     Retourne ``True`` si succès, ``False`` si échec (le caller active le fallback Resend).
+
+    Args:
+        imap_client: connexion IMAP existante du poller. Si fournie, on la réutilise
+            au lieu d'en ouvrir une nouvelle (évite le rejet Infomaniak pour
+            connexions simultanées).
     """
     settings = get_settings()
 
@@ -115,19 +121,26 @@ async def append_draft(
     msg.set_content(body_text)
     message_bytes = msg.as_bytes()
 
-    client = aioimaplib.IMAP4_SSL(settings.imap_host, settings.imap_port)
-    try:
-        await client.wait_hello_from_server()
-
-        login_resp = await client.login(mailbox.user, mailbox.app_password)
-        if login_resp.result != "OK":
-            log.warning(
-                "imap_draft.login_failed",
-                mailbox=mailbox.name,
-                response=str(login_resp.result),
-            )
+    own_client = False
+    client = imap_client
+    if client is None:
+        own_client = True
+        client = aioimaplib.IMAP4_SSL(settings.imap_host, settings.imap_port)
+        try:
+            await client.wait_hello_from_server()
+            login_resp = await client.login(mailbox.user, mailbox.app_password)
+            if login_resp.result != "OK":
+                log.warning(
+                    "imap_draft.login_failed",
+                    mailbox=mailbox.name,
+                    response=str(login_resp.result),
+                )
+                return False
+        except Exception as exc:
+            log.warning("imap_draft.failed", mailbox=mailbox.name, error=str(exc))
             return False
 
+    try:
         drafts_folder = await _find_drafts_folder(client)
         if not drafts_folder:
             return False
@@ -159,5 +172,6 @@ async def append_draft(
         log.warning("imap_draft.failed", mailbox=mailbox.name, error=str(exc))
         return False
     finally:
-        with contextlib.suppress(Exception):
-            await client.logout()
+        if own_client:
+            with contextlib.suppress(Exception):
+                await client.logout()

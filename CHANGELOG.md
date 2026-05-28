@@ -1,5 +1,13 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.18.3] — 2026-05-28 (hotfix critique Drafts IMAP)
+
+### Fixé
+- **IMAP Drafts — réutilisation connexion poller** : `append_draft()` accepte désormais un paramètre `imap_client` optionnel. Le poller passe sa connexion IMAP existante, éliminant la connexion secondaire qui était rejetée par Infomaniak (cause racine des 55 échecs `list_failed response=BAD` aujourd'hui).
+- **Alerte monitoring Draft IMAP** : nouvelle alerte Resend `alert_imap_draft_failure()` envoyée à CDAL à chaque échec de dépôt Draft. Permet de monitorer que les brouillons de Daniel sont bien déposés.
+
+---
+
 ## [1.18.2] — 2026-05-28
 
 ### Fixé

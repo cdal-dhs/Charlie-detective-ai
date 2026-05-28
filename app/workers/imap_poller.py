@@ -13,6 +13,7 @@ from pathlib import Path
 import structlog
 from aioimaplib import aioimaplib
 
+from app.alerts import alert_imap_draft_failure
 from app.cerveau_client import feed_correspondance, feed_document
 from app.cerveau_dossier import derive_dossier_id
 from app.config import MailboxConfig, get_settings
@@ -1104,9 +1105,18 @@ async def _process_single_mail(
             received_at=received_at,
             message_id=message_id,
         )
-        draft_ok = await append_draft(incoming, mailbox, gen, mail_id=mail_id)
+        draft_ok = await append_draft(
+            incoming, mailbox, gen, mail_id=mail_id, imap_client=client
+        )
         if not draft_ok:
             await notify_draft(incoming, mailbox, gen, mail_id=mail_id)
+            await alert_imap_draft_failure(
+                mailbox_name=mailbox.name,
+                mail_id=mail_id,
+                sender=sender,
+                subject=subject,
+                error_hint="Connexion IMAP secondaire rejetée (probable) ou LIST/APPEND échoué",
+            )
         if verified_draft:
             await notify_slack_draft(
                 draft_id=mail_id,
