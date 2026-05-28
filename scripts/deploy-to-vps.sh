@@ -89,25 +89,39 @@ rsync -avz --delete --exclude='agent_state.db' ./data/ "${VPS_USER}@${VPS_HOST}:
 echo ">>> Syncing .env as .env.production ..."
 rsync -avz ./.env "${VPS_USER}@${VPS_HOST}:${VPS_DIR}/.env.production"
 
-# --- 5. Build en LOCAL puis push vers VPS ---
-# ⚠️ JAMAIS builder sur le VPS (PROD) — ça sature le CPU/RAM et coupe le service 10-30 min.
-# Le build se fait toujours en local (Mac M4 Max), l'image compilée est poussée via docker save/load.
-echo ">>> Build local de l'image base (si pyproject.toml changé) ..."
-if ! docker images --format '{{.Repository}}:{{.Tag}}' | grep -q '^detective-agent:base$'; then
-    echo "   Image base absente en local — build complet ..."
-    docker build -f Dockerfile.base -t detective-agent:base .
+# --- Architecture check ---
+# Le VPS Hostinger est amd64 (x86_64). Le Mac M4 Max est arm64 (aarch64).
+# Une image arm64 ne peut pas tourner sur amd64 → redémarrages en boucle.
+# Sans torch, le build sur le VPS est rapide (< 3 min).
+echo ">>> Vérification de l'architecture ..."
+LOCAL_ARCH=$(docker version --format '{{.Client.Arch}}' 2>/dev/null || uname -m)
+VPS_ARCH=$(ssh "${VPS_USER}@${VPS_HOST}" 'docker version --format "{{.Server.Arch}}" 2>/dev/null || uname -m')
+echo "   Local : $LOCAL_ARCH | VPS : $VPS_ARCH"
+
+if [[ "$LOCAL_ARCH" != "$VPS_ARCH" ]]; then
+    echo "   ⚠️ ARCHITECTURE MISMATCH détectée ($LOCAL_ARCH ≠ $VPS_ARCH)"
+    echo "   → Build sur le VPS directement (plus sûr, rapide sans torch)"
+    ssh "${VPS_USER}@${VPS_HOST}" "cd ${VPS_DIR} && docker compose build --no-cache && docker compose up -d --force-recreate"
 else
-    echo "   Image base déjà présente en local — skip base build."
+    # --- 5. Build en LOCAL puis push vers VPS ---
+    # ⚠️ Avec torch supprimé, le build local est rapide. On pousse l'image compilée.
+    echo ">>> Build local de l'image base (si pyproject.toml changé) ..."
+    if ! docker images --format '{{.Repository}}:{{.Tag}}' | grep -q '^detective-agent:base$'; then
+        echo "   Image base absente en local — build complet ..."
+        docker build -f Dockerfile.base -t detective-agent:base .
+    else
+        echo "   Image base déjà présente en local — skip base build."
+    fi
+
+    echo ">>> Build local de l'image applicative ..."
+    docker build -t detective_detective .
+
+    echo ">>> Push de l'image vers le VPS (docker save | ssh docker load) ..."
+    docker save detective_detective | ssh "${VPS_USER}@${VPS_HOST}" 'docker load'
+
+    echo ">>> Démarrage du service sur le VPS ..."
+    ssh "${VPS_USER}@${VPS_HOST}" "cd ${VPS_DIR} && docker compose up -d"
 fi
-
-echo ">>> Build local de l'image applicative ..."
-docker build -t detective_detective .
-
-echo ">>> Push de l'image vers le VPS (docker save | ssh docker load) ..."
-docker save detective_detective | ssh "${VPS_USER}@${VPS_HOST}" 'docker load'
-
-echo ">>> Démarrage du service sur le VPS ..."
-ssh "${VPS_USER}@${VPS_HOST}" "cd ${VPS_DIR} && docker compose up -d"
 
 # --- 6. Post-deploy healthcheck ---
 echo ">>> Waiting for container to be healthy ..."

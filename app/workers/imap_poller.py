@@ -725,7 +725,7 @@ async def _process_mailbox(mailbox: MailboxConfig) -> None:
 
         # Limiter le traitement par cycle pour ne pas bloquer l'event loop
         # quand le backlog est important (ex: suppression du critère SINCE).
-        MAX_PER_CYCLE = 200
+        MAX_PER_CYCLE = 10
         if len(uids) > MAX_PER_CYCLE:
             log.warning(
                 "poller.backlog_limited",
@@ -744,7 +744,7 @@ async def _process_mailbox(mailbox: MailboxConfig) -> None:
             except Exception:
                 log.exception("poller.mail_error", mailbox=mailbox.name, uid=uid)
             # Céder le contrôle à l'event loop pour que uvicorn/web restent réactifs
-            await asyncio.sleep(0)
+            await asyncio.sleep(0.5)
 
         if cycle_stats:
             log.info(
@@ -796,6 +796,22 @@ async def _process_single_mail(
     sender = _decode_header(parseaddr(sender_raw)[1] or sender_raw)
     subject = _decode_header(subject_raw)
     received_at = msg.get("Date", "")
+
+    # Filtre date critique : ne traiter que les mails depuis le 20 mai 2026.
+    # Les mails plus vieux sont flaggés comme traités pour nettoyer le backlog.
+    if received_at:
+        try:
+            dt = parsedate_to_datetime(received_at)
+            if dt.date() < datetime(2026, 5, 20).date():
+                if not settings.dry_run:
+                    store_resp = await client.store(uid, "+FLAGS", f"({AGENT_FLAG})")
+                    if store_resp.result != "OK":
+                        log.warning("poller.flag_failed", mailbox=mailbox.name, uid=uid, response=store_resp)
+                log.info("poller.date_skipped", mailbox=mailbox.name, uid=uid, date=received_at[:10], reason="before_2026-05-20")
+                return "skipped"
+        except Exception:
+            pass  # Si parsing échoue, on traite quand même
+
     message_id = msg.get("Message-ID", "")
     body = _get_body_text(msg)
 

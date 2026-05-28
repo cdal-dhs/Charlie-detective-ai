@@ -1,5 +1,15 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.18.1] — 2026-05-28 (hotfix critique)
+
+### Fixé
+- **Poller saturation CPU** : le poller trouvait 7781 mails historiques sans flag `AgentProcessed`, saturant le VPS à 4604% CPU. Ajout d'un filtre date logiciel qui pose le flag et skip immédiatement tout mail avant le 20 mai 2026.
+- **`MAX_PER_CYCLE` réduit à 10** (au lieu de 200) pour éviter de bloquer l'event loop asyncio.
+- **Sleep 0.5s entre chaque mail** traité par le poller pour préserver la réactivité du cockpit web.
+- **Script `deploy-to-vps.sh`** : ajout d'une vérification d'architecture (local arm64 vs VPS amd64) pour éviter le déploiement d'une image incompatible.
+
+---
+
 ## [1.18.0] — 2026-05-28
 
 ### Changé
