@@ -89,10 +89,25 @@ rsync -avz --delete --exclude='agent_state.db' ./data/ "${VPS_USER}@${VPS_HOST}:
 echo ">>> Syncing .env as .env.production ..."
 rsync -avz ./.env "${VPS_USER}@${VPS_HOST}:${VPS_DIR}/.env.production"
 
-# --- 5. Build & run ---
-echo ">>> Building and starting container ..."
-# Sur le VPS : build base image si absente, puis build rapide
-ssh "${VPS_USER}@${VPS_HOST}" "cd ${VPS_DIR} && (docker images --format '{{.Repository}}:{{.Tag}}' | grep -q '^detective-agent:base$' || docker build -f Dockerfile.base -t detective-agent:base .) && docker compose up -d --build"
+# --- 5. Build en LOCAL puis push vers VPS ---
+# ⚠️ JAMAIS builder sur le VPS (PROD) — ça sature le CPU/RAM et coupe le service 10-30 min.
+# Le build se fait toujours en local (Mac M4 Max), l'image compilée est poussée via docker save/load.
+echo ">>> Build local de l'image base (si pyproject.toml changé) ..."
+if ! docker images --format '{{.Repository}}:{{.Tag}}' | grep -q '^detective-agent:base$'; then
+    echo "   Image base absente en local — build complet ..."
+    docker build -f Dockerfile.base -t detective-agent:base .
+else
+    echo "   Image base déjà présente en local — skip base build."
+fi
+
+echo ">>> Build local de l'image applicative ..."
+docker build -t detective_detective .
+
+echo ">>> Push de l'image vers le VPS (docker save | ssh docker load) ..."
+docker save detective_detective | ssh "${VPS_USER}@${VPS_HOST}" 'docker load'
+
+echo ">>> Démarrage du service sur le VPS ..."
+ssh "${VPS_USER}@${VPS_HOST}" "cd ${VPS_DIR} && docker compose up -d"
 
 # --- 6. Post-deploy healthcheck ---
 echo ">>> Waiting for container to be healthy ..."

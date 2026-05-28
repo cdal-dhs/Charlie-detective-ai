@@ -27,6 +27,12 @@ def _get_embedder() -> SentenceTransformer:
     if _embedder is None:
         settings = get_settings()
         log.info("rag.load_embedder", model=settings.embedding_model)
+        try:
+            import torch
+            # Limite la JIT Triton à 1 thread pour ne pas saturer l'event loop asyncio
+            torch.set_num_threads(1)
+        except Exception:
+            pass
         _embedder = SentenceTransformer(settings.embedding_model)
     return _embedder
 

@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -109,8 +110,8 @@ async def generate_draft(
     category: str = "",
 ) -> GenerationResult:
     settings = get_settings()
-    pairs = retrieve(
-        mailbox.db_path, f"{incoming_subject}\n{incoming_body}", top_k=settings.rag_top_k
+    pairs = await asyncio.to_thread(
+        retrieve, mailbox.db_path, f"{incoming_subject}\n{incoming_body}", settings.rag_top_k
     )
     log.info("generator.retrieved", rag=len(pairs))
 

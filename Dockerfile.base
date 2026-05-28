@@ -6,7 +6,6 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
 # System deps pour torch / sentence-transformers / build / OCR
@@ -18,5 +17,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copier seulement pyproject.toml pour bénéficier du layer cache Docker
 COPY pyproject.toml .
 RUN pip install --no-cache-dir -e .
+
+# Pré-compile tous les .pyc des dépendances pour accélérer les démarrages (~10 min → ~30s)
+RUN python -m compileall -q /usr/local/lib/python3.11/site-packages 2>/dev/null || true
 
 EXPOSE 8080 8765

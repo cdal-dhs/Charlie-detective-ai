@@ -116,6 +116,20 @@ ruff format .
 
 ⚠️ **Multilingue obligatoire** : la réponse générée DOIT être dans la langue détectée du mail entrant (FR/NL/EN). Tester systématiquement les 3 langues.
 
+⚠️ **JAMAIS builder l'image Docker sur le VPS de production.** Le VPS (`69.62.110.165`) est un VPS de PROD — un build Docker consomme tout le CPU/RAM et le site devient inaccessible pendant 10-30 min. Toujours builder en local (Mac CDAL, M4 Max 48 GB) puis pousser l'image compilée vers le VPS :
+```bash
+# 1. Builder en local (rapide sur M4 Max)
+docker build -f Dockerfile.base -t detective-agent:base .
+docker build -t detective_detective .
+
+# 2. Pousser l'image vers le VPS sans rebuild distant
+docker save detective_detective | ssh root@69.62.110.165 'docker load'
+
+# 3. Redémarrer le service sur le VPS (utilise l'image locale chargée)
+ssh root@69.62.110.165 'cd /opt/DETECTIVE && docker compose up -d'
+```
+Le script `scripts/deploy-to-vps.sh` intègre maintenant ce workflow. **Ne jamais utiliser `docker compose up -d --build` directement sur le VPS.**
+
 ---
 
 ## 7. État courant du projet

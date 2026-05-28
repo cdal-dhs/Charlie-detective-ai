@@ -64,6 +64,12 @@ async def main() -> None:
     from app.pipeline.rag import _get_embedder
 
     async def _preload_embedder() -> None:
+        # Délai de 3 min : laisse uvicorn + pollers s'initialiser avant le chargement Torch
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=180)
+            return
+        except asyncio.TimeoutError:
+            pass
         await asyncio.to_thread(_get_embedder)
         log.info("agent.embedder_ready")
 
