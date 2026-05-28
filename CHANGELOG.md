@@ -1,5 +1,12 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.18.4] — 2026-05-28 (hotfix critique poller)
+
+### Fixé
+- **Poller traite les mails récents en priorité** : avec 7701 vieux mails sans flag, `uids[:MAX_PER_CYCLE]` traitait les 10 plus anciens à chaque cycle. Les nouveaux mails n'auraient jamais été vus avant ~64h. Correction : `uids[::-1][:MAX_PER_CYCLE]` pour traiter les UIDs les plus élevés (donc les plus récents) en premier.
+
+---
+
 ## [1.18.3] — 2026-05-28 (hotfix critique Drafts IMAP)
 
 ### Fixé

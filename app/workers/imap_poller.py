@@ -734,7 +734,7 @@ async def _process_mailbox(mailbox: MailboxConfig) -> None:
                 total=len(uids),
                 cycle_max=MAX_PER_CYCLE,
             )
-            uids = uids[:MAX_PER_CYCLE]
+            uids = uids[::-1][:MAX_PER_CYCLE]
 
         cycle_stats: dict[str, int] = {}
         for uid_bytes in uids:
