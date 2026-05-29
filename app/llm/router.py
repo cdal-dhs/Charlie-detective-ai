@@ -69,12 +69,17 @@ async def complete(
         if model == fallback_model:
             raise
         log.info("llm.fallback", fallback=fallback_model)
-        # Fallback : OpenRouter a besoin de sa propre config
+        # Fallback : config spécifique selon le provider
         fb_extra: dict = {}
         if fallback_model.startswith("openrouter/"):
             fb_extra["api_base"] = "https://openrouter.ai/api/v1"
             if settings.openrouter_api_key:
                 fb_extra["api_key"] = settings.openrouter_api_key
+        elif fallback_model.startswith("openai/") and settings.ollama_pro_base_url:
+            # Modèles Ollama Cloud via endpoint OpenAI-compatible
+            fb_extra["api_base"] = settings.ollama_pro_base_url
+            if settings.ollama_pro_api_key:
+                fb_extra["api_key"] = settings.ollama_pro_api_key
         resp = await acompletion(
             model=fallback_model,
             messages=messages,
