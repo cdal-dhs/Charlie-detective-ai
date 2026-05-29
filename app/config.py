@@ -41,9 +41,9 @@ class Settings(BaseSettings):
     ollama_pro_base_url: str = "https://ollama.com/api"
     llm_model_default: str = "ollama_chat/kimi-k2"
     openrouter_api_key: str = ""
-    llm_model_fallback: str = "openrouter/anthropic/claude-3.5-sonnet"
+    llm_model_fallback: str = "ollama_chat/glm-5.1"
     llm_model_classifier: str = "ollama_chat/kimi-k2"
-    llm_model_chat: str = "ollama_chat/gemma4"
+    llm_model_chat: str = "ollama_chat/gemma4:31b"
 
     resend_api_key: str = ""
     resend_from: str = "agent@digitalhs.biz"
