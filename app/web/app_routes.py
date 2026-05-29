@@ -15,8 +15,8 @@ log = structlog.get_logger()
 router = APIRouter(prefix="/app", tags=["app"])
 templates = Jinja2Templates(directory="app/web/templates")
 
-# Masquer les mails traités avant le 15/05/2026 (pré-prod)
-_CUTOFF_DATE = "2026-05-15"
+# Masquer les mails traités avant le 20/05/2026 (démarrage propre du poller)
+_CUTOFF_DATE = "2026-05-20"
 
 _CATEGORIES = [
     "demande_client", "urgent", "newsletter", "facture",
@@ -94,7 +94,7 @@ async def _fetch_mails(
     q: str | None,
     sort_col: str = "date",
     sort_order: str = "desc",
-    limit: int = 50,
+    limit: int = 200,
 ) -> tuple[list[dict], list[dict]]:
     """Retourne (hot_mails, other_mails).
 

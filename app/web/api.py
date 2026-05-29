@@ -26,7 +26,7 @@ router = APIRouter(prefix="/api", tags=["api"])
 templates = Jinja2Templates(directory="app/web/templates")
 
 # Masquer les mails traités avant le 15/05/2026 (pré-prod)
-_CUTOFF_DATE = "2026-05-15"
+_CUTOFF_DATE = "2026-05-20"
 
 
 _SORTABLE_COLS = {
@@ -49,7 +49,7 @@ async def _fetch_mails_partial(
     q: str | None,
     sort_col: str = "date",
     sort_order: str = "desc",
-    limit: int = 50,
+    limit: int = 200,
 ) -> tuple[list[dict], list[dict]]:
     """Retourne (hot_mails, other_mails)."""
     where = ["processed_at >= ?"]

@@ -39,7 +39,7 @@ _SETTINGS_KEYS = [
 
 async def _stats(db: aiosqlite.Connection) -> dict:
     today_sql = "date(processed_at) = date('now')"
-    cutoff = "processed_at >= '2026-05-15'"
+    cutoff = "processed_at >= '2026-05-20'"
     stats = {}
     for key, sql in [
         ("total_today", f"SELECT COUNT(*) FROM mail_processed WHERE {today_sql} AND {cutoff}"),
