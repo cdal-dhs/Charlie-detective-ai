@@ -597,7 +597,7 @@ async def charlie_ask(
         results_html = '<p class="text-xs text-red-400 mt-1">Requête SQL refusée (sécurité).</p>'
     elif result.sql and result.sql_error:
         results_html = f'<p class="text-xs text-red-400 mt-1">Erreur SQL : {result.sql_error}</p>'
-    elif result.rows is not None:
+    elif result.rows is not None and not result.hide_rows:
         # Ignorer les résultats COUNT(*) mono-cellule : déjà inclus dans response_text
         if not (len(result.rows) == 1 and len(result.rows[0]) == 1):
             results_html = _format_rows_html(result.rows)

@@ -216,6 +216,7 @@ class CharlieResult:
     sql_safe: bool
     sql_error: str | None
     vault_notes: list[VaultNote] = field(default_factory=list)
+    hide_rows: bool = False  # Quand True, le template web ne montre pas le tableau SQL brut
 
 
 def parse_charlie_response(text: str) -> tuple[str, str]:
@@ -1621,24 +1622,14 @@ async def ask_charlie(
             vault_notes=vault_notes,
         )
 
-    # ── 5. Résumé de dossier — extraction Python + fallback LLM si disponible ──
+    # ── 5. Résumé de dossier — LLM CLAUDE avec prompt parfait ──
     if is_dossier_summary and (archive_rows or rows):
-        summary = _build_dossier_summary_from_emails(dossier_id, archive_rows, rows)
-        if summary:
-            log.info("charlie.dossier_summary_python", dossier_id=dossier_id, summary_len=len(summary))
-            await _auto_save_fact(db_path, question, summary, dossier_id)
-            return CharlieResult(
-                response_text=summary,
-                sql=sql,
-                rows=rows,
-                sql_safe=True,
-                sql_error=None,
-                vault_notes=vault_notes,
-            )
+        # Utiliser Claude (fallback) pour les résumés — deepseek ne sait pas synthétiser
+        summary_model = settings.llm_model_fallback or model
 
-        # Fallback LLM si l'extraction Python n'a pas trouvé assez d'infos
+        # Assembler les contenus des emails (body complet, pas preview)
         email_parts: list[str] = []
-        total_preview = 0
+        total_chars = 0
         all_emails = (archive_rows or []) + (rows or [])
         all_emails.sort(key=lambda r: r.get("received_at", r.get("date", "")), reverse=True)
         for r in all_emails[:10]:
@@ -1647,57 +1638,72 @@ async def ask_charlie(
                 continue
             subject = r.get("subject") or "Sans sujet"
             date = r.get("received_at") or r.get("date") or ""
-            email_parts.append(f"--- Email : {subject} ({date}) ---")
-            email_parts.append(content[:2000])
-            total_preview += len(content[:2000])
-            if total_preview > 10000:
-                email_parts.append("[… tronqué]")
+            email_parts.append(f"SUJET: {subject} | DATE: {date}")
+            email_parts.append(content[:2500])
+            total_chars += len(content[:2500])
+            if total_chars > 12000:
+                email_parts.append("[tronqué pour limiter la taille]")
                 break
 
         if email_parts:
-            _BAD_RESPONSE = ("je n'ai pas trouvé", "aucun résultat", "aucune information", "je ne trouve pas", "pas d'information", "aucune donnée")
-            dossier_prompt = f"""Tu es Charlie, l'assistant IA de Daniel Hurchon (Detective.be).
+            dossier_prompt = f"""Tu es Charlie, l'assistant IA personnel de Daniel Hurchon, détective privé chez Detective.be.
 
-Résumé du dossier {dossier_id} à partir de ces emails :
+MISSION : Résumer le dossier "{dossier_id}" pour Daniel en UN SEUL PARAGRAPHE FLUIDE ET NARRATIF.
+
+Ci-dessous, tu trouves les emails liés à ce dossier (contenus complets). Lis-les attentivement, comprends l'histoire, puis raconte-la à Daniel comme s'il te demandait "Qu'est-ce qui se passe avec ce dossier ?"
 
 {chr(10).join(email_parts)}
 
-Donne UN SEUL paragraphe fluide. Mentionne le client, la demande, les dates et les montants."""
-            try:
-                response = await complete(
-                    model=model,
-                    messages=[{"role": "user", "content": dossier_prompt}],
-                    max_tokens=800,
-                    temperature=0.2,
-                )
-                response = response.strip() if response else ""
-                if response and not any(p in response.lower() for p in _BAD_RESPONSE):
-                    log.info("charlie.dossier_summary_llm", dossier_id=dossier_id, answer_len=len(response))
-                    await _auto_save_fact(db_path, question, response, dossier_id)
-                    return CharlieResult(
-                        response_text=response,
-                        sql=sql,
-                        rows=rows,
-                        sql_safe=True,
-                        sql_error=None,
-                        vault_notes=vault_notes,
-                    )
-            except Exception as e:
-                log.warning("charlie.dossier_summary_llm_failed", error=str(e))
+CONSIGNES ABSOLUES :
+- UN SEUL PARAGRAPHE continu. Pas de puces. Pas de tableaux. Pas de listes à puces.
+- Mentionne : qui est le client, quelle est sa demande, quand ça se passe, et les montants financiers (offres, devis, honoraires, factures, acomptes, etc.) avec leur contexte.
+- Si tu vois plusieurs emails, raconte la chronologie de l'échange.
+- Sois direct, chaleureux, utilise "tu".
+- Si aucun montant n'est mentionné, dis-le simplement.
+- NE JAMAIS reproduire les métadonnées techniques (id, sender, statut, catégorie).
+- NE JAMAIS dire "voici les informations" ou "selon les emails". Raconte l'histoire directement.
 
-        # Dernier recours : message propre avec les sujets (jamais de tableau)
+RÉPONSE :"""
+
+            for attempt in (1, 2):
+                try:
+                    response = await complete(
+                        model=summary_model,
+                        messages=[{"role": "user", "content": dossier_prompt}],
+                        max_tokens=1000,
+                        temperature=0.3,
+                    )
+                    response = response.strip() if response else ""
+                    # Garde anti-vide et anti-tableau
+                    if response and len(response) > 50 and "- " not in response[:20] and "|" not in response[:50]:
+                        log.info("charlie.dossier_summary_ok", dossier_id=dossier_id, model=summary_model, attempt=attempt, len=len(response))
+                        await _auto_save_fact(db_path, question, response, dossier_id)
+                        return CharlieResult(
+                            response_text=response,
+                            sql=sql,
+                            rows=rows,
+                            sql_safe=True,
+                            sql_error=None,
+                            vault_notes=vault_notes,
+                            hide_rows=True,  # ← Masque le tableau SQL dans le chat
+                        )
+                    log.warning("charlie.dossier_summary_bad_format", attempt=attempt, preview=response[:120])
+                except Exception as e:
+                    log.warning("charlie.dossier_summary_failed", attempt=attempt, error=str(e))
+
+        # Dernier recours : message propre, jamais de tableau
         all_emails = (archive_rows or []) + (rows or [])
         all_emails.sort(key=lambda r: r.get("received_at", r.get("date", "")), reverse=True)
-        lines = [f"J'ai trouvé **{len(all_emails)}** email{'s' if len(all_emails) > 1 else ''} liés au dossier **{dossier_id}** :", ""]
-        for r in all_emails[:10]:
+        lines = [f"J'ai trouvé **{len(all_emails)}** email{'s' if len(all_emails) > 1 else ''} liés au dossier **{dossier_id}**, mais je n'ai pas pu les résumer automatiquement. Voici les sujets :", ""]
+        for r in all_emails[:8]:
             subject = r.get("subject") or "Sans sujet"
             date = r.get("received_at") or r.get("date") or ""
             line = f"- {subject}"
             if date:
                 line += f" ({date})"
             lines.append(line)
-        if len(all_emails) > 10:
-            lines.append(f"… et {len(all_emails) - 10} autres.")
+        if len(all_emails) > 8:
+            lines.append(f"… et {len(all_emails) - 8} autres.")
         fallback = "\n".join(lines)
         log.info("charlie.dossier_summary_fallback", dossier_id=dossier_id)
         await _auto_save_fact(db_path, question, fallback, dossier_id)
@@ -1708,6 +1714,7 @@ Donne UN SEUL paragraphe fluide. Mentionne le client, la demande, les dates et l
             sql_safe=True,
             sql_error=None,
             vault_notes=vault_notes,
+            hide_rows=True,
         )
 
     # ── 6. Bypass LLM extraction directe depuis notes Cerveau2 (brutes, 0 ms, 100% déterministe) ──
