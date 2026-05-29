@@ -8,8 +8,9 @@ services:
       - ./data:/app/data
       - ./logs:/app/logs
       - ./.env.production:/app/.env:ro
-      # Dev mount : permet de modifier le code sans rebuild Docker
+      # Dev mounts : permet de modifier le code sans rebuild Docker
       - ./app:/app/app:ro
+      - ./scripts:/app/scripts:ro
     environment:
       # Overrides obligatoires pour Docker / Traefik
       WEB_BIND_HOST: "0.0.0.0"

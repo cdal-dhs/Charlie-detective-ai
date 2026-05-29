@@ -753,43 +753,48 @@ def _build_keyword_sql(question: str) -> str | None:
     sur un dossier/client spécifique (ex: 'résume le dossier Lampaert').
 
     Retourne None si aucun mot-clé significatif n'est trouvé.
+    Privilégie les noms propres (majuscule initiale) et normalise les accents.
     """
-    q = question.lower()
-    # Extraire les noms propres (majuscule initiale) et mots longs significatifs
-    keywords = set()
+    STOP_WORDS = {
+        "moi", "vous", "dossier", "client", "resume", "resumer",
+        "question", "reponse", "donne", "donner", "aussi",
+        "partie", "partir", "faire", "etre", "avoir", "aller",
+        "comme", "alors", "apres", "avant", "encore", "toujours",
+        "jamais", "toutes", "toute", "tous", "tout", "plusieurs",
+        "quelques", "beaucoup", "souvent", "parfois", "maintenant",
+        "aujourd", "hier", "demain", "matin", "soir", "jour",
+        "semaine", "mois", "annee", "temps", "heure", "minute",
+        "proposition", "propose", "proposer", "offre", "offert",
+        "offrir", "financier", "financiere", "finance", "finances",
+        "budget", "prix", "cout", "couts", "montant", "euro",
+        "euros", "devis", "facture", "facturation", "paiement",
+        "payer", "paye", "versement", "provision", "honoraires",
+        "tarif", "tarifs", "forfait", "forfaits", "total",
+        "somme", "sommes", "argent", "gratuit", "gratuite",
+        "avec", "principaux", "principales", "important", "importants",
+        "details", "detail", "information", "informations",
+    }
+    keywords: list[tuple[int, str]] = []   # (score, word)
     for word in re.findall(r"[A-Za-zÀ-Ÿà-ÿ]{4,}", question):
         w = word.strip().lower()
         if len(w) < 4:
             continue
-        # Ignorer les mots vides
-        if w in (
-            "moi", "vous", "dossier", "client", "resume", "resumer",
-            "question", "reponse", "donne", "donner", "aussi",
-            "partie", "partir", "faire", "etre", "avoir", "aller",
-            "comme", "alors", "apres", "avant", "encore", "toujours",
-            "jamais", "toutes", "toute", "tous", "tout", "plusieurs",
-            "quelques", "beaucoup", "souvent", "parfois", "maintenant",
-            "aujourd", "hier", "demain", "matin", "soir", "jour",
-            "semaine", "mois", "annee", "temps", "heure", "minute",
-            "proposition", "propose", "proposer", "offre", "offert",
-            "offrir", "financier", "financiere", "finance", "finances",
-            "budget", "prix", "cout", "couts", "montant", "euro",
-            "euros", "devis", "facture", "facturation", "paiement",
-            "payer", "paye", "versement", "provision", "honoraires",
-            "tarif", "tarifs", "forfait", "forfaits", "total",
-            "somme", "sommes", "argent", "gratuit", "gratuite",
-        ):
+        w_norm = normalize("NFD", w).encode("ascii", "ignore").decode("ascii")
+        if w_norm in STOP_WORDS:
             continue
-        keywords.add(w)
-        # Aussi la version avec majuscule initiale
-        keywords.add(word)
+        # Score : majuscule initiale = nom propre = +10, longueur = discriminante
+        score = len(w)
+        if word[0].isupper():
+            score += 10
+        keywords.append((score, word))
 
     if not keywords:
         return None
 
+    # Trier par score décroissant, prendre les 5 meilleurs
+    keywords.sort(key=lambda x: x[0], reverse=True)
     likes = []
-    for kw in sorted(keywords)[:5]:  # max 5 mots pour éviter les requêtes lourdes
-        # Échapper les quotes simples pour éviter l'injection SQL
+    for _, kw in keywords[:5]:
         kw_safe = kw.replace("'", "''")
         likes.append(f"subject LIKE '%{kw_safe}%'")
         likes.append(f"body LIKE '%{kw_safe}%'")
@@ -1091,32 +1096,46 @@ async def ask_charlie(
         if dossier_id:
             return await _search_historical_by_keyword(db_path, dossier_id, year=year, limit=lim)
         # Si pas de dossier_id → chercher par mots-clés extraits de la question
-        keywords = []
-        for word in re.findall(r"[A-Za-zÀ-Ÿà-ÿ]{4,}", question):
+        # On normalise les accents pour que "Résume" match "resume" dans la liste stop-words
+        raw_words = re.findall(r"[A-Za-zÀ-Ÿà-ÿ]{4,}", question)
+        keywords: list[tuple[int, str]] = []   # (score, word) — score plus haut = plus pertinent
+        STOP_WORDS = {
+            "moi", "vous", "dossier", "client", "resume", "resumer",
+            "question", "reponse", "donne", "donner", "aussi",
+            "partie", "partir", "faire", "etre", "avoir", "aller",
+            "comme", "alors", "apres", "avant", "encore", "toujours",
+            "jamais", "toutes", "toute", "tous", "tout", "plusieurs",
+            "quelques", "beaucoup", "souvent", "parfois", "maintenant",
+            "aujourd", "hier", "demain", "matin", "soir", "jour",
+            "semaine", "mois", "annee", "temps", "heure", "minute",
+            "proposition", "propose", "proposer", "offre", "offert",
+            "offrir", "financier", "financiere", "finance", "finances",
+            "budget", "prix", "cout", "couts", "montant", "euro",
+            "euros", "devis", "facture", "facturation", "paiement",
+            "payer", "paye", "versement", "provision", "honoraires",
+            "tarif", "tarifs", "forfait", "forfaits", "total",
+            "somme", "sommes", "argent", "gratuit", "gratuite",
+            "avec", "principaux", "principales", "important", "importants",
+            "importants", "details", "detail", "information", "informations",
+        }
+        for word in raw_words:
             w = word.strip().lower()
             if len(w) < 4:
                 continue
-            if w in (
-                "moi", "vous", "dossier", "client", "resume", "resumer",
-                "question", "reponse", "donne", "donner", "aussi",
-                "partie", "partir", "faire", "etre", "avoir", "aller",
-                "comme", "alors", "apres", "avant", "encore", "toujours",
-                "jamais", "toutes", "toute", "tous", "tout", "plusieurs",
-                "quelques", "beaucoup", "souvent", "parfois", "maintenant",
-                "aujourd", "hier", "demain", "matin", "soir", "jour",
-                "semaine", "mois", "annee", "temps", "heure", "minute",
-                "proposition", "propose", "proposer", "offre", "offert",
-                "offrir", "financier", "financiere", "finance", "finances",
-                "budget", "prix", "cout", "couts", "montant", "euro",
-                "euros", "devis", "facture", "facturation", "paiement",
-                "payer", "paye", "versement", "provision", "honoraires",
-                "tarif", "tarifs", "forfait", "forfaits", "total",
-                "somme", "sommes", "argent", "gratuit", "gratuite",
-            ):
+            w_norm = normalize("NFD", w).encode("ascii", "ignore").decode("ascii")
+            if w_norm in STOP_WORDS:
                 continue
-            keywords.append(word)   # garder la casse originale (ex: Lampaert)
+            # Score de pertinence : majuscule initiale (nom propre) = +10, longueur = +len
+            score = len(w)
+            if word[0].isupper():
+                score += 10
+            keywords.append((score, word))   # garder la casse originale
         if keywords:
-            return await _search_historical_by_keyword(db_path, keywords[0], year=year, limit=lim)
+            # Trier par score décroissant → le plus pertinent en premier
+            keywords.sort(key=lambda x: x[0], reverse=True)
+            best = keywords[0][1]
+            log.info("charlie.archive_keyword", best=best, all_keywords=[k[1] for k in keywords[:5]])
+            return await _search_historical_by_keyword(db_path, best, year=year, limit=lim)
         if year:
             return await _search_historical_all(db_path, year=year, limit=lim)
         return []
