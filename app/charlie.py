@@ -1624,8 +1624,8 @@ async def ask_charlie(
 
     # ── 5. Résumé de dossier — LLM CLAUDE avec prompt parfait ──
     if is_dossier_summary and (archive_rows or rows):
-        # Utiliser Claude (fallback) pour les résumés — deepseek ne sait pas synthétiser
-        summary_model = settings.llm_model_fallback or model
+        # Utiliser le modèle chat (Kimi K2.6 sur Ollama Pro) pour les résumés
+        summary_model = model
 
         # Assembler les contenus des emails (body complet, pas preview)
         email_parts: list[str] = []
