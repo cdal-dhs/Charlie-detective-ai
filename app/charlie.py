@@ -1667,6 +1667,7 @@ RÉPONSE :"""
 
             for attempt in (1, 2):
                 try:
+                    log.info("charlie.dossier_summary_llm_call", dossier_id=dossier_id, model=summary_model, attempt=attempt, prompt_len=len(dossier_prompt))
                     response = await complete(
                         model=summary_model,
                         messages=[{"role": "user", "content": dossier_prompt}],
@@ -1674,8 +1675,9 @@ RÉPONSE :"""
                         temperature=0.3,
                     )
                     response = response.strip() if response else ""
-                    # Garde anti-vide et anti-tableau
-                    if response and len(response) > 50 and "- " not in response[:20] and "|" not in response[:50]:
+                    log.info("charlie.dossier_summary_llm_response", dossier_id=dossier_id, attempt=attempt, response_len=len(response), response_preview=response[:300])
+                    # Garde anti-vide seulement — on laisse le LLM décider du format
+                    if response and len(response) > 50:
                         log.info("charlie.dossier_summary_ok", dossier_id=dossier_id, model=summary_model, attempt=attempt, len=len(response))
                         await _auto_save_fact(db_path, question, response, dossier_id)
                         return CharlieResult(
@@ -1687,7 +1689,7 @@ RÉPONSE :"""
                             vault_notes=vault_notes,
                             hide_rows=True,  # ← Masque le tableau SQL dans le chat
                         )
-                    log.warning("charlie.dossier_summary_bad_format", attempt=attempt, preview=response[:120])
+                    log.warning("charlie.dossier_summary_too_short", attempt=attempt, preview=response[:300] if response else "(vide)")
                 except Exception as e:
                     log.warning("charlie.dossier_summary_failed", attempt=attempt, error=str(e))
 
