@@ -182,21 +182,25 @@ DETECTIVE_BE/
 
 ## Statut
 
-✅ **Production active** — `detective.digitalhs.biz` — **V1.17.3**
+✅ **Production active** — `detective.digitalhs.biz` — **v1.18.6**
 
-- **Pipeline IMAP** : polling 3 boîtes, classification 8 catégories, priorité intelligente
-- **Génération brouillon** : style Daniel, multilingue FR/NL/EN, fallback OpenRouter
-- **Livraison V2a — Drafts IMAP** : dépôt direct des brouillons dans la boîte source avec flag `\Draft` + fallback Resend (V1.17.3)
-- **Cockpit web** : inbox filtrable, conversation avec viewer pièces jointes (badge, liste, preview, download), bloc Charlie remonté à droite avec `Email #id` en évidence (V1.17.3)
+- **Pipeline IMAP** : polling 3 boîtes, classification 8 catégories, priorité intelligente, skip+flag historique avant 20/05/2026
+- **Génération brouillon** : style Daniel, multilingue FR/NL/EN, fallback OpenRouter, date/heure originale incluse
+- **Livraison V2a — Drafts IMAP** : dépôt direct dans la boîte source avec flag `\Draft`, vérification post-dépôt, fallback Resend (v1.18.5)
+- **Cockpit web** : inbox filtrable (200 mails), conversation avec viewer pièces jointes, bloc Charlie remonté à droite
 - **Chat AI Charlie** :
-  - SQL programmatique bypass LLM (comptages + statuts pending/urgent, V1.16.13)
-  - Cerveau2 vault + **fallback direct** sur les fiches entités non indexées (V1.16.12)
-  - **Nuage de liaison familial** (`épouse`, `mari`, `conjoint`, etc. via wikilinks YAML, V1.16.12)
+  - SQL programmatique bypass LLM (comptages + statuts pending/urgent)
+  - Cerveau2 vault + fallback direct sur fiches entités non indexées
+  - **Nuage de liaison familial** (wikilinks YAML : `épouse`, `mari`, `conjoint`, `fille`, `fils`, etc.)
   - Archives historiques (boite1/2/3) + mémoire courte
-  - Garde anti-réponse vide + garde anti-"pas trouvé" malgré données présentes (V1.16.13)
+  - Garde anti-réponse vide + garde anti-"pas trouvé" malgré données présentes
 - **Slack Bot Charlie AI** : @mention + DM sur #detective
-- **Cerveau2 vault** : ingestion 100% emails + pièces jointes, recherche sans troncation, insensible aux accents, blindé injection
-- **Dashboard admin** : stats, settings LLM, audit logs
+- **Cerveau2 vault** :
+  - Ingestion 100% emails + pièces jointes (zéro tolérance)
+  - **Fix v1.18.6** : mapping priorité `high→urgent`/`low→faible`, timeout 120s, troncage body 150K, log réponse 422
+  - Recherche sans troncation, insensible aux accents, blindé injection
+  - Extraction auto fiches entreprise (regex) + contact (LLM) → voir [`docs/CERVEAU2_EXTRACTION.md`](docs/CERVEAU2_EXTRACTION.md)
+- **Dashboard admin** : stats, settings LLM, audit logs, télémétrie poller, backup Cerveau2
 
 Voir `docs/ROADMAP.md` pour la roadmap V2b/V2c (feedback loop qualité Daniel, latence Charlie).
 
@@ -204,8 +208,16 @@ Voir `docs/ROADMAP.md` pour la roadmap V2b/V2c (feedback loop qualité Daniel, l
 
 ## Versions
 
-Version source de vérité : **`app/_version.py`** (`VERSION = "1.17.3"`).
+Version source de vérité : **`app/_version.py`** (`VERSION = "1.18.6"`).
 
 Le badge affiché dans le cockpit est lu dynamiquement depuis `app/_version.py`. **Tolérance zéro** sur la désynchronisation.
 
 Voir [`CHANGELOG.md`](CHANGELOG.md) pour l'historique détaillé.
+
+---
+
+## Documentation Cerveau2
+
+- [`docs/CERVEAU2_EXTRACTION.md`](docs/CERVEAU2_EXTRACTION.md) — **Comment traiter et extraire les informations** (fiches entreprise, contact, wikilinks, ingestion PJ)
+- [`docs/CERVEAU2_API.md`](docs/CERVEAU2_API.md) — Référence API interne (endpoints, formats, mappings)
+- [`docs/CERVEAU2_INTEGRATION.md`](docs/CERVEAU2_INTEGRATION.md) — Guide d'intégration pour agents externes (Hermes, etc.)

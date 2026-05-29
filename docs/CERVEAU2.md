@@ -2,6 +2,7 @@
 
 > Référence rapide pour tout agent Claude Code travaillant sur charlie.py, cerveau_client.py ou le pipeline IMAP.
 > Document complet : `/Users/cdal/DEV_APP_CLAUDE/CERVEAU2-DEtective/CERVEAU2-REF.md`
+> Extraction d'informations (fiches entreprise, contact, wikilinks) : [`docs/CERVEAU2_EXTRACTION.md`](CERVEAU2_EXTRACTION.md)
 
 ---
 
@@ -12,7 +13,7 @@
 | URL | `https://cerveau2-det.digitalhs.biz` |
 | Auth | `Authorization: Bearer {CERVEAU2_API_SECRET}` |
 | VPS | `root@69.62.110.165` → `/opt/CERVEAU2-Det` |
-| Healthcheck | `GET /health` → `{"status":"ok","version":"0.4.0"}` |
+| Healthcheck | `GET /health` → `{"status":"ok","version":"0.8.2"}` |
 
 **Variables `.env` DETECTIVE_BE** :
 ```env
@@ -69,7 +70,7 @@ dossier_list = await query_dossiers(
 
 ## Pipeline IMAP → Cerveau2
 
-Dans `app/workers/imap_poller.py` / pipeline, après classification :
+Dans `app/workers/imap_poller.py` / pipeline, après classification (hors newsletter/phishing) :
 
 ```python
 await feed_correspondance(
@@ -82,18 +83,21 @@ await feed_correspondance(
     objet="Sujet du mail",
     body="Corps (anonymisé si nécessaire)",
     marque="detectivebelgique",
-    dossier_id="ADF",        # si identifié
-    client_type="particulier",  # si connu — sinon "inconnu"
+    dossier_id="ADF",        # si identifié, sinon "GENERAL"
     categorie="demande_client",
     zone="jaune",
     langue="fr",
-    priorite="normal",
+    priorite="normal",       # high→urgent, normal→normal, low→faible (mapping automatique v1.18.6)
     base_url=settings.cerveau2_base_url,
     api_secret=settings.cerveau2_api_secret,
 )
 ```
 
-**Important** : si `dossier_id` est nouveau, Cerveau2 crée automatiquement son `_index.md` et l'ajoute au registre (`dossier_registry.jsonl`).
+**Important** :
+- Si `dossier_id` est nouveau, Cerveau2 crée automatiquement son `_index.md` et l'ajoute au registre (`dossier_registry.jsonl`).
+- `dossier_id` vide est remplacé par `"GENERAL"` avant envoi (Cerveau2 rejette les vides).
+- Body tronqué à 150K caractères si trop long (timeout 120s).
+- **Skip newsletter/phishing** : ces catégories ne sont pas ingérées (bruit inutile).
 
 ---
 

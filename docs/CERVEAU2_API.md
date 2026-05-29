@@ -88,8 +88,10 @@ Ajoute un document (PDF, DOCX, image OCR, TXT, etc.) au vault Cerveau2. Appel **
 
 #### Garde-fous côté client (`app/cerveau_client.py` → `feed_document()`)
 
-- Timeout : **15 secondes**.
-- Retry : **3 tentatives** avec backoff exponentiel.
+- Timeout : **120 secondes** (Cerveau2 met 40-120s pour indexer les embeddings + fallback LLM).
+- Retry : **3 tentatives** avec backoff exponentiel (2s, 4s, 8s).
+- Body tronqué à **150 000 caractères** si trop long (évite les timeouts sur gros emails).
+- `dossier_id` vide remplacé par `"GENERAL"` (Cerveau2 rejette les vides).
 - Stockage vault : `02_dossiers/{dossier_id}/documents/{date}_{type}_{slug}.md`
 
 ---
@@ -115,9 +117,11 @@ Ajoute un email au vault Cerveau2. Appel **fire-and-forget** depuis l'agent.
   "categorie": "string",         // ex: "demande_client", "facture"...
   "zone": "jaune|rouge",         // défaut "jaune"
   "langue": "fr|nl|en",          // défaut "fr"
-  "priorite": "normal|high|low"  // défaut "normal"
+  "priorite": "urgent|normal|faible"  // défaut "normal"
 }
 ```
+
+> **Mapping interne → Cerveau2** : `high` → `urgent`, `normal` → `normal`, `low` → `faible`. Cerveau2 valide via enum FastAPI — les valeurs `high`/`low` provoquaient un HTTP 422 avant v1.18.6.
 
 #### Réponse 200
 
@@ -131,8 +135,10 @@ Ajoute un email au vault Cerveau2. Appel **fire-and-forget** depuis l'agent.
 
 #### Garde-fous côté client
 
-- Timeout : **15 secondes**.
-- Retry : **3 tentatives** avec backoff implicite (boucle `for attempt`).
+- Timeout : **120 secondes** (indexation embeddings + fallback LLM peuvent prendre 40-120s).
+- Retry : **3 tentatives** avec backoff exponentiel (2s, 4s, 8s).
+- Body tronqué à **150 000 caractères** avec suffixe `[... tronqué]`.
+- `dossier_id` vide → remplacé par `"GENERAL"` (rejet 422 si vide).
 - Si `created: false` → l'email était déjà ingéré, ce n'est **pas** une erreur.
 
 ---
@@ -240,6 +246,10 @@ curl -s -X POST https://cerveau2-det.digitalhs.biz/ingest-email \
 
 | Date | Problème | Cause | Fix |
 |---|---|---|---|
+| 2026-05-29 | Emails `high`/`low` non ingérés | Enum Cerveau2 : `urgent\|normal\|faible` | `_map_priority()` : `high→urgent`, `low→faible` (v1.18.6) |
+| 2026-05-29 | Timeout ingestion systématique | Cerveau2 met 40-120s (embeddings) | Timeout client 15s → **120s** (v1.18.6) |
+| 2026-05-29 | `dossier_id` vide rejeté | Validation FastAPI `min_length=1` | Fallback `"GENERAL"` (v1.18.6) |
+| 2026-05-29 | Body trop long → timeout | Emails de 300K+ caractères | Troncage à 150K caractères (v1.18.6) |
 | 2026-05-20 | 422 sur `/query` | `limit: 100` > max 20 | Cap à 20 côté client |
 | 2026-05-20 | Emails non retrouvés dans Cerveau2 | Mauvais slug `marque` | Mapping `detective_belgique` → `detectivebelgique` |
 | 2026-05-20 | Ingestion lente/bloquée | FETCH IMAP batch multi-messages | Passage au FETCH un par un (fiabilité) |

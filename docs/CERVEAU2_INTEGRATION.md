@@ -1,7 +1,7 @@
 # Intégration Cerveau2 — Guide pour Agents Externes
 
 > Document technique : comment connecter un agent tiers (Hermes, copilote interne, etc.) au vault Cerveau2-Detective.
-> Version : v1.13.4
+> Version : v1.18.6
 > Vault : https://cerveau2-det.digitalhs.biz
 
 ---
@@ -91,11 +91,13 @@ Tous les endpoints sont protégés par **Bearer Token** (voir §3).
   "categorie": "surveillance",
   "zone": "jaune",
   "langue": "fr",
-  "priorite": "high"
+  "priorite": "urgent"    // urgent | normal | faible (high→urgent, low→faible)
 }
 ```
 
 **Réponse :** `{"created": true}` ou HTTP 409 si doublon.
+
+> **Garde-fous agent externe** : ne pas envoyer `high`/`low` — Cerveau2 valide via enum FastAPI. Envoyez `urgent`/`normal`/`faible`.
 
 ### 2.3 Ingestion Document — `POST /ingest-note`
 
@@ -187,7 +189,11 @@ async def ask_cerveau(question: str, dossier_id: str | None = None) -> dict:
 
 async def save_email_to_cerveau(payload: dict) -> bool:
     """Agent Hermes alimente Cerveau2 avec un email traité."""
-    async with httpx.AsyncClient(timeout=15.0) as client:
+    # Troncage body à 150K caractères pour éviter les timeouts
+    body = payload.get("body", "")
+    if len(body) > 150_000:
+        payload["body"] = body[:150_000] + "\n\n[... tronqué]"
+    async with httpx.AsyncClient(timeout=120.0) as client:  # 120s : Cerveau2 indexe les embeddings
         resp = await client.post(
             f"{CERVEAU_BASE}/ingest-email",
             json=payload,
@@ -203,6 +209,7 @@ async def save_email_to_cerveau(payload: dict) -> bool:
 ### 5.1 Path Traversal — dossier_id
 - **Regex obligatoire** : `^[A-Za-z0-9_-]+$`
 - **Rejet silencieux** : si un `dossier_id` invalide est envoyé, Cerveau2 retourne `[]` ou dépose en `01_inbox/` (fallback)
+- **Jamais vide** : Cerveau2 rejette `dossier_id=""` avec HTTP 422. Fallback côté agent : `"GENERAL"`.
 - **Jamais de concaténation directe** : ne faites pas `vault_path / dossier_id` sans validation
 
 ### 5.2 Zone Rouge
