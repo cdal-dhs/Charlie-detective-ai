@@ -813,7 +813,7 @@ def _build_keyword_sql(question: str) -> str | None:
         likes.append(f"body_preview LIKE '%{kw_safe}%'")
 
     where = " OR ".join(likes)
-    return f"SELECT id, subject, sender, received_at, category, status, priority, body_preview FROM mail_processed WHERE ({where}) ORDER BY received_at DESC LIMIT 20"
+    return f"SELECT id, subject, sender, received_at, category, status, priority, body_preview, substr(body, 1, 3000) as body FROM mail_processed WHERE ({where}) ORDER BY received_at DESC LIMIT 20"
 
 
 def _normalize(text: str) -> str:
@@ -1307,9 +1307,28 @@ async def ask_charlie(
 
     # SQL
     if rows:
-        context_parts.append(f"EMAILS BASE COURANTE — SQL ({len(rows)} ligne(s)) :")
-        context_parts.append(_sanitize_rows_for_prompt(rows))
-        context_parts.append("")
+        if is_dossier_summary:
+            # Pour les résumés de dossier, le LLM a besoin du CONTENU des emails,
+            # pas d'un tableau de métadonnées. On injecte les body complets.
+            context_parts.append(f"EMAILS BASE COURANTE ({len(rows)} email(s)) :")
+            total_body = 0
+            for r in rows[:10]:
+                body = r.get("body") or r.get("body_preview") or ""
+                if not body:
+                    continue
+                subject = r.get("subject") or "Sans sujet"
+                date = r.get("received_at") or r.get("processed_at") or ""
+                context_parts.append(f"--- Email : {subject} ({date}) ---")
+                context_parts.append(body[:1500])
+                total_body += len(body[:1500])
+                if total_body > 6000:
+                    context_parts.append("[… tronqué]")
+                    break
+            context_parts.append("")
+        else:
+            context_parts.append(f"EMAILS BASE COURANTE — SQL ({len(rows)} ligne(s)) :")
+            context_parts.append(_sanitize_rows_for_prompt(rows))
+            context_parts.append("")
     elif sql:
         context_parts.append("EMAILS BASE COURANTE : aucun email trouvé.")
         context_parts.append("")
@@ -1455,30 +1474,34 @@ async def ask_charlie(
         )
 
     # ── 5. Résumé de dossier — prompt LLM ciblé avec contenu des emails ──
+    _BAD_RESPONSE = ("je n'ai pas trouvé", "aucun résultat", "aucune information", "je ne trouve pas", "pas d'information", "aucune donnée")
     if is_dossier_summary and (archive_rows or rows):
-        # Construire un prompt ultra-ciblé avec SEULEMENT les body_preview des emails pertinents
+        # Construire un prompt ultra-ciblé avec le CONTENU COMPLET des emails (body > body_preview)
         email_parts: list[str] = []
         total_preview = 0
         all_emails = (archive_rows or []) + (rows or [])
         # Trier par date
         all_emails.sort(key=lambda r: r.get("received_at", r.get("date", "")), reverse=True)
         for r in all_emails[:10]:
-            preview = r.get("body_preview", "")
-            if not preview:
+            # Priorité absolue : body complet (3000 chars max) pour mail_processed,
+            # sinon body_preview (archives historiques déjà enrichies dans _search_historical_by_keyword)
+            content = r.get("body") or r.get("body_preview") or ""
+            if not content:
                 continue
             subject = r.get("subject") or "Sans sujet"
             date = r.get("received_at") or r.get("date") or ""
             email_parts.append(f"--- Email : {subject} ({date}) ---")
-            email_parts.append(preview[:2000])
-            total_preview += len(preview[:2000])
+            email_parts.append(content[:2000])
+            total_preview += len(content[:2000])
             if total_preview > 10000:
                 email_parts.append("[… tronqué]")
                 break
 
         if email_parts:
-            dossier_prompt = f"""Tu es Charlie, l'assistant IA de Daniel Hurchon (Detective.be). Version {VERSION}.
+            for attempt in (1, 2):
+                dossier_prompt = f"""Tu es Charlie, l'assistant IA de Daniel Hurchon (Detective.be). Version {VERSION}.
 
-Daniel demande un RÉSUMÉ DU DOSSIER **{dossier_id}**. Tu as trouvé les emails suivants dans les archives.
+Daniel demande un RÉSUMÉ DU DOSSIER **{dossier_id}**. Tu as trouvé les emails suivants.
 
 {chr(10).join(email_parts)}
 
@@ -1491,27 +1514,31 @@ INSTRUCTIONS ABSOLUES :
 
 RÉPONSE À DANIEL :"""
 
-            try:
-                response = await complete(
-                    model=model,
-                    messages=[{"role": "user", "content": dossier_prompt}],
-                    max_tokens=800,
-                    temperature=0.2,
-                )
-                response = response.strip() if response else ""
-                if response:
-                    log.info("charlie.dossier_summary_llm", dossier_id=dossier_id, answer_len=len(response))
-                    await _auto_save_fact(db_path, question, response, dossier_id)
-                    return CharlieResult(
-                        response_text=response,
-                        sql=sql,
-                        rows=rows,
-                        sql_safe=True,
-                        sql_error=None,
-                        vault_notes=vault_notes,
+                try:
+                    response = await complete(
+                        model=model,
+                        messages=[{"role": "user", "content": dossier_prompt}],
+                        max_tokens=800,
+                        temperature=0.2,
                     )
-            except Exception as e:
-                log.warning("charlie.dossier_summary_llm_failed", error=str(e))
+                    response = response.strip() if response else ""
+                    if response and not any(p in response.lower() for p in _BAD_RESPONSE):
+                        log.info("charlie.dossier_summary_llm", dossier_id=dossier_id, answer_len=len(response), attempt=attempt)
+                        await _auto_save_fact(db_path, question, response, dossier_id)
+                        return CharlieResult(
+                            response_text=response,
+                            sql=sql,
+                            rows=rows,
+                            sql_safe=True,
+                            sql_error=None,
+                            vault_notes=vault_notes,
+                        )
+                    log.warning("charlie.dossier_summary_empty_or_bad", attempt=attempt, response_preview=response[:120] if response else "(vide)")
+                except Exception as e:
+                    log.warning("charlie.dossier_summary_llm_failed", attempt=attempt, error=str(e))
+
+            # Les 2 tentatives ont échoué — on continue vers le LLM final mais on logue
+            log.warning("charlie.dossier_summary_bypass_failed", dossier_id=dossier_id, email_parts=len(email_parts))
 
     # ── 6. Bypass LLM extraction directe depuis notes Cerveau2 (brutes, 0 ms, 100% déterministe) ──
     direct_answer: str | None = None
@@ -1651,7 +1678,23 @@ RÉPONSE À DANIEL :"""
     if not response or (any(p in response.lower() for p in _BAD) and (rows or archive_rows)):
         response = ""
     if not response:
-        if is_count_request and (rows or archive_rows):
+        if is_dossier_summary and (rows or archive_rows):
+            # Dernier recours pour un résumé de dossier : on ne fait JAMAIS un tableau brut.
+            # On retourne un message propre avec les liens vers les emails trouvés.
+            all_emails = (rows or []) + (archive_rows or [])
+            all_emails.sort(key=lambda r: r.get("received_at", r.get("date", "")), reverse=True)
+            lines = [f"J'ai trouvé **{len(all_emails)}** email{'s' if len(all_emails) > 1 else ''} liés au dossier **{dossier_id}**, mais je n'ai pas réussi à les synthétiser automatiquement. Voici les sujets :", ""]
+            for r in all_emails[:10]:
+                subject = r.get("subject") or "Sans sujet"
+                date = r.get("received_at") or r.get("date") or ""
+                line = f"- {subject}"
+                if date:
+                    line += f" ({date})"
+                lines.append(line)
+            if len(all_emails) > 10:
+                lines.append(f"… et {len(all_emails) - 10} autres.")
+            response = "\n".join(lines)
+        elif is_count_request and (rows or archive_rows):
             sql_cnt = int(next(iter(rows[0].values()))) if rows and len(rows) == 1 and len(rows[0]) == 1 else 0
             arc_cnt = len(archive_rows)
             total = sql_cnt + arc_cnt
