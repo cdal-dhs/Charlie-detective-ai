@@ -182,17 +182,19 @@ DETECTIVE_BE/
 
 ## Statut
 
-✅ **Production active** — `detective.digitalhs.biz` — **v1.18.6**
+✅ **Production active** — `detective.digitalhs.biz` — **v1.18.7**
 
 - **Pipeline IMAP** : polling 3 boîtes, classification 8 catégories, priorité intelligente, skip+flag historique avant 20/05/2026
 - **Génération brouillon** : style Daniel, multilingue FR/NL/EN, fallback OpenRouter, date/heure originale incluse
 - **Livraison V2a — Drafts IMAP** : dépôt direct dans la boîte source avec flag `\Draft`, vérification post-dépôt, fallback Resend (v1.18.5)
 - **Cockpit web** : inbox filtrable (200 mails), conversation avec viewer pièces jointes, bloc Charlie remonté à droite
 - **Chat AI Charlie** :
-  - SQL programmatique bypass LLM (comptages + statuts pending/urgent)
+  - SQL programmatique bypass LLM (comptages + statuts pending/urgent + recherche par mot-clé factuelle)
   - Cerveau2 vault + fallback direct sur fiches entités non indexées
   - **Nuage de liaison familial** (wikilinks YAML : `épouse`, `mari`, `conjoint`, `fille`, `fils`, etc.)
-  - Archives historiques (boite1/2/3) + mémoire courte
+  - Archives historiques (boite1/2/3) par dossier_id **ou par mot-clé extrait de la question**
+  - **Guard anti-hallucination** : si aucune source n'a de données, retourne "Je n'ai trouvé aucune information..." sans appeler le LLM
+  - Mémoire courte + corrections utilisateur (priorité absolue)
   - Garde anti-réponse vide + garde anti-"pas trouvé" malgré données présentes
 - **Slack Bot Charlie AI** : @mention + DM sur #detective
 - **Cerveau2 vault** :

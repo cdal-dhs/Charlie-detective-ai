@@ -735,6 +735,57 @@ def _build_status_sql(question: str, dossier_id: str | None) -> str | None:
     return f"SELECT id, subject, received_at, category, status, priority FROM mail_processed WHERE {where} ORDER BY processed_at DESC LIMIT 20"
 
 
+def _build_keyword_sql(question: str) -> str | None:
+    """Génère un SQL de recherche par mot-clé pour les questions factuelles
+    sur un dossier/client spécifique (ex: 'résume le dossier Lampaert').
+
+    Retourne None si aucun mot-clé significatif n'est trouvé.
+    """
+    q = question.lower()
+    # Extraire les noms propres (majuscule initiale) et mots longs significatifs
+    keywords = set()
+    for word in re.findall(r"[A-Za-zÀ-Ÿà-ÿ]{4,}", question):
+        w = word.strip().lower()
+        if len(w) < 4:
+            continue
+        # Ignorer les mots vides
+        if w in (
+            "moi", "vous", "dossier", "client", "resume", "resumer",
+            "question", "reponse", "donne", "donner", "aussi",
+            "partie", "partir", "faire", "etre", "avoir", "aller",
+            "comme", "alors", "apres", "avant", "encore", "toujours",
+            "jamais", "toutes", "toute", "tous", "tout", "plusieurs",
+            "quelques", "beaucoup", "souvent", "parfois", "maintenant",
+            "aujourd", "hier", "demain", "matin", "soir", "jour",
+            "semaine", "mois", "annee", "temps", "heure", "minute",
+            "proposition", "propose", "proposer", "offre", "offert",
+            "offrir", "financier", "financiere", "finance", "finances",
+            "budget", "prix", "cout", "couts", "montant", "euro",
+            "euros", "devis", "facture", "facturation", "paiement",
+            "payer", "paye", "versement", "provision", "honoraires",
+            "tarif", "tarifs", "forfait", "forfaits", "total",
+            "somme", "sommes", "argent", "gratuit", "gratuite",
+        ):
+            continue
+        keywords.add(w)
+        # Aussi la version avec majuscule initiale
+        keywords.add(word)
+
+    if not keywords:
+        return None
+
+    likes = []
+    for kw in sorted(keywords)[:5]:  # max 5 mots pour éviter les requêtes lourdes
+        # Échapper les quotes simples pour éviter l'injection SQL
+        kw_safe = kw.replace("'", "''")
+        likes.append(f"subject LIKE '%{kw_safe}%'")
+        likes.append(f"body LIKE '%{kw_safe}%'")
+        likes.append(f"body_preview LIKE '%{kw_safe}%'")
+
+    where = " OR ".join(likes)
+    return f"SELECT id, subject, sender, received_at, category, status, priority, body_preview FROM mail_processed WHERE ({where}) ORDER BY received_at DESC LIMIT 20"
+
+
 def _normalize(text: str) -> str:
     return normalize("NFKD", text.lower()).encode("ascii", "ignore").decode("ascii")
 
@@ -908,6 +959,12 @@ async def ask_charlie(
     if not sql:
         sql = _build_status_sql(question, dossier_id) or ""
 
+    # Fallback recherche par mot-clé pour les questions factuelles spécifiques
+    if not sql and not is_count_request and not is_dossier_count and not is_dossier_list:
+        sql = _build_keyword_sql(question) or ""
+        if sql:
+            log.info("charlie.keyword_sql", question=question[:60], sql_preview=sql[:80])
+
     if not sql:
         try:
             from datetime import date as _date
@@ -1020,6 +1077,33 @@ async def ask_charlie(
         lim = 500 if is_count_request else 50
         if dossier_id:
             return await _search_historical_by_keyword(db_path, dossier_id, year=year, limit=lim)
+        # Si pas de dossier_id → chercher par mots-clés extraits de la question
+        keywords = []
+        for word in re.findall(r"[A-Za-zÀ-Ÿà-ÿ]{4,}", question):
+            w = word.strip().lower()
+            if len(w) < 4:
+                continue
+            if w in (
+                "moi", "vous", "dossier", "client", "resume", "resumer",
+                "question", "reponse", "donne", "donner", "aussi",
+                "partie", "partir", "faire", "etre", "avoir", "aller",
+                "comme", "alors", "apres", "avant", "encore", "toujours",
+                "jamais", "toutes", "toute", "tous", "tout", "plusieurs",
+                "quelques", "beaucoup", "souvent", "parfois", "maintenant",
+                "aujourd", "hier", "demain", "matin", "soir", "jour",
+                "semaine", "mois", "annee", "temps", "heure", "minute",
+                "proposition", "propose", "proposer", "offre", "offert",
+                "offrir", "financier", "financiere", "finance", "finances",
+                "budget", "prix", "cout", "couts", "montant", "euro",
+                "euros", "devis", "facture", "facturation", "paiement",
+                "payer", "paye", "versement", "provision", "honoraires",
+                "tarif", "tarifs", "forfait", "forfaits", "total",
+                "somme", "sommes", "argent", "gratuit", "gratuite",
+            ):
+                continue
+            keywords.append(word)   # garder la casse originale (ex: Lampaert)
+        if keywords:
+            return await _search_historical_by_keyword(db_path, keywords[0], year=year, limit=lim)
         if year:
             return await _search_historical_all(db_path, year=year, limit=lim)
         return []
@@ -1374,6 +1458,22 @@ async def ask_charlie(
         )
     if vault_has_bad:
         log.info("charlie.vault_answer_bad", question=question[:60], answer_preview=vault_answer[:120])
+
+    # ── 6.5 Guard anti-hallucination — si aucune source n'a de données ──
+    if not vault_notes and not rows and not archive_rows and not vault_answer and not direct_answer:
+        # Aucun contexte trouvé : le LLM inventerait obligatoirement.
+        # On retourne une réponse honnête sans appeler le LLM.
+        log.info("charlie.empty_guard_triggered", question=question[:60])
+        msg = "Je n'ai trouvé aucune information sur ce sujet dans les sources disponibles."
+        await _auto_save_fact(db_path, question, msg, dossier_id)
+        return CharlieResult(
+            response_text=msg,
+            sql=sql,
+            rows=rows,
+            sql_safe=True,
+            sql_error=None,
+            vault_notes=vault_notes,
+        )
 
     # ── 7. Appel LLM final pour les questions spécifiques ──
     if is_list_request:
