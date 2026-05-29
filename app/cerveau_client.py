@@ -1,11 +1,26 @@
 """Client HTTP asynchrone pour l'API Cerveau2-Det."""
 import asyncio
+import contextlib
 from dataclasses import dataclass
 
 import httpx
 import structlog
 
 log = structlog.get_logger()
+
+_MAX_BODY_LEN = 150_000
+
+_PRIORITY_MAP = {"high": "urgent", "normal": "normal", "low": "faible"}
+
+
+def _map_priority(p: str) -> str:
+    return _PRIORITY_MAP.get((p or "").lower().strip(), "normal")
+
+
+def _trim_body(body: str) -> str:
+    if not body or len(body) <= _MAX_BODY_LEN:
+        return body or ""
+    return body[:_MAX_BODY_LEN] + f"\n\n[... tronqué, taille originale : {len(body)} caractères]"
 
 
 @dataclass
@@ -125,6 +140,11 @@ async def feed_correspondance(
     if not base_url or not api_secret:
         return False
 
+    # Normalisation : Cerveau2 rejette dossier_id vide et priorité "high"/"low"
+    dossier_id = (dossier_id or "").strip() or "GENERAL"
+    body = _trim_body(body)
+    priorite = _map_priority(priorite)
+
     payload = {
         "message_id": message_id,
         "direction": direction,
@@ -165,12 +185,16 @@ async def feed_correspondance(
                 # Doublon — considéré comme succès
                 log.info("cerveau.feed_duplicate", message_id=message_id, dossier_id=dossier_id)
                 return True
+            err_body = ""
+            with contextlib.suppress(Exception):
+                err_body = e.response.text[:500]
             log.warning(
                 "cerveau.feed_failed",
                 attempt=attempt,
                 status=e.response.status_code,
                 message_id=message_id,
                 dossier_id=dossier_id,
+                response=err_body,
             )
         except Exception as e:
             log.warning(
@@ -183,6 +207,9 @@ async def feed_correspondance(
 
         if attempt < max_retries:
             await asyncio.sleep(2 ** attempt)
+
+    return False
+
 
 async def feed_document(
     *,
@@ -206,6 +233,10 @@ async def feed_document(
     """
     if not base_url or not api_secret:
         return False
+
+    # Normalisation : Cerveau2 rejette dossier_id vide
+    dossier_id = (dossier_id or "").strip() or "GENERAL"
+    body = _trim_body(body)
 
     payload = {
         "id": doc_id,
@@ -242,12 +273,16 @@ async def feed_document(
             if e.response.status_code == 409:
                 log.info("cerveau.document_duplicate", doc_id=doc_id, dossier_id=dossier_id)
                 return True
+            err_body = ""
+            with contextlib.suppress(Exception):
+                err_body = e.response.text[:500]
             log.warning(
                 "cerveau.document_feed_failed",
                 attempt=attempt,
                 status=e.response.status_code,
                 doc_id=doc_id,
                 dossier_id=dossier_id,
+                response=err_body,
             )
         except Exception as e:
             log.warning(

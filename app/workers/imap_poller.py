@@ -1008,94 +1008,95 @@ async def _process_single_mail(
             )
         )
 
-        # --- Pièces jointes -> Cerveau2 (ZERO tolérance : TOUTES ingérées) ---
-        for att_filename, att_data in attachments:
-            att_text = extract_text_bytes(att_data, att_filename)
-            att_extractable = bool(att_text and att_text.strip())
-            if not att_extractable:
-                # Fallback : même non extractable, on ingère avec métadonnées pour référence
-                att_text = (
-                    f"[Pièce jointe non extractable automatiquement]\n"
-                    f"Fichier : {att_filename}\n"
-                    f"Taille : {len(att_data)} octets\n"
-                    f"Type : {Path(att_filename).suffix.lower() or 'inconnu'}"
+        # --- Pièces jointes -> Cerveau2 (skip newsletter / phishing : bruit) ---
+        if category not in ("newsletter", "phishing"):
+            for att_filename, att_data in attachments:
+                att_text = extract_text_bytes(att_data, att_filename)
+                att_extractable = bool(att_text and att_text.strip())
+                if not att_extractable:
+                    # Fallback : même non extractable, on ingère avec métadonnées pour référence
+                    att_text = (
+                        f"[Pièce jointe non extractable automatiquement]\n"
+                        f"Fichier : {att_filename}\n"
+                        f"Taille : {len(att_data)} octets\n"
+                        f"Type : {Path(att_filename).suffix.lower() or 'inconnu'}"
+                    )
+                    log.info(
+                        "poller.attachment_unextractable",
+                        mailbox=mailbox.name,
+                        uid=uid,
+                        filename=att_filename,
+                        dossier_id=dossier_id,
+                        size=len(att_data),
+                    )
+
+                # Hash déterministe (MD5) pour doc_id stable entre les redémarrages
+                att_hash = hashlib.md5(
+                    f"{mail_id}:{att_filename}".encode(), usedforsecurity=False
+                ).hexdigest()[:12]
+                att_id = f"att-{mail_id}-{att_hash}"
+
+                asyncio.create_task(  # noqa: RUF006
+                    feed_document(
+                        doc_id=att_id,
+                        type="document",
+                        dossier_id=dossier_id,
+                        marque=_marque,
+                        date=date_str,
+                        titre=f"[PJ] {att_filename}",
+                        body=att_text,
+                        metadata={
+                            "source": "piece_jointe_email",
+                            "parent_message_id": message_id or f"{mailbox.name}_{uid}",
+                            "filename": att_filename,
+                            "size_bytes": len(att_data),
+                        },
+                        zone="jaune",
+                        langue=language,
+                        base_url=settings.cerveau2_base_url,
+                        api_secret=settings.cerveau2_api_secret,
+                    )
                 )
                 log.info(
-                    "poller.attachment_unextractable",
+                    "poller.attachment_ingested",
                     mailbox=mailbox.name,
                     uid=uid,
                     filename=att_filename,
                     dossier_id=dossier_id,
                     size=len(att_data),
-                )
-
-            # Hash déterministe (MD5) pour doc_id stable entre les redémarrages
-            att_hash = hashlib.md5(
-                f"{mail_id}:{att_filename}".encode(), usedforsecurity=False
-            ).hexdigest()[:12]
-            att_id = f"att-{mail_id}-{att_hash}"
-
-            asyncio.create_task(  # noqa: RUF006
-                feed_document(
                     doc_id=att_id,
-                    type="document",
-                    dossier_id=dossier_id,
-                    marque=_marque,
-                    date=date_str,
-                    titre=f"[PJ] {att_filename}",
-                    body=att_text,
-                    metadata={
-                        "source": "piece_jointe_email",
-                        "parent_message_id": message_id or f"{mailbox.name}_{uid}",
-                        "filename": att_filename,
-                        "size_bytes": len(att_data),
-                    },
-                    zone="jaune",
-                    langue=language,
-                    base_url=settings.cerveau2_base_url,
-                    api_secret=settings.cerveau2_api_secret,
-                )
-            )
-            log.info(
-                "poller.attachment_ingested",
-                mailbox=mailbox.name,
-                uid=uid,
-                filename=att_filename,
-                dossier_id=dossier_id,
-                size=len(att_data),
-                doc_id=att_id,
-            )
-
-            # --- Extraction fiche entreprise depuis la pièce jointe ---
-            if att_extractable:
-                asyncio.create_task(  # noqa: RUF006
-                    _extract_and_feed_entreprise(
-                        text=att_text,
-                        subject=att_filename,
-                        dossier_id=dossier_id,
-                        marque=_marque,
-                        date_str=date_str,
-                        base_url=settings.cerveau2_base_url,
-                        api_secret=settings.cerveau2_api_secret,
-                        source_label=f"pièce jointe [{att_filename}]",
-                    )
                 )
 
-            # --- Extraction fiche contact depuis la pièce jointe (si texte extractable) ---
-            if att_extractable:
-                asyncio.create_task(  # noqa: RUF006
-                    _extract_and_feed_contact(
-                        text=att_text,
-                        subject=att_filename,
-                        sender=sender,
-                        dossier_id=dossier_id,
-                        marque=_marque,
-                        date_str=date_str,
-                        base_url=settings.cerveau2_base_url,
-                        api_secret=settings.cerveau2_api_secret,
-                        source_label=f"pièce jointe [{att_filename}]",
+                # --- Extraction fiche entreprise depuis la pièce jointe ---
+                if att_extractable:
+                    asyncio.create_task(  # noqa: RUF006
+                        _extract_and_feed_entreprise(
+                            text=att_text,
+                            subject=att_filename,
+                            dossier_id=dossier_id,
+                            marque=_marque,
+                            date_str=date_str,
+                            base_url=settings.cerveau2_base_url,
+                            api_secret=settings.cerveau2_api_secret,
+                            source_label=f"pièce jointe [{att_filename}]",
+                        )
                     )
-                )
+
+                # --- Extraction fiche contact depuis la pièce jointe (si texte extractable) ---
+                if att_extractable:
+                    asyncio.create_task(  # noqa: RUF006
+                        _extract_and_feed_contact(
+                            text=att_text,
+                            subject=att_filename,
+                            sender=sender,
+                            dossier_id=dossier_id,
+                            marque=_marque,
+                            date_str=date_str,
+                            base_url=settings.cerveau2_base_url,
+                            api_secret=settings.cerveau2_api_secret,
+                            source_label=f"pièce jointe [{att_filename}]",
+                        )
+                    )
 
     if category == "demande_client" and is_new and not settings.dry_run:
         incoming = IncomingMail(
