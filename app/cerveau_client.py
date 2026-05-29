@@ -165,7 +165,7 @@ async def feed_correspondance(
     max_retries = 3
     for attempt in range(1, max_retries + 1):
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
+            async with httpx.AsyncClient(timeout=60.0) as client:
                 resp = await client.post(
                     f"{base_url.rstrip('/')}/ingest-email",
                     json=payload,
@@ -254,7 +254,7 @@ async def feed_document(
     max_retries = 3
     for attempt in range(1, max_retries + 1):
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
+            async with httpx.AsyncClient(timeout=60.0) as client:
                 resp = await client.post(
                     f"{base_url.rstrip('/')}/ingest-note",
                     json=payload,
