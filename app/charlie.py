@@ -1301,7 +1301,7 @@ async def ask_charlie(
         context_parts.append("EMAILS BASE COURANTE : aucun email trouvé.")
         context_parts.append("")
 
-    # Archives historiques — résumé par catégorie + détail des 50 premiers
+    # Archives historiques — contexte pour le LLM
     if archive_rows:
         from collections import Counter
         cat_counts = Counter(r.get("category") or "SANS_CAT" for r in archive_rows)
@@ -1309,19 +1309,38 @@ async def ask_charlie(
         context_parts.append("Répartition par catégorie :")
         for cat, cnt in cat_counts.most_common():
             context_parts.append(f"  - {cat}: {cnt}")
-        context_parts.append("Détail (50 premiers sujets) :")
-        for r in archive_rows[:50]:
-            subject = r.get("subject") or "Sans sujet"
-            date = r.get("received_at") or r.get("date") or ""
-            cat = r.get("category") or ""
-            line = f"- {subject}"
-            if date:
-                line += f" ({date})"
-            if cat:
-                line += f" [{cat}]"
-            context_parts.append(line)
-        if len(archive_rows) > 50:
-            context_parts.append(f"… et {len(archive_rows) - 50} autres.")
+
+        if is_list_request:
+            # Mode liste : tous les sujets
+            context_parts.append("Détail (50 premiers sujets) :")
+            for r in archive_rows[:50]:
+                subject = r.get("subject") or "Sans sujet"
+                date = r.get("received_at") or r.get("date") or ""
+                cat = r.get("category") or ""
+                line = f"- {subject}"
+                if date:
+                    line += f" ({date})"
+                if cat:
+                    line += f" [{cat}]"
+                context_parts.append(line)
+            if len(archive_rows) > 50:
+                context_parts.append(f"… et {len(archive_rows) - 50} autres.")
+        else:
+            # Mode synthèse : contenu des emails (body_preview) pour permettre au LLM de résumer
+            context_parts.append("Contenu des emails pertinents :")
+            total_preview = 0
+            for r in archive_rows[:10]:  # max 10 emails pour ne pas exploser le contexte
+                preview = r.get("body_preview", "")
+                if not preview:
+                    continue
+                subject = r.get("subject") or "Sans sujet"
+                date = r.get("received_at") or r.get("date") or ""
+                context_parts.append(f"--- Email : {subject} ({date}) ---")
+                context_parts.append(preview[:1500])  # max 1500 chars par email
+                total_preview += len(preview[:1500])
+                if total_preview > 8000:  # hard limit pour le contexte total
+                    context_parts.append("[… tronqué pour limiter le contexte]")
+                    break
         context_parts.append("")
 
     context = "\n".join(context_parts)
@@ -1515,7 +1534,7 @@ async def ask_charlie(
     elif is_identity_request:
         format_rule = "7. Daniel demande une IDENTITÉ. Cherche dans le second cerveau et réponds en une ou deux phrases maximum, directement."
     else:
-        format_rule = "7. Réponds de manière fluide et directe, en une ou deux phrases maximum."
+        format_rule = "7. Daniel demande une SYNTHÈSE ou une INFO. Réponds de manière fluide et directe, en une ou deux phrases maximum. Si c'est un résumé de dossier, extrais les infos clés (client, demande, dates, montants) en un paragraphe clair."
 
     # Si Cerveau2 a répondu mais c'est un comptage, on injecte sa réponse dans le contexte
     vault_context = context
@@ -1537,7 +1556,9 @@ RÈGLES :
 5. Pour un comptage, additionne les résultats SQL et les archives.
 6. Si aucune source n'a de réponse, dis-le clairement en une phrase.
 {format_rule}
-8. N'invente jamais d'informations absentes des sources ci-dessus.
+8. Ne reproduis JAMAIS les tableaux de données bruts, les listes d'emails avec leurs métadonnées (id, date, status, etc.), ou les extraits techniques. Tu dois SYNTHÉTISER le contenu en langage naturel fluide.
+9. Si Daniel demande un résumé de dossier (ex: "résume le dossier X"), extrais et présente les informations clés : nom du client, type de demande, dates importantes, montants financiers. Un paragraphe clair et direct.
+10. N'invente jamais d'informations absentes des sources ci-dessus.
 
 RÉPONSE À DANIEL :"""
 

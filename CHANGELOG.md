@@ -1,5 +1,17 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.18.10] — 2026-05-29 (hotfix prompt + contexte archives — synthèse dossier)
+
+### Fixé
+- **Prompt LLM — règles anti-tableau + pro-synthèse** : ajout des règles 8, 9, 10 dans le prompt final :
+  - Règle 8 : "Ne reproduis JAMAIS les tableaux de données bruts, les listes d'emails avec leurs métadonnées, ou les extraits techniques. Tu dois SYNTHÉTISER le contenu en langage naturel fluide."
+  - Règle 9 : "Si Daniel demande un résumé de dossier, extrais et présente les informations clés : nom du client, type de demande, dates importantes, montants financiers. Un paragraphe clair et direct."
+  - Règle 7 modifiée : "Daniel demande une SYNTHÈSE ou une INFO."
+- **Contexte archives — mode synthèse vs mode liste** : quand `is_list_request` est faux (question normale ou résumé), le contexte injecté dans le prompt contient désormais le **body_preview** des emails historiques (jusqu'à 10 emails, 1500 caractères chacun, hard limit 8000 caractères total) au lieu d'une simple liste de sujets. Cela permet au LLM de voir le contenu (ex: proposition financière Lampaert avec les montants) et de le résumer.
+- **Mode liste préservé** : quand `is_list_request` est vrai, le comportement ancien est conservé (liste des sujets avec dates/catégories).
+
+---
+
 ## [1.18.9] — 2026-05-29 (hotfix keywords — normalisation accents + tri par pertinence)
 
 ### Fixé
