@@ -378,10 +378,14 @@ _ENQUETE_TO_CATEGORY: dict[str, str] = {
 async def _search_historical_by_keyword(
     db_path: Path, keyword: str, year: str | None = None, limit: int = 50,
 ) -> list[dict]:
-    """Cherche dans les 3 DB historiques par mot-clé (subject, body_preview, sender).
+    """Cherche dans les 3 DB historiques par mot-clé (subject, body_preview, body_full, sender).
 
-    Utilisé quand un dossier spécifique est mentionné (ex: ADF) pour trouver
-    tous les emails liés, même ceux antérieurs au cutoff de mail_processed.
+    Utilisé quand un dossier spécifique est mentionné (ex: ADF) ou quand un
+    mot-clé est extrait de la question (ex: "Lampaert") pour trouver tous les
+    emails liés, même ceux antérieurs au cutoff de mail_processed.
+
+    body_full est inclus car certains emails ont un body_preview vide mais
+    contiennent le mot-clé dans le corps complet (ex: réponses avec citations).
     """
     data_dir = db_path.parent
     results: list[dict] = []
@@ -393,10 +397,10 @@ async def _search_historical_by_keyword(
         try:
             async with aiosqlite.connect(db_file) as db:
                 sql = (
-                    "SELECT id, subject, sender, date, body_preview, category "
-                    "FROM emails WHERE (subject LIKE ? OR body_preview LIKE ? OR sender LIKE ?) "
+                    "SELECT id, subject, sender, date, body_preview, body_full, category "
+                    "FROM emails WHERE (subject LIKE ? OR body_preview LIKE ? OR body_full LIKE ? OR sender LIKE ?) "
                 )
-                params: list = [like, like, like]
+                params: list = [like, like, like, like]
                 if year:
                     sql += "AND date LIKE ? "
                     params.append(f"%{year}%")
@@ -405,13 +409,22 @@ async def _search_historical_by_keyword(
                 cursor = await db.execute(sql, tuple(params))
                 rows = await cursor.fetchall()
                 for row in rows:
+                    preview = row[4] or ""
+                    # Si le preview est vide ou trop court, utiliser un extrait du body_full
+                    if len(preview.strip()) < 50 and row[5]:
+                        full = row[5]
+                        # Extraire le premier bloc de texte significatif (ignorer les sauts de ligne initiaux)
+                        full_clean = full.strip()
+                        preview = full_clean[:800]
+                        if len(full_clean) > 800:
+                            preview += " [...]"
                     results.append({
                         "id": row[0],
                         "subject": row[1],
                         "sender": row[2],
                         "received_at": row[3],
-                        "body_preview": row[4],
-                        "category": row[5],
+                        "body_preview": preview,
+                        "category": row[6],
                         "source_db": db_name,
                     })
         except Exception as e:

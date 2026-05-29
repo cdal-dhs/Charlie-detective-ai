@@ -1,5 +1,13 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.18.8] — 2026-05-29 (hotfix archives — recherche body_full + fallback preview)
+
+### Fixé
+- **Archives historiques — recherche dans `body_full`** : `_search_historical_by_keyword()` ne cherchait que dans `subject`, `body_preview` et `sender`. Les réponses avec citations (ex: email de réponse à un formulaire) ont souvent un `body_preview` vide car ils commencent par des sauts de ligne ou des headers. Désormais, `body_full LIKE ?` est aussi inclus dans la clause WHERE.
+- **Archives — fallback body_full quand preview vide** : quand un email historique est trouvé mais que son `body_preview` est vide ou < 50 caractères, les 800 premiers caractères de `body_full` sont extraits et retournés comme preview. Cela permet au LLM de voir le contenu des réponses avec proposition financière (ex: dossier Lampaert — offerte 200€ + 150€ + 1740€ + voorschot 1263.24€).
+
+---
+
 ## [1.18.7] — 2026-05-29 (hotfix Charlie recherche factuelle + anti-hallucination)
 
 ### Fixé
