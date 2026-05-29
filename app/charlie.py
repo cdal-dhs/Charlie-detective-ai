@@ -410,14 +410,15 @@ async def _search_historical_by_keyword(
                 rows = await cursor.fetchall()
                 for row in rows:
                     preview = row[4] or ""
-                    # Si le preview est vide ou trop court, utiliser un extrait du body_full
-                    if len(preview.strip()) < 50 and row[5]:
-                        full = row[5]
-                        # Extraire le premier bloc de texte significatif (ignorer les sauts de ligne initiaux)
-                        full_clean = full.strip()
-                        preview = full_clean[:800]
-                        if len(full_clean) > 800:
-                            preview += " [...]"
+                    body_full = row[5] or ""
+                    # Les body_preview des DB historiques sont souvent incomplets ou tronqués.
+                    # On utilise systématiquement le body_full (jusqu'à 3000 chars) pour donner
+                    # au LLM le contenu réel de l'email, pas juste un extrait partiel.
+                    if body_full:
+                        full_clean = body_full.strip()
+                        preview = full_clean[:3000]
+                        if len(full_clean) > 3000:
+                            preview += "\n\n[… tronqué à 3000 caractères]"
                     results.append({
                         "id": row[0],
                         "subject": row[1],
