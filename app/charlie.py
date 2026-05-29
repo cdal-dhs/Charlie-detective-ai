@@ -598,8 +598,10 @@ async def _search_historical_all(
 
 
 _DOSSIER_RE = re.compile(
-    r"(?i:dossier|affaire|projet|enquete|investigation)"
-    r"[\s:]+([A-Z][a-zA-Z0-9]{2,})",
+    r"[Dd][Oo][Ss]{2}[Ii][Ee][Rr]\s*[Nn]°\s*([A-Za-z0-9_-]+)"
+)
+_DOSSIER_NAME_RE = re.compile(
+    r"[Dd][Oo][Ss]{2}[Ii][Ee][Rr]\s+([A-Z][a-zA-Z]+)"
 )
 _HASH_DOSSIER_RE = re.compile(r"#([A-Z][A-Z0-9]{2,})")
 _CODE_RE = re.compile(r"\b([A-Z]{3,6})\b")
@@ -607,16 +609,25 @@ _YEAR_RE = re.compile(r"\b(20\d{2})\b")
 
 
 def _extract_dossier_id(question: str) -> str | None:
+    # Pattern 1 : "dossier N°123" ou "dossier N° ABC-123"
     m = _DOSSIER_RE.search(question)
     if m:
         return m.group(1)
+    # Pattern 2 : "dossier Lampaert" — nom propre après "dossier"
+    m = _DOSSIER_NAME_RE.search(question)
+    if m:
+        name = m.group(1)
+        # Exclure les mots communs qui ne sont pas des noms de dossier
+        if name.lower() not in ("client", "general", "generale", "monsieur", "madame", "mademoiselle", "monsieur", "madame", "cliente"):
+            return name
+    # Pattern 3 : hashtag #ADF
     m = _HASH_DOSSIER_RE.search(question)
     if m:
         return m.group(1)
-    # Codes dossier en majuscules isolés (ex: ADF, DPDH)
+    # Pattern 4 : codes ALL-CAPS isolés (ex: ADF, DPDH)
     for m in _CODE_RE.finditer(question):
         code = m.group(1)
-        if code not in ("SQL", "OK", "HTTP", "API", "URL", "HTML", "XML", "JSON"):
+        if code not in ("SQL", "OK", "HTTP", "API", "URL", "HTML", "XML", "JSON", "HTTPS", "SMTP", "IMAP", "PDF", "CSV", "JPEG", "PNG"):
             return code
     return None
 
@@ -970,6 +981,7 @@ async def ask_charlie(
     is_dossier_count = any(kw in q_norm for kw in ("nouveau dossier", "dossier ouvert", "dossier cree", "dossiers crees", "combien de dossier", "ouvert depuis", "crees depuis", "nouveau client", "nouveaux client", "dossiers client"))
     is_dossier_list = is_list_request and not dossier_id and any(kw in q_norm for kw in ("dossier", "enquete", "enquetes", "affaire", "affaires", "client"))
     is_identity_request = any(kw in q_norm for kw in ("qui est", "nom", "prenom", "contact", "personne", "sappelle", "epouse", "mari", "conjoint"))
+    is_dossier_summary = dossier_id is not None and any(kw in q_norm for kw in ("resume", "resumer", "resum", "synthese", "synthetiser", "info", "infos", "detail", "details", "situation", "etat"))
 
     # ── 2. Génération SQL ──
     # Fallback programmatique pour les comptages simples (pas besoin de LLM)
@@ -1441,7 +1453,66 @@ async def ask_charlie(
             vault_notes=vault_notes,
         )
 
-    # ── 5. Bypass LLM extraction directe depuis notes Cerveau2 (brutes, 0 ms, 100% déterministe) ──
+    # ── 5. Résumé de dossier — prompt LLM ciblé avec contenu des emails ──
+    if is_dossier_summary and (archive_rows or rows):
+        # Construire un prompt ultra-ciblé avec SEULEMENT les body_preview des emails pertinents
+        email_parts: list[str] = []
+        total_preview = 0
+        all_emails = (archive_rows or []) + (rows or [])
+        # Trier par date
+        all_emails.sort(key=lambda r: r.get("received_at", r.get("date", "")), reverse=True)
+        for r in all_emails[:10]:
+            preview = r.get("body_preview", "")
+            if not preview:
+                continue
+            subject = r.get("subject") or "Sans sujet"
+            date = r.get("received_at") or r.get("date") or ""
+            email_parts.append(f"--- Email : {subject} ({date}) ---")
+            email_parts.append(preview[:2000])
+            total_preview += len(preview[:2000])
+            if total_preview > 10000:
+                email_parts.append("[… tronqué]")
+                break
+
+        if email_parts:
+            dossier_prompt = f"""Tu es Charlie, l'assistant IA de Daniel Hurchon (Detective.be). Version {VERSION}.
+
+Daniel demande un RÉSUMÉ DU DOSSIER **{dossier_id}**. Tu as trouvé les emails suivants dans les archives.
+
+{chr(10).join(email_parts)}
+
+INSTRUCTIONS ABSOLUES :
+1. SYNTHÉTISE le contenu des emails ci-dessus en UN SEUL PARAGRAPHE fluide et direct.
+2. Mentionne OBLIGATOIREMENT : nom du client, type de demande, dates importantes, et TOUS les montants financiers (offre, devis, facture, honoraires, etc.).
+3. Ne reproduis PAS les tableaux bruts, les métadonnées techniques, ni les en-têtes d'emails.
+4. Si tu ne trouves pas d'informations financières, dis-le clairement.
+5. Réponds en français (ou dans la langue détectée du dossier).
+
+RÉPONSE À DANIEL :"""
+
+            try:
+                response = await complete(
+                    model=model,
+                    messages=[{"role": "user", "content": dossier_prompt}],
+                    max_tokens=800,
+                    temperature=0.2,
+                )
+                response = response.strip() if response else ""
+                if response:
+                    log.info("charlie.dossier_summary_llm", dossier_id=dossier_id, answer_len=len(response))
+                    await _auto_save_fact(db_path, question, response, dossier_id)
+                    return CharlieResult(
+                        response_text=response,
+                        sql=sql,
+                        rows=rows,
+                        sql_safe=True,
+                        sql_error=None,
+                        vault_notes=vault_notes,
+                    )
+            except Exception as e:
+                log.warning("charlie.dossier_summary_llm_failed", error=str(e))
+
+    # ── 6. Bypass LLM extraction directe depuis notes Cerveau2 (brutes, 0 ms, 100% déterministe) ──
     direct_answer: str | None = None
     if vault_notes:
         q_lower = question.lower()
