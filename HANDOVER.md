@@ -1,7 +1,7 @@
 # HANDOVER — Detective.be Agent IA (Charlie)
 
 > Document de transfert pour Claude Opus 4.7 ou tout agent ultérieur.  
-> Dernière mise à jour : **2026-05-26** · Version courante : **V1.16.13** · Déployé sur : `detective.digitalhs.biz`
+> Dernière mise à jour : **2026-05-29** · Version courante : **V1.19.0** · Déployé sur : `detective.digitalhs.biz`
 
 ---
 
@@ -19,7 +19,7 @@
 
 ---
 
-## 2. Architecture actuelle (V1.16.13)
+## 2. Architecture actuelle (V1.19.0)
 
 ```
 [3 boîtes Infomaniak IMAP] ──polling 5min──► [Worker asyncio Python]
@@ -41,11 +41,11 @@
 
 | Fichier | Rôle critique | À savoir |
 |---|---|---|
-| `app/_version.py` | **Source unique de vérité** version | `VERSION = "1.16.13"`. Tolérance zéro sur la désynchronisation. |
-| `app/charlie.py` | **Cœur intelligent Charlie AI** | Pipeline `ask_charlie()` : extraction entités → SQL programmatique (bypass LLM pour comptages + statuts) + vault Cerveau2 (fallback direct GET pour entités non indexées) + archives + corrections + mémoire → nuage de liaison familial → LLM final → garde anti-vide + garde anti-"pas trouvé" |
+| `app/_version.py` | **Source unique de vérité** version | `VERSION = "1.19.0"`. Tolérance zéro sur la désynchronisation. |
+| `app/charlie.py` | **Cœur intelligent Charlie AI** | Pipeline `ask_charlie()` : extraction entités → SQL programmatique (bypass LLM pour comptages + statuts) + vault Cerveau2 (fallback direct GET pour entités non indexées) + archives + corrections + mémoire → nuage de liaison familial → **résumé de dossier narratif LLM** (v1.19.0) → garde anti-vide + garde anti-"pas trouvé" |
 | `app/charlie_memory.py` | **Mémoire persistante** | Table `charlie_memory` (feedback good/bad, corrections, auto-save). |
 | `app/cerveau_client.py` | **Client HTTP Cerveau2** | `query_vault()`, `get_vault_note()` (fallback direct par chemin), `feed_correspondance()`, `feed_document()`. Bearer Token statique. |
-| `app/config.py` | **Configuration pydantic-settings** | `llm_model_chat = "openai/deepseek-v4-pro"` (Ollama Pro). |
+| `app/config.py` | **Configuration pydantic-settings** | `llm_model_chat = "openai/gemma4:31b"` (Ollama Pro, cloud). Provider `openai/` + `api_base=https://ollama.com/v1`. |
 | `app/llm/router.py` | **Wrapper LiteLLM** | `complete()` avec fallback automatique vers `llm_model_fallback`. |
 | `app/web/api.py` | **Endpoints HTMX + Charlie** | `charlie_ask()` et `charlie_feedback()` — `hx-disabled-elt` pour éviter double-clic. |
 | `app/workers/imap_poller.py` | **Polling IMAP** | 1 task asyncio par boîte, flag `AgentProcessed` (sans `$` — Infomaniak rejette `$`). |
@@ -113,8 +113,15 @@ Ordre de priorité dans le prompt final :
 - **Dossier par ville** : `_extract_dossier_par_ville()`.
 - **Entreprise (siège/adresse)** : `_extract_entreprise_info()`.
 
+#### Résumé de dossier (v1.19.0)
+- Détecté par `is_dossier_summary` (keywords : "résume", "synthèse", "infos", "détails" + `dossier_id` extrait).
+- Bypass dédié : assemble les **contenus complets** des emails (body, pas preview) et appelle le LLM avec un prompt ultra-ciblé : "UN SEUL PARAGRAPHE FLUIDE ET NARRATIF".
+- Le LLM doit raconter l'histoire du dossier (client, demande, dates, montants financiers).
+- `hide_rows=True` dans `CharlieResult` → le template web **ne montre pas** le tableau SQL brut sous le résumé.
+- 2 tentatives avec le modèle chat, fallback sur `llm_model_fallback`.
+
 #### LLM final (questions spécifiques)
-- `complete(model=settings.llm_model_chat, ...)` — deepseek-v4-pro via Ollama Pro.
+- `complete(model=settings.llm_model_chat, ...)` — gemma4:31b via Ollama Pro Cloud.
 
 #### Garde-fous de secours (V1.16.13 — critique)
 Si le LLM dit "pas trouvé" / "aucune information" malgré des résultats SQL en base :
@@ -139,9 +146,9 @@ if not response and rows:
 | Concurrence | `asyncio` | Tout est `async def` |
 | IMAP | `aioimaplib` | 2.0.1 |
 | LLM router | **LiteLLM** | 1.85.0 |
-| LLM chat (Charlie AI) | **deepseek-v4-pro** via Ollama Pro | `openai/deepseek-v4-pro` |
-| LLM fallback | **OpenRouter** | `openrouter/anthropic/claude-3.5-sonnet` |
-| LLM pipeline (classifier) | Kimi K2 via Ollama Pro | `ollama_chat/kimi-k2` |
+| LLM chat (Charlie AI) | **gemma4:31b** via Ollama Pro Cloud | `openai/gemma4:31b` |
+| LLM fallback | **glm-5.1** via Ollama Pro Cloud | `openai/glm-5.1` |
+| LLM pipeline (classifier) | Kimi K2 via Ollama Pro Cloud | `openai/kimi-k2` |
 | Embeddings | `intfloat/multilingual-e5-large` | sentence-transformers, local CPU |
 | Vector store | `sqlite-vec` | 0.1.9, vit dans les DB existantes |
 | Détection langue | `langdetect` | Remplace fasttext (ne build pas sur Mac ARM) |
@@ -326,7 +333,7 @@ Le poller IMAP ne traite que les mails reçus depuis cette date. Les archives hi
 
 ---
 
-## 9. Bugs connus et points de vigilance (2026-05-26, V1.16.13)
+## 9. Bugs connus et points de vigilance (2026-05-29, V1.19.0)
 
 | # | Problème | Statut | Fichier concerné | Notes |
 |---|---|---|---|---|
@@ -338,18 +345,21 @@ Le poller IMAP ne traite que les mails reçus depuis cette date. Les archives hi
 | 6 | **Count ADF = 0** car SQL cherchait `subject LIKE '%ADF%'` mais emails ADF viennent de `@groupeadf.com` | ✅ Corrigé V1.14.1 | `CHARLIE_SYSTEM_PROMPT` | Mode B recherche aussi dans `sender`. |
 | 7 | **Corrections écrasaient les questions analytiques** | ✅ Corrigé V1.14.0 | `_summarize_results()` | Bypass correction ne s'applique que si `_is_identity_query()`. |
 
-### Point de vigilance #1 — deepseek-v4-pro et réponses vides
-Ce modèle (via Ollama Pro) retourne parfois `length=0` sur des prompts longs (contexte SQL + vault + archives + mémoire). Le fallback LiteLLM ne se déclenche **pas** sur une réponse vide — seulement sur une exception.  
-**Garde** : le bloc `if not response:` (garde-fous secours) est la dernière ligne de défense.
+### Point de vigilance #1 — Provider litellm pour Ollama Cloud (CRITIQUE v1.19.0)
+`ollama_chat/gemma4:31b` force litellm vers `localhost:11434` (Ollama **local**). Le provider correct pour Ollama **Cloud** est `openai/gemma4:31b` avec `api_base=https://ollama.com/v1`.
+**Si un nouveau modèle ne répond pas** → vérifier immédiatement le provider (openai/ vs ollama_chat/) et l'URL api_base.
 
-### Point de vigilance #2 — mail_processed ne contient que les emails post-cutoff
+### Point de vigilance #2 — deepseek-v4-pro remplacé par gemma4:31b
+Le modèle deepseek-v4-pro (via Ollama Pro) **ne savait pas synthétiser** en paragraphe narratif (retournait vide ou reproduisait des tableaux). Il a été remplacé par **gemma4:31b** qui produit des résumés fluides. Si gemma4 échoue, le fallback est **glm-5.1** (toujours sur Ollama Cloud).
+
+### Point de vigilance #3 — mail_processed ne contient que les emails post-cutoff
 La base courante `agent_state.db/mail_processed` ne contient que les emails post-cutoff (2026-05-15). Les vraies données sont dans `boite1.sqlite`.  
 **Conséquence** : pour les questions sur 2026, les archives historiques sont la source principale. Le SQL local retourne souvent 0.
 
-### Point de vigilance #3 — Cerveau2 peut être down
+### Point de vigilance #4 — Cerveau2 peut être down
 Le client `query_vault()` est dégradation silencieuse. Si Cerveau2 est indisponible, Charlie répond avec SQL + mémoire seuls. Vérifier les logs `cerveau.query_failed`.
 
-### Point de vigilance #4 — Entités Cerveau2 non indexées dans sqlite-vec
+### Point de vigilance #5 — Entités Cerveau2 non indexées dans sqlite-vec
 Les fiches `04_entities/personnes/*.md` créées manuellement ne sont pas dans l'index sémantique. Le fallback direct `GET /notes/{path}` contourne ce problème, mais la **vraie solution** serait de réindexer le vault Cerveau2. Toutes les tentatives sur le VPS ont échoué (problèmes volume mount, extension sqlite3 vec0 manquante).
 
 ---
@@ -425,4 +435,4 @@ Avant de modifier quoi que ce soit :
 
 ---
 
-*Document généré le 2026-05-26 pour la V1.16.13 de Detective.be Agent IA.*
+*Document généré le 2026-05-29 pour la V1.19.0 de Detective.be Agent IA.*

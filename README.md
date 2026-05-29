@@ -182,7 +182,7 @@ DETECTIVE_BE/
 
 ## Statut
 
-✅ **Production active** — `detective.digitalhs.biz` — **v1.18.12**
+✅ **Production active** — `detective.digitalhs.biz` — **v1.19.0**
 
 - **Pipeline IMAP** : polling 3 boîtes, classification 8 catégories, priorité intelligente, skip+flag historique avant 20/05/2026
 - **Génération brouillon** : style Daniel, multilingue FR/NL/EN, fallback OpenRouter, date/heure originale incluse
@@ -193,6 +193,8 @@ DETECTIVE_BE/
   - Cerveau2 vault + fallback direct sur fiches entités non indexées
   - **Nuage de liaison familial** (wikilinks YAML : `épouse`, `mari`, `conjoint`, `fille`, `fils`, etc.)
   - Archives historiques (boite1/2/3) par dossier_id **ou par mot-clé extrait de la question**
+  - **Résumé de dossier narratif** (v1.19.0) : le LLM lit les emails du dossier et produit un paragraphe fluide avec client, dates et montants financiers
+  - **Masquage tableau SQL** dans le chat pour les résumés de dossier (pas de dump technique)
   - **Guard anti-hallucination** : si aucune source n'a de données, retourne "Je n'ai trouvé aucune information..." sans appeler le LLM
   - Mémoire courte + corrections utilisateur (priorité absolue)
   - Garde anti-réponse vide + garde anti-"pas trouvé" malgré données présentes
@@ -210,7 +212,7 @@ Voir `docs/ROADMAP.md` pour la roadmap V2b/V2c (feedback loop qualité Daniel, l
 
 ## Versions
 
-Version source de vérité : **`app/_version.py`** (`VERSION = "1.18.15"`).
+Version source de vérité : **`app/_version.py`** (`VERSION = "1.19.0"`).
 
 Le badge affiché dans le cockpit est lu dynamiquement depuis `app/_version.py`. **Tolérance zéro** sur la désynchronisation.
 
