@@ -1,5 +1,19 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.18.14] — 2026-05-29 (hotfix résumé de dossier — extraction Python intelligente, plus de LLM)
+
+### Fixé
+- **Remplacement total du bypass LLM par extraction Python** : le LLM deepseek-v4-pro ne savait pas synthétiser les emails (retournait vide ou reproduisait les tableaux). Désormais, `_build_dossier_summary_from_emails()` extrait automatiquement et déterministiquement :
+  - Nom du client (patterns Achternaam/Voornaam, Nom/Prénom, Name/Naam)
+  - Montants financiers (regex €, euro, EUR — filtre 10€ à 500K€, déduplication)
+  - Dates importantes (des headers + dans le texte)
+  - Type de demande (catégorie + mots-clés dans le body)
+  → Formate un résumé structuré propre sans appeler de LLM.
+- **Fallback LLM conservé mais secondaire** : si l'extraction Python ne trouve pas assez d'infos, on essaie encore une fois le LLM avec un prompt ultra-court. Si ça échoue aussi, retour direct d'un message propre avec les sujets d'emails.
+- **Anti-tableau garanti** : quand `is_dossier_summary` est True, le code retourne TOUJOURS avant d'atteindre le LLM final qui reproduisait les tableaux `_sanitize_rows_for_prompt`.
+
+---
+
 ## [1.18.13] — 2026-05-29 (hotfix résumé de dossier — body complet + retry + anti-tableau secours)
 
 ### Fixé

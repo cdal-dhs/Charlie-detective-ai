@@ -953,6 +953,154 @@ async def _resolve_links(
     return results
 
 
+def _build_dossier_summary_from_emails(
+    dossier_id: str | None, archive_rows: list[dict], rows: list[dict]
+) -> str | None:
+    """Extraction déterministe d'un résumé de dossier depuis les emails.
+
+    Ne dépend PAS d'un LLM. Utilise des regex pour extraire :
+    - nom/prénom du client
+    - montants financiers (€, euro, euros, EUR)
+    - dates importantes
+    - type de demande
+
+    Retourne un paragraphe fluide ou None si pas assez d'infos.
+    """
+    all_emails = (archive_rows or []) + (rows or [])
+    if not all_emails:
+        return None
+
+    # Trier par date
+    all_emails.sort(key=lambda r: r.get("received_at", r.get("date", "")), reverse=True)
+
+    # --- Extraction nom client ---
+    client_name: str | None = None
+    for r in all_emails:
+        text = r.get("body") or r.get("body_preview") or ""
+        if not text:
+            continue
+        # Pattern formulaire NL : Achternaam: X Voornaam: Y
+        m = re.search(r"Achternaam\s*[:=]\s*([A-Za-zÀ-Ÿ\-]+).*?Voornaam\s*[:=]\s*([A-Za-zÀ-Ÿ\-]+)", text, re.IGNORECASE | re.DOTALL)
+        if m:
+            client_name = f"{m.group(2)} {m.group(1)}"
+            break
+        # Pattern FR : Nom: X Prénom: Y
+        m = re.search(r"Nom\s*[:=]\s*([A-Za-zÀ-Ÿ\-]+).*?Prénom\s*[:=]\s*([A-Za-zÀ-Ÿ\-]+)", text, re.IGNORECASE | re.DOTALL)
+        if m:
+            client_name = f"{m.group(2)} {m.group(1)}"
+            break
+        # Pattern simple : Name: / Naam:
+        m = re.search(r"(?:Name|Naam)\s*[:=]\s*([A-Za-zÀ-Ÿ\-\s]{2,40})", text, re.IGNORECASE)
+        if m:
+            client_name = m.group(1).strip()
+            break
+
+    if not client_name and dossier_id:
+        client_name = dossier_id
+
+    # --- Extraction montants financiers ---
+    amounts_found: list[str] = []
+    seen_amounts: set[str] = set()
+    for r in all_emails:
+        text = r.get("body") or r.get("body_preview") or ""
+        if not text:
+            continue
+        # Patterns : 200€, 200 euros, 200 EUR, €200, 1.234,56, 1234.56, 1 234,56
+        for m in re.finditer(r"(?:€|EUR|euro?s?\s*)?\s*(\d{1,3}(?:[\s.]\d{3})*(?:,\d{2})?|\d+(?:,\d{2})?)\s*(?:€|EUR|euro?s?)?", text, re.IGNORECASE):
+            raw = m.group(0).strip()
+            # Filtrer les faux positifs (années, numéros de téléphone, IDs)
+            num_str = m.group(1).replace(" ", "").replace(".", "").replace(",", ".")
+            try:
+                val = float(num_str)
+            except ValueError:
+                continue
+            if val < 10 or val > 500000:
+                continue
+            # Éviter les doublons (valeur proche)
+            key = f"{val:.2f}"
+            if key not in seen_amounts:
+                seen_amounts.add(key)
+                amounts_found.append(raw)
+
+    # --- Extraction dates ---
+    dates_found: list[str] = []
+    seen_dates: set[str] = set()
+    for r in all_emails:
+        text = r.get("body") or r.get("body_preview") or ""
+        date = r.get("received_at") or r.get("date") or ""
+        if date and date not in seen_dates:
+            seen_dates.add(date)
+            dates_found.append(date)
+        # Chercher des dates dans le texte (ex: "7 février 2025", "07/02/2025")
+        for m in re.finditer(r"\b(\d{1,2}\s+[a-zéûà]+\s+20\d{2})\b", text, re.IGNORECASE):
+            d = m.group(1)
+            if d not in seen_dates:
+                seen_dates.add(d)
+                dates_found.append(d)
+        for m in re.finditer(r"\b(\d{1,2}[/-]\d{1,2}[/-]20\d{2})\b", text):
+            d = m.group(1)
+            if d not in seen_dates:
+                seen_dates.add(d)
+                dates_found.append(d)
+
+    # --- Détection type de demande ---
+    demand_type: str | None = None
+    for r in all_emails:
+        cat = (r.get("category") or "").lower()
+        if cat in ("demande_client", "demande"):
+            demand_type = "demande client"
+            break
+        if "infidel" in cat or "adultere" in cat:
+            demand_type = "enquête d'infidélité"
+            break
+        if "surveillance" in cat or "filature" in cat:
+            demand_type = "surveillance / filature"
+            break
+        if "recherche" in cat or "disparition" in cat:
+            demand_type = "recherche de personne"
+            break
+        if "famille" in cat or "garde" in cat or "pension" in cat:
+            demand_type = "enquête familiale"
+            break
+    if not demand_type:
+        text_all = " ".join(r.get("body", "") or r.get("body_preview", "") or "" for r in all_emails).lower()
+        if any(k in text_all for k in ("surveillance", "filature", "suivre", "observer")):
+            demand_type = "surveillance / filature"
+        elif any(k in text_all for k in ("infidel", "adultere", "tromperie", "ma femme", "mon mari", "conjoi")):
+            demand_type = "enquête d'infidélité"
+        elif any(k in text_all for k in ("disparu", "retrouver", "localiser", "fugue")):
+            demand_type = "recherche de personne"
+        elif any(k in text_all for k in ("garde", "pension", "enfant", "famille", "divorce")):
+            demand_type = "enquête familiale"
+        else:
+            demand_type = "demande client"
+
+    # --- Construction du résumé ---
+    parts: list[str] = []
+    parts.append(f"Voici le résumé du dossier **{dossier_id or 'non identifié'}** :")
+    parts.append("")
+
+    client_line = f"**Client** : {client_name}" if client_name else f"**Dossier** : {dossier_id}"
+    parts.append(client_line)
+    parts.append(f"**Type de demande** : {demand_type}")
+
+    if dates_found:
+        parts.append(f"**Dates clés** : {', '.join(dates_found[:3])}")
+
+    if amounts_found:
+        parts.append(f"**Montants mentionnés** : {', '.join(amounts_found[:6])}")
+    else:
+        parts.append("**Montants** : aucun montant financier détecté dans les emails.")
+
+    parts.append("")
+    # Résumé narratif basé sur les catégories et sujets
+    subjects = [r.get("subject") for r in all_emails if r.get("subject")]
+    if subjects:
+        parts.append(f"**Emails trouvés** ({len(all_emails)} au total) : sujets liés à '{subjects[0][:60]}...'")
+
+    return "\n".join(parts)
+
+
 async def ask_charlie(
     question: str,
     db_path: Path,
@@ -1473,18 +1621,27 @@ async def ask_charlie(
             vault_notes=vault_notes,
         )
 
-    # ── 5. Résumé de dossier — prompt LLM ciblé avec contenu des emails ──
-    _BAD_RESPONSE = ("je n'ai pas trouvé", "aucun résultat", "aucune information", "je ne trouve pas", "pas d'information", "aucune donnée")
+    # ── 5. Résumé de dossier — extraction Python + fallback LLM si disponible ──
     if is_dossier_summary and (archive_rows or rows):
-        # Construire un prompt ultra-ciblé avec le CONTENU COMPLET des emails (body > body_preview)
+        summary = _build_dossier_summary_from_emails(dossier_id, archive_rows, rows)
+        if summary:
+            log.info("charlie.dossier_summary_python", dossier_id=dossier_id, summary_len=len(summary))
+            await _auto_save_fact(db_path, question, summary, dossier_id)
+            return CharlieResult(
+                response_text=summary,
+                sql=sql,
+                rows=rows,
+                sql_safe=True,
+                sql_error=None,
+                vault_notes=vault_notes,
+            )
+
+        # Fallback LLM si l'extraction Python n'a pas trouvé assez d'infos
         email_parts: list[str] = []
         total_preview = 0
         all_emails = (archive_rows or []) + (rows or [])
-        # Trier par date
         all_emails.sort(key=lambda r: r.get("received_at", r.get("date", "")), reverse=True)
         for r in all_emails[:10]:
-            # Priorité absolue : body complet (3000 chars max) pour mail_processed,
-            # sinon body_preview (archives historiques déjà enrichies dans _search_historical_by_keyword)
             content = r.get("body") or r.get("body_preview") or ""
             if not content:
                 continue
@@ -1498,47 +1655,60 @@ async def ask_charlie(
                 break
 
         if email_parts:
-            for attempt in (1, 2):
-                dossier_prompt = f"""Tu es Charlie, l'assistant IA de Daniel Hurchon (Detective.be). Version {VERSION}.
+            _BAD_RESPONSE = ("je n'ai pas trouvé", "aucun résultat", "aucune information", "je ne trouve pas", "pas d'information", "aucune donnée")
+            dossier_prompt = f"""Tu es Charlie, l'assistant IA de Daniel Hurchon (Detective.be).
 
-Daniel demande un RÉSUMÉ DU DOSSIER **{dossier_id}**. Tu as trouvé les emails suivants.
+Résumé du dossier {dossier_id} à partir de ces emails :
 
 {chr(10).join(email_parts)}
 
-INSTRUCTIONS ABSOLUES :
-1. SYNTHÉTISE le contenu des emails ci-dessus en UN SEUL PARAGRAPHE fluide et direct.
-2. Mentionne OBLIGATOIREMENT : nom du client, type de demande, dates importantes, et TOUS les montants financiers (offre, devis, facture, honoraires, etc.).
-3. Ne reproduis PAS les tableaux bruts, les métadonnées techniques, ni les en-têtes d'emails.
-4. Si tu ne trouves pas d'informations financières, dis-le clairement.
-5. Réponds en français (ou dans la langue détectée du dossier).
-
-RÉPONSE À DANIEL :"""
-
-                try:
-                    response = await complete(
-                        model=model,
-                        messages=[{"role": "user", "content": dossier_prompt}],
-                        max_tokens=800,
-                        temperature=0.2,
+Donne UN SEUL paragraphe fluide. Mentionne le client, la demande, les dates et les montants."""
+            try:
+                response = await complete(
+                    model=model,
+                    messages=[{"role": "user", "content": dossier_prompt}],
+                    max_tokens=800,
+                    temperature=0.2,
+                )
+                response = response.strip() if response else ""
+                if response and not any(p in response.lower() for p in _BAD_RESPONSE):
+                    log.info("charlie.dossier_summary_llm", dossier_id=dossier_id, answer_len=len(response))
+                    await _auto_save_fact(db_path, question, response, dossier_id)
+                    return CharlieResult(
+                        response_text=response,
+                        sql=sql,
+                        rows=rows,
+                        sql_safe=True,
+                        sql_error=None,
+                        vault_notes=vault_notes,
                     )
-                    response = response.strip() if response else ""
-                    if response and not any(p in response.lower() for p in _BAD_RESPONSE):
-                        log.info("charlie.dossier_summary_llm", dossier_id=dossier_id, answer_len=len(response), attempt=attempt)
-                        await _auto_save_fact(db_path, question, response, dossier_id)
-                        return CharlieResult(
-                            response_text=response,
-                            sql=sql,
-                            rows=rows,
-                            sql_safe=True,
-                            sql_error=None,
-                            vault_notes=vault_notes,
-                        )
-                    log.warning("charlie.dossier_summary_empty_or_bad", attempt=attempt, response_preview=response[:120] if response else "(vide)")
-                except Exception as e:
-                    log.warning("charlie.dossier_summary_llm_failed", attempt=attempt, error=str(e))
+            except Exception as e:
+                log.warning("charlie.dossier_summary_llm_failed", error=str(e))
 
-            # Les 2 tentatives ont échoué — on continue vers le LLM final mais on logue
-            log.warning("charlie.dossier_summary_bypass_failed", dossier_id=dossier_id, email_parts=len(email_parts))
+        # Dernier recours : message propre avec les sujets (jamais de tableau)
+        all_emails = (archive_rows or []) + (rows or [])
+        all_emails.sort(key=lambda r: r.get("received_at", r.get("date", "")), reverse=True)
+        lines = [f"J'ai trouvé **{len(all_emails)}** email{'s' if len(all_emails) > 1 else ''} liés au dossier **{dossier_id}** :", ""]
+        for r in all_emails[:10]:
+            subject = r.get("subject") or "Sans sujet"
+            date = r.get("received_at") or r.get("date") or ""
+            line = f"- {subject}"
+            if date:
+                line += f" ({date})"
+            lines.append(line)
+        if len(all_emails) > 10:
+            lines.append(f"… et {len(all_emails) - 10} autres.")
+        fallback = "\n".join(lines)
+        log.info("charlie.dossier_summary_fallback", dossier_id=dossier_id)
+        await _auto_save_fact(db_path, question, fallback, dossier_id)
+        return CharlieResult(
+            response_text=fallback,
+            sql=sql,
+            rows=rows,
+            sql_safe=True,
+            sql_error=None,
+            vault_notes=vault_notes,
+        )
 
     # ── 6. Bypass LLM extraction directe depuis notes Cerveau2 (brutes, 0 ms, 100% déterministe) ──
     direct_answer: str | None = None
