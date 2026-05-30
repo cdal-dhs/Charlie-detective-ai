@@ -1218,7 +1218,9 @@ async def ask_charlie(
 
     async def _vault_task() -> list:
         nonlocal vault_answer
-        lim = 8 if (is_identity_request or is_list_request or is_dossier_list) else settings.cerveau2_limit
+        # Recherches factuelles (mot-clé, comptage, liste) = besoin de plus de sources
+        is_factual_search = bool(sql) and not is_dossier_summary
+        lim = 15 if (is_identity_request or is_list_request or is_dossier_list or is_factual_search) else settings.cerveau2_limit
         # Pour les questions identitaires, ne pas filtrer par dossier_id
         # car les fiches personnes/entités ne sont pas liées à un dossier
         vault_dossier_id = None if is_identity_request else dossier_id

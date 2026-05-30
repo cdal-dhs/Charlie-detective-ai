@@ -606,18 +606,55 @@ async def charlie_ask(
     if result.vault_notes:
         items_html = ""
         for note in result.vault_notes:
-            filename = note.path.split("/")[-1].replace(".md", "")
-            preview = (note.content[:300]
+            # --- Parse frontmatter YAML pour un affichage propre ---
+            fm: dict = {}
+            body_text = note.content
+            if body_text.startswith("---"):
+                parts = body_text.split("---", 2)
+                if len(parts) >= 3:
+                    for line in parts[1].strip().splitlines():
+                        if ":" in line:
+                            k, v = line.split(":", 1)
+                            fm[k.strip()] = v.strip().strip('"').strip("'")
+                    body_text = parts[2].strip()
+
+            date_str = fm.get("date", "")
+            direction = fm.get("direction", "")
+            msg_type = fm.get("type", "")
+
+            # --- Extraction sujet depuis le body (première ligne significative) ---
+            subject = ""
+            for line in body_text.splitlines()[:5]:
+                line_clean = line.strip()
+                if line_clean and not line_clean.startswith("---") and len(line_clean) > 3:
+                    subject = line_clean[:80]
+                    break
+            if not subject:
+                subject = note.path.split("/")[-1].replace(".md", "")[:60]
+
+            # --- Indicateur direction ---
+            arrow = "📥" if direction == "in" else "📤" if direction == "out" else "📝"
+
+            # --- Preview body (après le frontmatter) ---
+            preview = (body_text[:250]
                        .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+
             items_html += (
-                f'<div class="mt-2 text-xs bg-gray-900 rounded px-3 py-2">'
-                f'<div class="text-purple-400 font-mono mb-1">{filename}</div>'
+                f'<div class="mt-2 text-xs bg-gray-900 rounded px-3 py-2 border-l-2 border-purple-600">'
+                f'<div class="flex items-center gap-2 mb-1">'
+                f'<span class="text-purple-400 font-mono">{arrow}</span>'
+                f'<span class="text-purple-300 font-medium">{subject}</span>'
+                f'</div>'
+                f'<div class="flex items-center gap-2 text-gray-500 mb-1">'
+                f'<span>{date_str}</span>'
+                f'{f"<span class=\\'text-gray-600\\'>[{msg_type}]</span>" if msg_type else ""}'
+                f'</div>'
                 f'<div class="text-gray-400 whitespace-pre-wrap">{preview}…</div>'
                 f'</div>'
             )
         vault_html = (
             f'<div class="mt-4 border-t border-gray-700 pt-3">'
-            f'<div class="text-xs text-purple-400 font-semibold mb-1">📚 Second cerveau '
+            f'<div class="text-xs text-purple-400 font-semibold mb-1">📚 Sources Cerveau2 '
             f'({len(result.vault_notes)} note(s))</div>'
             f'{items_html}'
             f'</div>'
