@@ -1788,7 +1788,7 @@ RÉPONSE :"""
             sql_safe=True,
             sql_error=None,
             vault_notes=vault_notes,
-            hide_rows=True,  # ← Masque le tableau SQL quand la réponse vient du vault
+            hide_rows=False,  # ← Laisse le tableau SQL quand il y a des résultats probants
         )
     if vault_has_bad:
         log.info("charlie.vault_answer_bad", question=question[:60], answer_preview=vault_answer[:120])

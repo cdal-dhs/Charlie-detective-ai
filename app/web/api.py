@@ -522,7 +522,7 @@ async def mail_update_category(
 def _format_rows_html(rows: list[dict]) -> str:
     """Formate les résultats SQL en tableau HTML avec liens cliquables et date."""
     if not rows:
-        return '<p class="text-xs text-gray-500 mt-1">Aucun résultat.</p>'
+        return ""  # pas de tableau quand 0 résultat — la réponse textuelle suffit
 
     headers = list(rows[0].keys())
     has_id = "id" in headers
