@@ -1,7 +1,7 @@
 # HANDOVER — Detective.be Agent IA (Charlie)
 
 > Document de transfert pour Claude Opus 4.7 ou tout agent ultérieur.  
-> Dernière mise à jour : **2026-05-29** · Version courante : **V1.19.0** · Déployé sur : `detective.digitalhs.biz`
+> Dernière mise à jour : **2026-05-30** · Version courante : **V1.19.1** · Déployé sur : `detective.digitalhs.biz`
 
 ---
 
@@ -19,7 +19,7 @@
 
 ---
 
-## 2. Architecture actuelle (V1.19.0)
+## 2. Architecture actuelle (V1.19.1)
 
 ```
 [3 boîtes Infomaniak IMAP] ──polling 5min──► [Worker asyncio Python]
@@ -41,8 +41,8 @@
 
 | Fichier | Rôle critique | À savoir |
 |---|---|---|
-| `app/_version.py` | **Source unique de vérité** version | `VERSION = "1.19.0"`. Tolérance zéro sur la désynchronisation. |
-| `app/charlie.py` | **Cœur intelligent Charlie AI** | Pipeline `ask_charlie()` : extraction entités → SQL programmatique (bypass LLM pour comptages + statuts) + vault Cerveau2 (fallback direct GET pour entités non indexées) + archives + corrections + mémoire → nuage de liaison familial → **résumé de dossier narratif LLM** (v1.19.0) → garde anti-vide + garde anti-"pas trouvé" |
+| `app/_version.py` | **Source unique de vérité** version | `VERSION = "1.19.1"`. Tolérance zéro sur la désynchronisation. |
+| `app/charlie.py` | **Cœur intelligent Charlie AI** | Pipeline `ask_charlie()` : extraction entités → SQL programmatique (bypass LLM pour comptages + statuts) + vault Cerveau2 (fallback direct GET pour entités non indexées) + archives + corrections + mémoire → nuage de liaison familial → **résumé de dossier narratif LLM** (v1.19.1) → garde anti-vide + garde anti-"pas trouvé" |
 | `app/charlie_memory.py` | **Mémoire persistante** | Table `charlie_memory` (feedback good/bad, corrections, auto-save). |
 | `app/cerveau_client.py` | **Client HTTP Cerveau2** | `query_vault()`, `get_vault_note()` (fallback direct par chemin), `feed_correspondance()`, `feed_document()`. Bearer Token statique. |
 | `app/config.py` | **Configuration pydantic-settings** | `llm_model_chat = "openai/gemma4:31b"` (Ollama Pro, cloud). Provider `openai/` + `api_base=https://ollama.com/v1`. |
@@ -113,7 +113,7 @@ Ordre de priorité dans le prompt final :
 - **Dossier par ville** : `_extract_dossier_par_ville()`.
 - **Entreprise (siège/adresse)** : `_extract_entreprise_info()`.
 
-#### Résumé de dossier (v1.19.0)
+#### Résumé de dossier (v1.19.1)
 - Détecté par `is_dossier_summary` (keywords : "résume", "synthèse", "infos", "détails" + `dossier_id` extrait).
 - Bypass dédié : assemble les **contenus complets** des emails (body, pas preview) et appelle le LLM avec un prompt ultra-ciblé : "UN SEUL PARAGRAPHE FLUIDE ET NARRATIF".
 - Le LLM doit raconter l'histoire du dossier (client, demande, dates, montants financiers).
@@ -333,7 +333,7 @@ Le poller IMAP ne traite que les mails reçus depuis cette date. Les archives hi
 
 ---
 
-## 9. Bugs connus et points de vigilance (2026-05-29, V1.19.0)
+## 9. Bugs connus et points de vigilance (2026-05-30, V1.19.1)
 
 | # | Problème | Statut | Fichier concerné | Notes |
 |---|---|---|---|---|
@@ -344,8 +344,9 @@ Le poller IMAP ne traite que les mails reçus depuis cette date. Les archives hi
 | 5 | **Réponses list montrent des stats** au lieu de noms de dossiers | ✅ Corrigé V1.14.2 | `app/charlie.py` | Bypass Python pour list supprimé, contexte 50 emails. |
 | 6 | **Count ADF = 0** car SQL cherchait `subject LIKE '%ADF%'` mais emails ADF viennent de `@groupeadf.com` | ✅ Corrigé V1.14.1 | `CHARLIE_SYSTEM_PROMPT` | Mode B recherche aussi dans `sender`. |
 | 7 | **Corrections écrasaient les questions analytiques** | ✅ Corrigé V1.14.0 | `_summarize_results()` | Bypass correction ne s'applique que si `_is_identity_query()`. |
+| 8 | **Mauvais mot-clé dans `_build_keyword_sql`** — verbes d'action ("retrouve", "donne") choisis à la place de noms concrets ("hotel", "facture") → SQL non pertinent, tableau affiché sous réponse vault | ✅ Corrigé V1.19.1 | `app/charlie.py` | Nouvelle fonction `_extract_keywords()` avec scoring sémantique : bonus +15 noms concrets, pénalité −15 verbes d'action. Dédoublonnage `_build_keyword_sql` + `_archive_task`. Masquage tableau quand réponse principale vient du vault (`hide_rows=True`). |
 
-### Point de vigilance #1 — Provider litellm pour Ollama Cloud (CRITIQUE v1.19.0)
+### Point de vigilance #1 — Provider litellm pour Ollama Cloud (CRITIQUE v1.19.1)
 `ollama_chat/gemma4:31b` force litellm vers `localhost:11434` (Ollama **local**). Le provider correct pour Ollama **Cloud** est `openai/gemma4:31b` avec `api_base=https://ollama.com/v1`.
 **Si un nouveau modèle ne répond pas** → vérifier immédiatement le provider (openai/ vs ollama_chat/) et l'URL api_base.
 
@@ -435,4 +436,4 @@ Avant de modifier quoi que ce soit :
 
 ---
 
-*Document généré le 2026-05-29 pour la V1.19.0 de Detective.be Agent IA.*
+*Document généré le 2026-05-30 pour la V1.19.1 de Detective.be Agent IA.*

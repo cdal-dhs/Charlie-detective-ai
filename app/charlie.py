@@ -761,12 +761,12 @@ def _build_status_sql(question: str, dossier_id: str | None) -> str | None:
     return f"SELECT id, subject, received_at, category, status, priority FROM mail_processed WHERE {where} ORDER BY processed_at DESC LIMIT 20"
 
 
-def _build_keyword_sql(question: str) -> str | None:
-    """Génère un SQL de recherche par mot-clé pour les questions factuelles
-    sur un dossier/client spécifique (ex: 'résume le dossier Lampaert').
+def _extract_keywords(question: str) -> list[tuple[int, str]]:
+    """Extrait et score les mots-clés pertinents d'une question.
 
-    Retourne None si aucun mot-clé significatif n'est trouvé.
-    Privilégie les noms propres (majuscule initiale) et normalise les accents.
+    Retourne une liste triée par score décroissant (score, mot_original).
+    Pénalise les verbes d'action génériques et booste les noms concrets
+    (lieux, types de documents, objets de recherche).
     """
     STOP_WORDS = {
         "moi", "vous", "dossier", "client", "resume", "resumer",
@@ -780,14 +780,37 @@ def _build_keyword_sql(question: str) -> str | None:
         "proposition", "propose", "proposer", "offre", "offert",
         "offrir", "financier", "financiere", "finance", "finances",
         "budget", "prix", "cout", "couts", "montant", "euro",
-        "euros", "devis", "facture", "facturation", "paiement",
-        "payer", "paye", "versement", "provision", "honoraires",
-        "tarif", "tarifs", "forfait", "forfaits", "total",
+        "euros", "paiement", "payer", "paye", "versement", "provision",
+        "honoraires", "tarif", "tarifs", "forfait", "forfaits", "total",
         "somme", "sommes", "argent", "gratuit", "gratuite",
         "avec", "principaux", "principales", "important", "importants",
         "details", "detail", "information", "informations",
     }
-    keywords: list[tuple[int, str]] = []   # (score, word)
+    ACTION_WORDS = {
+        "retrouve", "trouve", "donne", "donner", "montre", "montrer",
+        "cherche", "chercher", "liste", "lister", "affiche", "afficher",
+        "envoie", "envoyer", "rapporte", "rapport", "dis", "dire",
+        "trouves", "donnes", "montres", "cherches", "listes", "afficher",
+        "trouver", "donner", "montrer", "chercher", "lister", "afficher",
+        "envoyer", "dire", "demande", "demander", "demandes", "demandent",
+        "envoies", "envoyes", "envoyez", "regarde", "regarder", "regardes",
+        "presente", "presenter", "presentes", "presentez",
+        "retrouver", "retrouves", "retrouvez", "retrouvent",
+        "trouves", "trouvez", "trouvent", "recherche", "rechercher",
+        "recherches", "recherchez", "recherchent",
+    }
+    SEMANTIC_BOOST = {
+        "hotel", "hotels", "facture", "factures", "devis", "contrat",
+        "rapport", "reservation", "vol", "avion", "train", "taxi",
+        "restaurant", "parking", "essence", "carburant", "peage", "toll",
+        "autoroute", "document", "photo", "video", "preuve", "temoin",
+        "adresse", "telephone", "email", "mail", "message", "sujet",
+        "client", "enquete", "investigation", "surveillance", "adulte",
+        "infidelite", "disparition", "recherche", "personne", "garde",
+        "enfant", "famille", "residence", "domicile", "entreprise",
+        "fraude", "materiel", "collaboration", "harcelement",
+    }
+    keywords: list[tuple[int, str]] = []
     for word in re.findall(r"[A-Za-zÀ-Ÿà-ÿ]{4,}", question):
         w = word.strip().lower()
         if len(w) < 4:
@@ -795,17 +818,30 @@ def _build_keyword_sql(question: str) -> str | None:
         w_norm = normalize("NFD", w).encode("ascii", "ignore").decode("ascii")
         if w_norm in STOP_WORDS:
             continue
-        # Score : majuscule initiale = nom propre = +10, longueur = discriminante
         score = len(w)
         if word[0].isupper():
             score += 10
-        keywords.append((score, word))
+        if w_norm in ACTION_WORDS:
+            score -= 15
+        if w_norm in SEMANTIC_BOOST:
+            score += 15
+        if score > 0:
+            keywords.append((score, word))
+    keywords.sort(key=lambda x: x[0], reverse=True)
+    return keywords
 
+
+def _build_keyword_sql(question: str) -> str | None:
+    """Génère un SQL de recherche par mot-clé pour les questions factuelles
+    sur un dossier/client spécifique (ex: 'résume le dossier Lampaert').
+
+    Retourne None si aucun mot-clé significatif n'est trouvé.
+    Privilégie les noms propres (majuscule initiale) et normalise les accents.
+    """
+    keywords = _extract_keywords(question)
     if not keywords:
         return None
 
-    # Trier par score décroissant, prendre les 5 meilleurs
-    keywords.sort(key=lambda x: x[0], reverse=True)
     likes = []
     for _, kw in keywords[:5]:
         kw_safe = kw.replace("'", "''")
@@ -814,7 +850,11 @@ def _build_keyword_sql(question: str) -> str | None:
         likes.append(f"body_preview LIKE '%{kw_safe}%'")
 
     where = " OR ".join(likes)
-    return f"SELECT id, subject, sender, received_at, category, status, priority, body_preview, substr(body, 1, 3000) as body FROM mail_processed WHERE ({where}) ORDER BY received_at DESC LIMIT 20"
+    year = _extract_year(question)
+    date_clause = ""
+    if year:
+        date_clause = f" AND (processed_at >= '{year}-01-01' AND processed_at < '{int(year) + 1}-01-01')"
+    return f"SELECT id, subject, sender, received_at, category, status, priority, body_preview, substr(body, 1, 3000) as body FROM mail_processed WHERE ({where}){date_clause} ORDER BY received_at DESC LIMIT 20"
 
 
 def _normalize(text: str) -> str:
@@ -1257,44 +1297,8 @@ async def ask_charlie(
         lim = 500 if is_count_request else 50
         if dossier_id:
             return await _search_historical_by_keyword(db_path, dossier_id, year=year, limit=lim)
-        # Si pas de dossier_id → chercher par mots-clés extraits de la question
-        # On normalise les accents pour que "Résume" match "resume" dans la liste stop-words
-        raw_words = re.findall(r"[A-Za-zÀ-Ÿà-ÿ]{4,}", question)
-        keywords: list[tuple[int, str]] = []   # (score, word) — score plus haut = plus pertinent
-        STOP_WORDS = {
-            "moi", "vous", "dossier", "client", "resume", "resumer",
-            "question", "reponse", "donne", "donner", "aussi",
-            "partie", "partir", "faire", "etre", "avoir", "aller",
-            "comme", "alors", "apres", "avant", "encore", "toujours",
-            "jamais", "toutes", "toute", "tous", "tout", "plusieurs",
-            "quelques", "beaucoup", "souvent", "parfois", "maintenant",
-            "aujourd", "hier", "demain", "matin", "soir", "jour",
-            "semaine", "mois", "annee", "temps", "heure", "minute",
-            "proposition", "propose", "proposer", "offre", "offert",
-            "offrir", "financier", "financiere", "finance", "finances",
-            "budget", "prix", "cout", "couts", "montant", "euro",
-            "euros", "devis", "facture", "facturation", "paiement",
-            "payer", "paye", "versement", "provision", "honoraires",
-            "tarif", "tarifs", "forfait", "forfaits", "total",
-            "somme", "sommes", "argent", "gratuit", "gratuite",
-            "avec", "principaux", "principales", "important", "importants",
-            "importants", "details", "detail", "information", "informations",
-        }
-        for word in raw_words:
-            w = word.strip().lower()
-            if len(w) < 4:
-                continue
-            w_norm = normalize("NFD", w).encode("ascii", "ignore").decode("ascii")
-            if w_norm in STOP_WORDS:
-                continue
-            # Score de pertinence : majuscule initiale (nom propre) = +10, longueur = +len
-            score = len(w)
-            if word[0].isupper():
-                score += 10
-            keywords.append((score, word))   # garder la casse originale
+        keywords = _extract_keywords(question)
         if keywords:
-            # Trier par score décroissant → le plus pertinent en premier
-            keywords.sort(key=lambda x: x[0], reverse=True)
             best = keywords[0][1]
             log.info("charlie.archive_keyword", best=best, all_keywords=[k[1] for k in keywords[:5]])
             return await _search_historical_by_keyword(db_path, best, year=year, limit=lim)
@@ -1784,6 +1788,7 @@ RÉPONSE :"""
             sql_safe=True,
             sql_error=None,
             vault_notes=vault_notes,
+            hide_rows=True,  # ← Masque le tableau SQL quand la réponse vient du vault
         )
     if vault_has_bad:
         log.info("charlie.vault_answer_bad", question=question[:60], answer_preview=vault_answer[:120])
