@@ -217,6 +217,7 @@ class CharlieResult:
     sql_error: str | None
     vault_notes: list[VaultNote] = field(default_factory=list)
     hide_rows: bool = False  # Quand True, le template web ne montre pas le tableau SQL brut
+    archive_rows: list[dict] = field(default_factory=list)  # Emails trouvés dans les DB historiques boite1/2/3
 
 
 def parse_charlie_response(text: str) -> tuple[str, str]:
@@ -1790,7 +1791,8 @@ RÉPONSE :"""
             sql_safe=True,
             sql_error=None,
             vault_notes=vault_notes,
-            hide_rows=False,  # ← Laisse le tableau SQL quand il y a des résultats probants
+            hide_rows=False,
+            archive_rows=archive_rows,
         )
     if vault_has_bad:
         log.info("charlie.vault_answer_bad", question=question[:60], answer_preview=vault_answer[:120])
@@ -1932,6 +1934,7 @@ RÉPONSE À DANIEL :"""
         sql_safe=True,
         sql_error=None,
         vault_notes=vault_notes,
+        archive_rows=archive_rows,
     )
 
 def _needs_summary(question: str) -> bool:

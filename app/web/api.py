@@ -601,6 +601,9 @@ async def charlie_ask(
         # Ignorer les résultats COUNT(*) mono-cellule : déjà inclus dans response_text
         if not (len(result.rows) == 1 and len(result.rows[0]) == 1):
             results_html = _format_rows_html(result.rows)
+    # Si pas de rows SQL mais des archives historiques → afficher les preuves
+    if not results_html and result.archive_rows and not result.hide_rows:
+        results_html = _format_rows_html(result.archive_rows)
 
     vault_html = ""
     if result.vault_notes:
