@@ -1885,8 +1885,12 @@ RÉPONSE :"""
 
     # Si Cerveau2 a répondu mais c'est un comptage, on injecte sa réponse dans le contexte
     vault_context = context
-    if vault_answer:
+    if vault_answer and not vault_has_bad and vault_is_relevant:
         vault_context = f"RÉPONSE DU SECOND CERVEAU (Cerveau2-Det) :\n{vault_answer.strip()}\n\n---\n\n{context}"
+    elif vault_answer and (vault_has_bad or not vault_is_relevant):
+        log.info("charlie.vault_context_purged", question=question[:60],
+                 bad=vault_has_bad, relevant=vault_is_relevant,
+                 preview=vault_answer[:120] if vault_answer else "(vide)")
 
     final_prompt = f"""Tu es Charlie, l'assistant IA personnel de Daniel Hurchon, détective privé chez Detective.be. Version {VERSION}.
 Tu t'adresses à Daniel comme à un partenaire : direct, chaleureux, sans langue de bois. Utilise "tu".

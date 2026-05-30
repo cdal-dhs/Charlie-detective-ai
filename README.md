@@ -182,7 +182,7 @@ DETECTIVE_BE/
 
 ## Statut
 
-✅ **Production active** — `detective.digitalhs.biz` — **v1.19.1**
+✅ **Production active** — `detective.digitalhs.biz` — **v1.19.2**
 
 - **Pipeline IMAP** : polling 3 boîtes, classification 8 catégories, priorité intelligente, skip+flag historique avant 20/05/2026
 - **Génération brouillon** : style Daniel, multilingue FR/NL/EN, fallback OpenRouter, date/heure originale incluse
@@ -212,7 +212,7 @@ Voir `docs/ROADMAP.md` pour la roadmap V2b/V2c (feedback loop qualité Daniel, l
 
 ## Versions
 
-Version source de vérité : **`app/_version.py`** (`VERSION = "1.19.1"`).
+Version source de vérité : **`app/_version.py`** (`VERSION = "1.19.2"`).
 
 Le badge affiché dans le cockpit est lu dynamiquement depuis `app/_version.py`. **Tolérance zéro** sur la désynchronisation.
 
