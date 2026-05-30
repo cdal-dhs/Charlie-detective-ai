@@ -601,9 +601,15 @@ async def charlie_ask(
         # Ignorer les résultats COUNT(*) mono-cellule : déjà inclus dans response_text
         if not (len(result.rows) == 1 and len(result.rows[0]) == 1):
             results_html = _format_rows_html(result.rows)
-    # Si pas de rows SQL mais des archives historiques → afficher les preuves
+    # Si pas de rows SQL mais des archives historiques → message textuel de sources
+    # (les archives sont anonymisées — on n'affiche pas le tableau brut)
     if not results_html and result.archive_rows and not result.hide_rows:
-        results_html = _format_rows_html(result.archive_rows)
+        arc_cnt = len(result.archive_rows)
+        results_html = (
+            f'<p class="text-xs text-gray-500 mt-2">'
+            f'📎 {arc_cnt} email(s) source(s) trouvé(s) dans les archives historiques'
+            f'</p>'
+        )
 
     vault_html = ""
     if result.vault_notes:

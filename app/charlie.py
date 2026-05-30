@@ -851,11 +851,22 @@ def _build_keyword_sql(question: str) -> str | None:
         likes.append(f"body_preview LIKE '%{kw_safe}%'")
 
     where = " OR ".join(likes)
+
+    # Boost par catégorie quand la question mentionne un type d'email connu
+    q_norm = _normalize(question)
+    category_clause = ""
+    if any(kw in q_norm for kw in ("facture", "factures", "invoice")):
+        category_clause = " OR category = 'facture'"
+    elif any(kw in q_norm for kw in ("newsletter", "digest", "bulletin")):
+        category_clause = " OR category = 'newsletter'"
+    elif any(kw in q_norm for kw in ("rappel", "reminder")):
+        category_clause = " OR category = 'rappel'"
+
     year = _extract_year(question)
     date_clause = ""
     if year:
         date_clause = f" AND (processed_at >= '{year}-01-01' AND processed_at < '{int(year) + 1}-01-01')"
-    return f"SELECT id, subject, sender, received_at, category, status, priority, body_preview, substr(body, 1, 3000) as body FROM mail_processed WHERE ({where}){date_clause} ORDER BY received_at DESC LIMIT 20"
+    return f"SELECT id, subject, sender, received_at, category, status, priority, body_preview, substr(body, 1, 3000) as body FROM mail_processed WHERE ({where}{category_clause}){date_clause} ORDER BY received_at DESC LIMIT 20"
 
 
 def _normalize(text: str) -> str:
