@@ -639,6 +639,7 @@ async def charlie_ask(
             preview = (body_text[:250]
                        .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
 
+            msg_type_tag = f'<span class="text-gray-600">[{msg_type}]</span>' if msg_type else ""
             items_html += (
                 f'<div class="mt-2 text-xs bg-gray-900 rounded px-3 py-2 border-l-2 border-purple-600">'
                 f'<div class="flex items-center gap-2 mb-1">'
@@ -647,7 +648,7 @@ async def charlie_ask(
                 f'</div>'
                 f'<div class="flex items-center gap-2 text-gray-500 mb-1">'
                 f'<span>{date_str}</span>'
-                f'{f"<span class=\\'text-gray-600\\'>[{msg_type}]</span>" if msg_type else ""}'
+                f'{msg_type_tag}'
                 f'</div>'
                 f'<div class="text-gray-400 whitespace-pre-wrap">{preview}…</div>'
                 f'</div>'
