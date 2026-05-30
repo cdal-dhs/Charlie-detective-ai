@@ -1927,7 +1927,13 @@ RÉPONSE À DANIEL :"""
 
     # Garde : réponse vide OU inutile alors qu'on a des données → réponse de secours
     _BAD = ("je n'ai pas trouvé", "aucun résultat", "aucune information", "je ne trouve pas", "pas d'information", "aucune donnée")
-    if not response or (any(p in response.lower() for p in _BAD) and (rows or archive_rows)):
+    # Garde renforcée : réponses de refus du LLM (mêmes patterns que le vault)
+    _BAD_RESPONSE = _BAD_VAULT + (
+        "je n'ai pas trouvé", "aucun résultat", "aucune information",
+        "je ne trouve pas", "pas d'information", "aucune donnée",
+    )
+    is_bad_response = any(p in response.lower() for p in _BAD_RESPONSE)
+    if not response or (is_bad_response and (rows or archive_rows)):
         response = ""
     if not response:
         if is_dossier_summary and (rows or archive_rows):

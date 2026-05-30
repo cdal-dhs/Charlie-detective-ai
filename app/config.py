@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     openrouter_api_key: str = ""
     llm_model_fallback: str = "openai/glm-5.1"
     llm_model_classifier: str = "openai/kimi-k2"
-    llm_model_chat: str = "openai/gemma4:31b"
+    llm_model_chat: str = "openai/kimi-k2"
 
     resend_api_key: str = ""
     resend_from: str = "agent@digitalhs.biz"
