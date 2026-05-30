@@ -640,6 +640,15 @@ def _extract_year(question: str) -> str | None:
     return m.group(1) if m else None
 
 
+def _extract_years(question: str) -> list[str]:
+    """Extrait TOUTES les années 20xx mentionnées dans la question.
+
+    Retourne une liste triée. Ex: '2025 et 2026' → ['2025', '2026'].
+    """
+    years = sorted({m.group(1) for m in _YEAR_RE.finditer(question)})
+    return years
+
+
 _MONTH_FR = {
     "janvier": 1, "fevrier": 2, "mars": 3, "avril": 4, "mai": 5, "juin": 6,
     "juillet": 7, "aout": 8, "septembre": 9, "octobre": 10, "novembre": 11, "decembre": 12,
@@ -862,10 +871,14 @@ def _build_keyword_sql(question: str) -> str | None:
     elif any(kw in q_norm for kw in ("rappel", "reminder")):
         category_clause = " OR category = 'rappel'"
 
-    year = _extract_year(question)
+    years = _extract_years(question)
     date_clause = ""
-    if year:
-        date_clause = f" AND (processed_at >= '{year}-01-01' AND processed_at < '{int(year) + 1}-01-01')"
+    if len(years) == 1:
+        y = years[0]
+        date_clause = f" AND (processed_at >= '{y}-01-01' AND processed_at < '{int(y) + 1}-01-01')"
+    elif len(years) > 1:
+        min_y, max_y = years[0], years[-1]
+        date_clause = f" AND (processed_at >= '{min_y}-01-01' AND processed_at < '{int(max_y) + 1}-01-01')"
     return f"SELECT id, subject, sender, received_at, category, status, priority, body_preview, substr(body, 1, 3000) as body FROM mail_processed WHERE ({where}{category_clause}){date_clause} ORDER BY received_at DESC LIMIT 20"
 
 
@@ -1174,7 +1187,11 @@ async def ask_charlie(
 
     dossier_id = _extract_dossier_id(question)
     year = _extract_year(question)
-    log.info("charlie.ask", question=question[:60], dossier_id=dossier_id, year=year)
+    years = _extract_years(question)
+    # Pour les archives historiques : si plusieurs années, pas de filtre année
+    # (la recherche par mot-clé trouve les emails de toutes les années)
+    archive_year = None if len(years) > 1 else year
+    log.info("charlie.ask", question=question[:60], dossier_id=dossier_id, year=year, years=years)
 
     # Détection d'intention (avant les closures — late binding Python)
     q_norm = _normalize(question)
@@ -1310,14 +1327,14 @@ async def ask_charlie(
     async def _archive_task() -> list[dict]:
         lim = 500 if is_count_request else 50
         if dossier_id:
-            return await _search_historical_by_keyword(db_path, dossier_id, year=year, limit=lim)
+            return await _search_historical_by_keyword(db_path, dossier_id, year=archive_year, limit=lim)
         keywords = _extract_keywords(question)
         if keywords:
             best = keywords[0][1]
             log.info("charlie.archive_keyword", best=best, all_keywords=[k[1] for k in keywords[:5]])
-            return await _search_historical_by_keyword(db_path, best, year=year, limit=lim)
-        if year:
-            return await _search_historical_all(db_path, year=year, limit=lim)
+            return await _search_historical_by_keyword(db_path, best, year=archive_year, limit=lim)
+        if archive_year:
+            return await _search_historical_all(db_path, year=archive_year, limit=lim)
         return []
 
     async def _dossiers_task() -> list[dict]:
@@ -1780,10 +1797,40 @@ RÉPONSE :"""
         "je ne trouve pas", "pas trouvé", "aucune information", "je ne trouve",
         "pas d'information", "aucune donnée", "aucun résultat",
         "ne trouve pas d'information", "pas explicitement identifié",
+        "tu n'as pas", "pas posé de question", "dernier message",
+        "pas compris", "je ne comprends pas", "qu'est-ce que tu",
+        "on fait quoi", "je t'écoute", "pas de question", "question précise",
+        "pas de sujet", "pas de demande", "de quoi tu parles",
     )
+    # Pertinence sémantique : la réponse du vault doit contenir AU MOINS un mot-clé
+    # significatif de la question. Sinon c'est du garbage (ex: Lampaert quand on
+    # demande des factures d'hôtel).
+    def _vault_has_relevance(vault_ans: str, q: str) -> bool:
+        if not vault_ans or len(vault_ans.strip()) < 30:
+            return False
+        q_words = {normalize("NFD", w.lower()).encode("ascii", "ignore").decode("ascii")
+                   for w in re.findall(r"[A-Za-zÀ-Ÿà-ÿ]{4,}", q)}
+        # Exclure les stop-words courants
+        q_words -= {"moi", "vous", "dossier", "client", "question", "reponse",
+                    "donne", "donner", "faire", "etre", "avoir", "aller", "comme",
+                    "alors", "apres", "avant", "encore", "toujours", "jamais",
+                    "toutes", "toute", "tous", "tout", "plusieurs", "quelques",
+                    "beaucoup", "souvent", "parfois", "maintenant", "aujourd",
+                    "hier", "demain", "matin", "soir", "jour", "semaine", "mois",
+                    "annee", "temps", "heure", "minute", "avec", "depuis", "dans",
+                    "pour", "sur", "sous", "entre", "contre", "vers", "chez",
+                    "retrouve", "trouve", "cherche", "chercher", "liste", "lister",
+                    "montre", "montrer", "donne", "donner"}
+        ans_lower = normalize("NFD", vault_ans.lower()).encode("ascii", "ignore").decode("ascii")
+        for w in q_words:
+            if len(w) >= 4 and w in ans_lower:
+                return True
+        return False
+
     vault_has_bad = vault_answer and any(p in vault_answer.lower() for p in _BAD_VAULT)
-    if vault_answer and not is_count_request and not vault_has_bad:
-        # Cerveau2 a répondu en direct et de manière utile
+    vault_is_relevant = vault_answer and _vault_has_relevance(vault_answer, question)
+    if vault_answer and not is_count_request and not vault_has_bad and vault_is_relevant:
+        # Cerveau2 a répondu en direct et de manière utile ET pertinente
         enriched = vault_answer.strip()
         if rows or archive_rows:
             enriched += "\n\n_(Sources complémentaires : "
@@ -1805,8 +1852,10 @@ RÉPONSE :"""
             hide_rows=False,
             archive_rows=archive_rows,
         )
-    if vault_has_bad:
-        log.info("charlie.vault_answer_bad", question=question[:60], answer_preview=vault_answer[:120])
+    if vault_has_bad or not vault_is_relevant:
+        log.info("charlie.vault_answer_skipped", question=question[:60],
+                 bad=vault_has_bad, relevant=vault_is_relevant,
+                 preview=vault_answer[:120] if vault_answer else "(vide)")
 
     # ── 6.5 Guard anti-hallucination — si aucune source n'a de données ──
     if not vault_notes and not rows and not archive_rows and not vault_answer and not direct_answer:
