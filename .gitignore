@@ -12,6 +12,9 @@ data/*.db-shm
 data/*.sqlite-journal
 data/*.sqlite-wal
 data/*.sqlite-shm
+# Pièces jointes extraites des emails (ne pas supprimer par git clean)
+data/attachments/*
+!data/attachments/.gitkeep
 
 # Screenshots & test artifacts
 screenshot_*.png
