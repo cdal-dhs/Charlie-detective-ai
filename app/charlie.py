@@ -1509,9 +1509,28 @@ async def ask_charlie(
                     context_parts.append("[… tronqué]")
                     break
             context_parts.append("")
-        else:
+        elif is_list_request:
+            # Mode liste : tous les sujets visibles
             context_parts.append(f"EMAILS BASE COURANTE — SQL ({len(rows)} ligne(s)) :")
             context_parts.append(_sanitize_rows_for_prompt(rows))
+            context_parts.append("")
+        else:
+            # Mode synthèse/recherche factuelle : seulement les 5 plus récents,
+            # format texte (pas de tableau) pour éviter que le LLM reproduise la structure
+            limit = min(len(rows), 5)
+            context_parts.append(f"EMAILS BASE COURANTE ({len(rows)} trouvé(s), {limit} montré(s) ci-dessous) :")
+            for r in rows[:limit]:
+                subject = r.get("subject") or "Sans sujet"
+                date = r.get("received_at") or r.get("processed_at") or ""
+                cat = r.get("category") or ""
+                line = f"- {subject}"
+                if date:
+                    line += f" ({date})"
+                if cat:
+                    line += f" [{cat}]"
+                context_parts.append(line)
+            if len(rows) > limit:
+                context_parts.append(f"… et {len(rows) - limit} autres.")
             context_parts.append("")
     elif sql:
         context_parts.append("EMAILS BASE COURANTE : aucun email trouvé.")
@@ -1519,15 +1538,13 @@ async def ask_charlie(
 
     # Archives historiques — contexte pour le LLM
     if archive_rows:
-        from collections import Counter
-        cat_counts = Counter(r.get("category") or "SANS_CAT" for r in archive_rows)
-        context_parts.append(f"EMAILS ARCHIVES HISTORIQUES ({len(archive_rows)} email(s)) :")
-        context_parts.append("Répartition par catégorie :")
-        for cat, cnt in cat_counts.most_common():
-            context_parts.append(f"  - {cat}: {cnt}")
-
         if is_list_request:
-            # Mode liste : tous les sujets
+            from collections import Counter
+            cat_counts = Counter(r.get("category") or "SANS_CAT" for r in archive_rows)
+            context_parts.append(f"EMAILS ARCHIVES HISTORIQUES ({len(archive_rows)} email(s)) :")
+            context_parts.append("Répartition par catégorie :")
+            for cat, cnt in cat_counts.most_common():
+                context_parts.append(f"  - {cat}: {cnt}")
             context_parts.append("Détail (50 premiers sujets) :")
             for r in archive_rows[:50]:
                 subject = r.get("subject") or "Sans sujet"
@@ -1541,23 +1558,42 @@ async def ask_charlie(
                 context_parts.append(line)
             if len(archive_rows) > 50:
                 context_parts.append(f"… et {len(archive_rows) - 50} autres.")
-        else:
-            # Mode synthèse : contenu des emails (body_preview) pour permettre au LLM de résumer
+            context_parts.append("")
+        elif is_dossier_summary:
+            # Résumé de dossier : body_preview des archives pour le LLM
+            context_parts.append(f"EMAILS ARCHIVES HISTORIQUES ({len(archive_rows)} email(s)) :")
             context_parts.append("Contenu des emails pertinents :")
             total_preview = 0
-            for r in archive_rows[:10]:  # max 10 emails pour ne pas exploser le contexte
+            for r in archive_rows[:10]:
                 preview = r.get("body_preview", "")
                 if not preview:
                     continue
                 subject = r.get("subject") or "Sans sujet"
                 date = r.get("received_at") or r.get("date") or ""
                 context_parts.append(f"--- Email : {subject} ({date}) ---")
-                context_parts.append(preview[:1500])  # max 1500 chars par email
+                context_parts.append(preview[:1500])
                 total_preview += len(preview[:1500])
-                if total_preview > 8000:  # hard limit pour le contexte total
+                if total_preview > 8000:
                     context_parts.append("[… tronqué pour limiter le contexte]")
                     break
-        context_parts.append("")
+            context_parts.append("")
+        else:
+            # Recherche factuelle : seulement les 5 plus récents, format texte
+            limit = min(len(archive_rows), 5)
+            context_parts.append(f"EMAILS ARCHIVES HISTORIQUES ({len(archive_rows)} trouvé(s), {limit} montré(s) ci-dessous) :")
+            for r in archive_rows[:limit]:
+                subject = r.get("subject") or "Sans sujet"
+                date = r.get("received_at") or r.get("date") or ""
+                cat = r.get("category") or ""
+                line = f"- {subject}"
+                if date:
+                    line += f" ({date})"
+                if cat:
+                    line += f" [{cat}]"
+                context_parts.append(line)
+            if len(archive_rows) > limit:
+                context_parts.append(f"… et {len(archive_rows) - limit} autres.")
+            context_parts.append("")
 
     context = "\n".join(context_parts)
 
@@ -1873,42 +1909,6 @@ RÉPONSE :"""
             vault_notes=vault_notes,
         )
 
-    # ── 6.6 Bypass LLM pour recherches factuelles — pas de synthèse LLM quand on a des résultats SQL/archives
-    # Le modèle chat (Kimi K2) ignore les instructions de format et retourne des listes brutes ou des refus.
-    # Pour les requêtes factuelles (factures, hotel, etc.), on construit la réponse directement en Python.
-    is_factual_search = bool(sql) and " LIKE " in sql and not is_count_request and not is_list_request and not is_dossier_summary and not is_identity_request
-    if is_factual_search and (rows or archive_rows):
-        all_emails = (rows or []) + (archive_rows or [])
-        all_emails.sort(key=lambda r: r.get("received_at", r.get("date", "")), reverse=True)
-        keywords = _extract_keywords(question)
-        kw_label = ", ".join(k[1] for k in keywords[:3]) if keywords else "cette recherche"
-        lines = [f"J'ai trouvé **{len(all_emails)}** email{'s' if len(all_emails) > 1 else ''} liés à **{kw_label}** :", ""]
-        for r in all_emails[:15]:
-            subject = r.get("subject") or "Sans sujet"
-            date = r.get("received_at") or r.get("date") or ""
-            cat = r.get("category") or ""
-            line = f"- {subject}"
-            if date:
-                line += f" ({date})"
-            if cat:
-                line += f" [{cat}]"
-            lines.append(line)
-        if len(all_emails) > 15:
-            lines.append(f"… et {len(all_emails) - 15} autres.")
-        response = "\n".join(lines)
-        log.info("charlie.factual_bypass", question=question[:60], count=len(all_emails))
-        await _auto_save_fact(db_path, question, response, dossier_id)
-        return CharlieResult(
-            response_text=response,
-            sql=sql,
-            rows=rows,
-            sql_safe=True,
-            sql_error=None,
-            vault_notes=vault_notes,
-            hide_rows=True,  # On masque le tableau SQL brut car la réponse textuelle est déjà propre
-            archive_rows=archive_rows,
-        )
-
     # ── 7. Appel LLM final pour les questions spécifiques ──
     if is_list_request:
         format_rule = "7. Daniel demande une LISTE. Si le second cerveau a des notes sur ces dossiers, liste-les en priorité. Sinon, extrait les noms de dossiers identifiables depuis les emails. Ne liste pas les catégories — donne les NOMS (ex: ADF, Zaventem, ODM)."
@@ -1916,8 +1916,13 @@ RÉPONSE :"""
         format_rule = "7. Daniel demande un COMPTAGE. Donne le nombre total clair et précis."
     elif is_identity_request:
         format_rule = "7. Daniel demande une IDENTITÉ. Cherche dans le second cerveau et réponds en une ou deux phrases maximum, directement."
+    elif is_dossier_summary:
+        format_rule = "7. Daniel demande un RÉSUMÉ DE DOSSIER. Extrais les infos clés (client, demande, dates, montants) en un paragraphe clair et direct."
+    elif bool(sql) and " LIKE " in sql:
+        # Recherche factuelle par mot-clé (factures, hotel, etc.)
+        format_rule = "7. Daniel demande une RECHERCHE FACTUELLE. Le contexte ci-dessus contient quelques emails pertinents (5 max par source). Tu dois faire un RÉSUMÉ NARRATIF en 1-2 phrases : de quoi parlent ces emails, quelles catégories dominent, quelles périodes. NE FAIS JAMAIS DE LISTE À PUCES. Ne recopie jamais les sujets un par un. ANALYSE et SYNTHÉTISE."
     else:
-        format_rule = "7. Daniel demande une SYNTHÈSE ou une INFO. Réponds de manière fluide et directe, en une ou deux phrases maximum. Si c'est un résumé de dossier, extrais les infos clés (client, demande, dates, montants) en un paragraphe clair."
+        format_rule = "7. Daniel demande une SYNTHÈSE ou une INFO. Réponds de manière fluide et directe, en une ou deux phrases maximum."
 
     # Si Cerveau2 a répondu mais c'est un comptage, on injecte sa réponse dans le contexte
     vault_context = context
@@ -1943,9 +1948,10 @@ RÈGLES :
 5. Pour un comptage, additionne les résultats SQL et les archives.
 6. Si aucune source n'a de réponse, dis-le clairement en une phrase.
 {format_rule}
-8. Ne reproduis JAMAIS les tableaux de données bruts, les listes d'emails avec leurs métadonnées (id, date, status, etc.), ou les extraits techniques. Tu dois SYNTHÉTISER le contenu en langage naturel fluide.
-9. Si Daniel demande un résumé de dossier (ex: "résume le dossier X"), extrais et présente les informations clés : nom du client, type de demande, dates importantes, montants financiers. Un paragraphe clair et direct.
+8. Le contexte ci-dessus contient des extraits d'emails et de notes. Tu dois les ANALYSER et SYNTHÉTISER en langage naturel fluide. NE RECOPIE JAMAIS les listes de sujets, les tableaux de métadonnées, ou les extraits techniques bruts. RACONTE ce que tu as trouvé, comme un partenaire qui fait un compte-rendu.
+9. Si Daniel demande un résumé de dossier, extrais les infos clés (client, demande, dates, montants) en un paragraphe clair.
 10. N'invente jamais d'informations absentes des sources ci-dessus.
+11. ABSOLU : ta réponse ne doit contenir AUCUNE puce "- ", AUCUN tableau markdown "|", AUCUNE liste numérotée. Rédige uniquement en phrases continues.
 
 RÉPONSE À DANIEL :"""
 
