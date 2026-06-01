@@ -379,6 +379,7 @@ _ENQUETE_TO_CATEGORY: dict[str, str] = {
 
 async def _search_historical_by_keyword(
     db_path: Path, keyword: str, year: str | None = None, limit: int = 50,
+    category: str | None = None,
 ) -> list[dict]:
     """Cherche dans les 3 DB historiques par mot-clé (subject, body_preview, body_full, sender).
 
@@ -406,6 +407,9 @@ async def _search_historical_by_keyword(
                 if year:
                     sql += "AND date LIKE ? "
                     params.append(f"%{year}%")
+                if category:
+                    sql += "AND category = ? "
+                    params.append(category)
                 sql += "ORDER BY date DESC LIMIT ?"
                 params.append(limit)
                 cursor = await db.execute(sql, tuple(params))
@@ -880,7 +884,7 @@ def _build_keyword_sql(question: str) -> str | None:
     elif len(years) > 1:
         min_y, max_y = years[0], years[-1]
         date_clause = f" AND (processed_at >= '{min_y}-01-01' AND processed_at < '{int(max_y) + 1}-01-01')"
-    return f"SELECT id, subject, sender, received_at, category, status, priority, body_preview, substr(body, 1, 3000) as body FROM mail_processed WHERE ({where}{category_clause}){date_clause} ORDER BY received_at DESC LIMIT 20"
+    return f"SELECT id, subject, sender, received_at, category, status, priority, body_preview, substr(body, 1, 3000) as body FROM mail_processed WHERE ({where}{category_clause}){date_clause} ORDER BY received_at DESC LIMIT 5"
 
 
 def _normalize(text: str) -> str:
@@ -1235,6 +1239,8 @@ async def ask_charlie(
             log.warning("charlie.sql_gen_failed", error=str(e))
 
     # ── 3. Recherches en parallèle ──
+    is_factual_search = bool(sql) and not is_dossier_summary
+
     async def _sql_task() -> list[dict]:
         if not sql or not is_safe_sql(sql):
             return []
@@ -1248,8 +1254,6 @@ async def ask_charlie(
 
     async def _vault_task() -> list:
         nonlocal vault_answer
-        # Recherches factuelles (mot-clé, comptage, liste) = besoin de plus de sources
-        is_factual_search = bool(sql) and not is_dossier_summary
         lim = 15 if (is_identity_request or is_list_request or is_dossier_list or is_factual_search) else settings.cerveau2_limit
         # Pour les questions identitaires, ne pas filtrer par dossier_id
         # car les fiches personnes/entités ne sont pas liées à un dossier
@@ -1326,14 +1330,29 @@ async def ask_charlie(
         )
 
     async def _archive_task() -> list[dict]:
-        lim = 500 if is_count_request else 50
+        # Pour les recherches factuelles, même limite stricte que le SQL (5)
+        if is_count_request:
+            lim = 500
+        elif is_factual_search:
+            lim = 5
+        else:
+            lim = 50
+        # Filtre catégorie pour les archives (même logique que le SQL)
+        q_norm = _normalize(question)
+        category_filter = None
+        if any(kw in q_norm for kw in ("facture", "factures", "invoice")):
+            category_filter = "facture"
+        elif any(kw in q_norm for kw in ("newsletter", "digest", "bulletin")):
+            category_filter = "newsletter"
+        elif any(kw in q_norm for kw in ("rappel", "reminder")):
+            category_filter = "rappel"
         if dossier_id:
-            return await _search_historical_by_keyword(db_path, dossier_id, year=archive_year, limit=lim)
+            return await _search_historical_by_keyword(db_path, dossier_id, year=archive_year, limit=lim, category=category_filter)
         keywords = _extract_keywords(question)
         if keywords:
             best = keywords[0][1]
-            log.info("charlie.archive_keyword", best=best, all_keywords=[k[1] for k in keywords[:5]])
-            return await _search_historical_by_keyword(db_path, best, year=archive_year, limit=lim)
+            log.info("charlie.archive_keyword", best=best, all_keywords=[k[1] for k in keywords[:5]], category=category_filter)
+            return await _search_historical_by_keyword(db_path, best, year=archive_year, limit=lim, category=category_filter)
         if archive_year:
             return await _search_historical_all(db_path, year=archive_year, limit=lim)
         return []
@@ -1936,17 +1955,31 @@ RÉPONSE :"""
                  bad=vault_has_bad, relevant=vault_is_relevant,
                  preview=vault_answer[:120] if vault_answer else "(vide)")
 
-    # ── Prompt LLM : court et ciblé pour les recherches factuelles, complet sinon ──
+    # ── Prompt LLM : vault-first pour les recherches factuelles, complet sinon ──
     is_factual = bool(sql) and " LIKE " in sql
-    if is_factual:
+    if is_factual and vault_answer and not vault_has_bad and vault_is_relevant:
+        # VAULT-FIRST : le Cerveau2 a la réponse. On ne pollue PAS avec les emails.
+        # Le LLM résume la réponse du Cerveau2 en langage naturel.
         final_prompt = f"""Tu es Charlie, l'assistant de Daniel Hurchon (Detective.be). Version {VERSION}.
 
 Question de Daniel : {question}
 
-Voici ce que j'ai trouvé :
-{vault_context}
+Ce que le Cerveau2 a trouvé :
+{vault_answer.strip()}
 
-Consigne absolue : réponds en 1-2 phrases fluides, directes, comme un partenaire qui fait un compte-rendu à Daniel. NE JAMAIS faire de liste à puces. NE JAMAIS recopier les sujets email un par un. SYNTHÉTISE. Utilise "tu".
+Résume cela en 1-2 phrases fluides et directes pour Daniel. Utilise "tu". NE JAMAIS faire de liste à puces. NE JAMAIS recopier des sujets email. Raconte simplement ce que le Cerveau2 sait.
+
+RÉPONSE À DANIEL :"""
+    elif is_factual:
+        # Vault vide ou non pertinent : on utilise le résumé narratif des emails (contexte allégé)
+        final_prompt = f"""Tu es Charlie, l'assistant de Daniel Hurchon (Detective.be). Version {VERSION}.
+
+Question de Daniel : {question}
+
+Voici ce que j'ai trouvé en base :
+{context}
+
+Résume en 1-2 phrases fluides. Utilise "tu". NE JAMAIS faire de liste à puces. SYNTHÉTISE.
 
 RÉPONSE À DANIEL :"""
     else:
@@ -1994,7 +2027,10 @@ RÉPONSE À DANIEL :"""
     if not response or (is_bad_response and (rows or archive_rows)):
         response = ""
     if not response:
-        if is_dossier_summary and (rows or archive_rows):
+        if is_factual and vault_answer and not vault_has_bad and vault_is_relevant:
+            # Vault-first : le Cerveau2 avait la réponse, le LLM a foiré. On retourne le vault direct.
+            response = vault_answer.strip()
+        elif is_dossier_summary and (rows or archive_rows):
             # Dernier recours pour un résumé de dossier : on ne fait JAMAIS un tableau brut.
             # On retourne un message propre avec les liens vers les emails trouvés.
             all_emails = (rows or []) + (archive_rows or [])
