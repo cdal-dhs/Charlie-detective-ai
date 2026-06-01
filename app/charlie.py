@@ -1923,7 +1923,7 @@ RÉPONSE :"""
         format_rule = "7. Daniel demande un RÉSUMÉ DE DOSSIER. Extrais les infos clés (client, demande, dates, montants) en un paragraphe clair et direct."
     elif bool(sql) and " LIKE " in sql:
         # Recherche factuelle par mot-clé (factures, hotel, etc.)
-        format_rule = "7. Daniel demande une RECHERCHE FACTUELLE. Le contexte ci-dessus contient quelques emails pertinents (5 max par source). Tu dois faire un RÉSUMÉ NARRATIF en 1-2 phrases : de quoi parlent ces emails, quelles catégories dominent, quelles périodes. NE FAIS JAMAIS DE LISTE À PUCES. Ne recopie jamais les sujets un par un. ANALYSE et SYNTHÉTISE."
+        format_rule = "RÉPOND EN 1-2 PHRASES FLUIDES. Résume pour Daniel ce que le Cerveau2 et les emails disent sur ce sujet. NE JAMAIS faire de liste à puces. NE JAMAIS recopier les sujets email un par un."
     else:
         format_rule = "7. Daniel demande une SYNTHÈSE ou une INFO. Réponds de manière fluide et directe, en une ou deux phrases maximum."
 
@@ -1936,7 +1936,21 @@ RÉPONSE :"""
                  bad=vault_has_bad, relevant=vault_is_relevant,
                  preview=vault_answer[:120] if vault_answer else "(vide)")
 
-    final_prompt = f"""Tu es Charlie, l'assistant IA personnel de Daniel Hurchon, détective privé chez Detective.be. Version {VERSION}.
+    # ── Prompt LLM : court et ciblé pour les recherches factuelles, complet sinon ──
+    is_factual = bool(sql) and " LIKE " in sql
+    if is_factual:
+        final_prompt = f"""Tu es Charlie, l'assistant de Daniel Hurchon (Detective.be). Version {VERSION}.
+
+Question de Daniel : {question}
+
+Voici ce que j'ai trouvé :
+{vault_context}
+
+Consigne absolue : réponds en 1-2 phrases fluides, directes, comme un partenaire qui fait un compte-rendu à Daniel. NE JAMAIS faire de liste à puces. NE JAMAIS recopier les sujets email un par un. SYNTHÉTISE. Utilise "tu".
+
+RÉPONSE À DANIEL :"""
+    else:
+        final_prompt = f"""Tu es Charlie, l'assistant IA personnel de Daniel Hurchon, détective privé chez Detective.be. Version {VERSION}.
 Tu t'adresses à Daniel comme à un partenaire : direct, chaleureux, sans langue de bois. Utilise "tu".
 
 Question de Daniel : {question}
@@ -2019,23 +2033,32 @@ RÉPONSE À DANIEL :"""
             response = "\n".join(lines)
         elif rows:
             # Secours quand le LLM dit "pas trouvé" malgré des résultats SQL
-            lines = [f"J'ai trouvé **{len(rows)}** résultat{'s' if len(rows) > 1 else ''} :", ""]
-            for r in rows[:20]:
-                subject = r.get("subject") or "Sans sujet"
-                date = r.get("received_at") or r.get("processed_at") or ""
-                cat = r.get("category") or ""
-                status = r.get("status") or ""
-                line = f"- {subject}"
-                if date:
-                    line += f" ({date})"
-                if cat:
-                    line += f" [{cat}]"
-                if status:
-                    line += f" ({status})"
-                lines.append(line)
-            if len(rows) > 20:
-                lines.append(f"… et {len(rows) - 20} autres.")
-            response = "\n".join(lines)
+            # JAMAIS de liste brute pour les recherches factuelles — résumé narratif algorithmique
+            if bool(sql) and " LIKE " in sql:
+                from collections import Counter
+                cat_counts = Counter(r.get("category") or "inconnu" for r in rows)
+                top_cats = ", ".join(f"{k} ({v})" for k, v in cat_counts.most_common(3))
+                recent_subjects = [r.get("subject", "Sans sujet") for r in rows[:3]]
+                recent_text = " ; ".join(recent_subjects)
+                dates = [r.get("received_at") or r.get("processed_at") or "" for r in rows]
+                dates = [d for d in dates if d]
+                date_range = ""
+                if dates:
+                    date_range = f"La période couverte va de {dates[-1][:10]} à {dates[0][:10]}."
+                if vault_answer and not vault_has_bad and vault_is_relevant:
+                    vault_snippet = vault_answer.strip()[:300]
+                    response = (
+                        f"D'après le Cerveau2 : {vault_snippet}…\n\n"
+                        f"J'ai aussi repéré **{len(rows)}** emails en base, principalement dans les catégories {top_cats}. "
+                        f"{date_range} Les sujets récents portent sur : {recent_text}."
+                    )
+                else:
+                    response = (
+                        f"J'ai repéré **{len(rows)}** emails en base sur ce sujet, principalement dans les catégories {top_cats}. "
+                        f"{date_range} Les sujets récents portent sur : {recent_text}."
+                    )
+            else:
+                response = f"J'ai trouvé **{len(rows)}** élément{'s' if len(rows) > 1 else ''} en base. Tu veux que je te les détaille ?"
         else:
             response = "Je n'ai pas trouvé d'informations."
 
