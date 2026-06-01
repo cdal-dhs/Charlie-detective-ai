@@ -1873,6 +1873,42 @@ RÉPONSE :"""
             vault_notes=vault_notes,
         )
 
+    # ── 6.6 Bypass LLM pour recherches factuelles — pas de synthèse LLM quand on a des résultats SQL/archives
+    # Le modèle chat (Kimi K2) ignore les instructions de format et retourne des listes brutes ou des refus.
+    # Pour les requêtes factuelles (factures, hotel, etc.), on construit la réponse directement en Python.
+    is_factual_search = bool(sql) and " LIKE " in sql and not is_count_request and not is_list_request and not is_dossier_summary and not is_identity_request
+    if is_factual_search and (rows or archive_rows):
+        all_emails = (rows or []) + (archive_rows or [])
+        all_emails.sort(key=lambda r: r.get("received_at", r.get("date", "")), reverse=True)
+        keywords = _extract_keywords(question)
+        kw_label = ", ".join(k[1] for k in keywords[:3]) if keywords else "cette recherche"
+        lines = [f"J'ai trouvé **{len(all_emails)}** email{'s' if len(all_emails) > 1 else ''} liés à **{kw_label}** :", ""]
+        for r in all_emails[:15]:
+            subject = r.get("subject") or "Sans sujet"
+            date = r.get("received_at") or r.get("date") or ""
+            cat = r.get("category") or ""
+            line = f"- {subject}"
+            if date:
+                line += f" ({date})"
+            if cat:
+                line += f" [{cat}]"
+            lines.append(line)
+        if len(all_emails) > 15:
+            lines.append(f"… et {len(all_emails) - 15} autres.")
+        response = "\n".join(lines)
+        log.info("charlie.factual_bypass", question=question[:60], count=len(all_emails))
+        await _auto_save_fact(db_path, question, response, dossier_id)
+        return CharlieResult(
+            response_text=response,
+            sql=sql,
+            rows=rows,
+            sql_safe=True,
+            sql_error=None,
+            vault_notes=vault_notes,
+            hide_rows=True,  # On masque le tableau SQL brut car la réponse textuelle est déjà propre
+            archive_rows=archive_rows,
+        )
+
     # ── 7. Appel LLM final pour les questions spécifiques ──
     if is_list_request:
         format_rule = "7. Daniel demande une LISTE. Si le second cerveau a des notes sur ces dossiers, liste-les en priorité. Sinon, extrait les noms de dossiers identifiables depuis les emails. Ne liste pas les catégories — donne les NOMS (ex: ADF, Zaventem, ODM)."
@@ -1932,8 +1968,11 @@ RÉPONSE À DANIEL :"""
         "je n'ai pas trouvé", "aucun résultat", "aucune information",
         "je ne trouve pas", "pas d'information", "aucune donnée",
     )
+    # Garde format : réponses qui reproduisent des listes brutes au lieu de synthétiser
+    _BAD_FORMAT = ("j'ai trouvé **", "j'ai trouve **", "résultats :", "resultats :", "- ", "[newsletter]", "[facture]", "(approved)", "(pending)")
     is_bad_response = any(p in response.lower() for p in _BAD_RESPONSE)
-    if not response or (is_bad_response and (rows or archive_rows)):
+    is_bad_format = any(p in response.lower() for p in _BAD_FORMAT) and (rows or archive_rows)
+    if not response or ((is_bad_response or is_bad_format) and (rows or archive_rows)):
         response = ""
     if not response:
         if is_dossier_summary and (rows or archive_rows):
