@@ -861,15 +861,16 @@ def _build_keyword_sql(question: str) -> str | None:
 
     where = " OR ".join(likes)
 
-    # Boost par catégorie quand la question mentionne un type d'email connu
+    # Restriction par catégorie quand la question mentionne un type d'email connu
+    # AND (pas OR) : on veut les emails qui matchent les mots-clés ET la catégorie
     q_norm = _normalize(question)
     category_clause = ""
     if any(kw in q_norm for kw in ("facture", "factures", "invoice")):
-        category_clause = " OR category = 'facture'"
+        category_clause = " AND category = 'facture'"
     elif any(kw in q_norm for kw in ("newsletter", "digest", "bulletin")):
-        category_clause = " OR category = 'newsletter'"
+        category_clause = " AND category = 'newsletter'"
     elif any(kw in q_norm for kw in ("rappel", "reminder")):
-        category_clause = " OR category = 'rappel'"
+        category_clause = " AND category = 'rappel'"
 
     years = _extract_years(question)
     date_clause = ""
@@ -1515,22 +1516,24 @@ async def ask_charlie(
             context_parts.append(_sanitize_rows_for_prompt(rows))
             context_parts.append("")
         else:
-            # Mode synthèse/recherche factuelle : seulement les 5 plus récents,
-            # format texte (pas de tableau) pour éviter que le LLM reproduise la structure
-            limit = min(len(rows), 5)
-            context_parts.append(f"EMAILS BASE COURANTE ({len(rows)} trouvé(s), {limit} montré(s) ci-dessous) :")
-            for r in rows[:limit]:
-                subject = r.get("subject") or "Sans sujet"
-                date = r.get("received_at") or r.get("processed_at") or ""
-                cat = r.get("category") or ""
-                line = f"- {subject}"
-                if date:
-                    line += f" ({date})"
-                if cat:
-                    line += f" [{cat}]"
-                context_parts.append(line)
-            if len(rows) > limit:
-                context_parts.append(f"… et {len(rows) - limit} autres.")
+            # Mode synthèse/recherche factuelle : RÉSUMÉ NARRATIF algorithmique
+            # On n'envoie PAS une liste technique au LLM — il la recopierait.
+            # On envoie un texte narratif qu'il doit synthétiser.
+            from collections import Counter
+            cat_counts = Counter(r.get("category") or "inconnu" for r in rows)
+            top_cats = ", ".join(f"{k} ({v})" for k, v in cat_counts.most_common(3))
+            recent_subjects = [r.get("subject", "Sans sujet") for r in rows[:3]]
+            recent_text = " ; ".join(recent_subjects)
+            date_range = ""
+            if rows:
+                dates = [r.get("received_at") or r.get("processed_at") or "" for r in rows]
+                dates = [d for d in dates if d]
+                if dates:
+                    date_range = f"La période couverte va de {dates[-1][:10]} à {dates[0][:10]}."
+            context_parts.append(f"RÉSUMÉ DES EMAILS TROUVÉS EN BASE COURANTE ({len(rows)} email(s)) :")
+            context_parts.append(f"Catégories principales : {top_cats}. {date_range}")
+            context_parts.append(f"Sujets les plus récents : {recent_text}.")
+            context_parts.append("Tu dois SYNTHÉTISER ces informations en 1-2 phrases pour Daniel. Ne liste pas les sujets un par un.")
             context_parts.append("")
     elif sql:
         context_parts.append("EMAILS BASE COURANTE : aucun email trouvé.")
@@ -1578,21 +1581,21 @@ async def ask_charlie(
                     break
             context_parts.append("")
         else:
-            # Recherche factuelle : seulement les 5 plus récents, format texte
-            limit = min(len(archive_rows), 5)
-            context_parts.append(f"EMAILS ARCHIVES HISTORIQUES ({len(archive_rows)} trouvé(s), {limit} montré(s) ci-dessous) :")
-            for r in archive_rows[:limit]:
-                subject = r.get("subject") or "Sans sujet"
-                date = r.get("received_at") or r.get("date") or ""
-                cat = r.get("category") or ""
-                line = f"- {subject}"
-                if date:
-                    line += f" ({date})"
-                if cat:
-                    line += f" [{cat}]"
-                context_parts.append(line)
-            if len(archive_rows) > limit:
-                context_parts.append(f"… et {len(archive_rows) - limit} autres.")
+            # Recherche factuelle : RÉSUMÉ NARRATIF algorithmique des archives
+            from collections import Counter
+            cat_counts = Counter(r.get("category") or "inconnu" for r in archive_rows)
+            top_cats = ", ".join(f"{k} ({v})" for k, v in cat_counts.most_common(3))
+            recent_subjects = [r.get("subject", "Sans sujet") for r in archive_rows[:3]]
+            recent_text = " ; ".join(recent_subjects)
+            date_range = ""
+            if archive_rows:
+                dates = [r.get("received_at") or r.get("date") or "" for r in archive_rows]
+                dates = [d for d in dates if d]
+                if dates:
+                    date_range = f"La période couverte va de {dates[-1][:10]} à {dates[0][:10]}."
+            context_parts.append(f"RÉSUMÉ DES EMAILS TROUVÉS EN ARCHIVES ({len(archive_rows)} email(s)) :")
+            context_parts.append(f"Catégories principales : {top_cats}. {date_range}")
+            context_parts.append(f"Sujets les plus récents : {recent_text}.")
             context_parts.append("")
 
     context = "\n".join(context_parts)
@@ -1967,18 +1970,14 @@ RÉPONSE À DANIEL :"""
         log.warning("charlie.final_llm_failed", error=str(e))
         response = ""
 
-    # Garde : réponse vide OU inutile alors qu'on a des données → réponse de secours
-    _BAD = ("je n'ai pas trouvé", "aucun résultat", "aucune information", "je ne trouve pas", "pas d'information", "aucune donnée")
-    # Garde renforcée : réponses de refus du LLM (mêmes patterns que le vault)
+    # Garde : réponse vide OU refus explicite alors qu'on a des données → réponse de secours
+    # On ne court-circuite PAS le LLM pour "mauvais format" — le secours Python est encore pire.
     _BAD_RESPONSE = _BAD_VAULT + (
         "je n'ai pas trouvé", "aucun résultat", "aucune information",
         "je ne trouve pas", "pas d'information", "aucune donnée",
     )
-    # Garde format : réponses qui reproduisent des listes brutes au lieu de synthétiser
-    _BAD_FORMAT = ("j'ai trouvé **", "j'ai trouve **", "résultats :", "resultats :", "- ", "[newsletter]", "[facture]", "(approved)", "(pending)")
     is_bad_response = any(p in response.lower() for p in _BAD_RESPONSE)
-    is_bad_format = any(p in response.lower() for p in _BAD_FORMAT) and (rows or archive_rows)
-    if not response or ((is_bad_response or is_bad_format) and (rows or archive_rows)):
+    if not response or (is_bad_response and (rows or archive_rows)):
         response = ""
     if not response:
         if is_dossier_summary and (rows or archive_rows):
