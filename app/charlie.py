@@ -826,6 +826,7 @@ def _extract_keywords(question: str) -> list[tuple[int, str]]:
         "fraude", "materiel", "collaboration", "harcelement",
     }
     keywords: list[tuple[int, str]] = []
+    # Mots alphabétiques
     for word in re.findall(r"[A-Za-zÀ-Ÿà-ÿ]{4,}", question):
         w = word.strip().lower()
         if len(w) < 4:
@@ -842,6 +843,11 @@ def _extract_keywords(question: str) -> list[tuple[int, str]]:
             score += 15
         if score > 0:
             keywords.append((score, word))
+    # Numéros (téléphone, IBAN, numéro de dossier...) — identifiants très précis
+    for raw_num in re.findall(r"[\d\s./-]{6,}", question):
+        digits_only = re.sub(r"\D", "", raw_num)
+        if len(digits_only) >= 6:
+            keywords.append((30, digits_only))
     keywords.sort(key=lambda x: x[0], reverse=True)
     return keywords
 
@@ -1401,8 +1407,13 @@ async def ask_charlie(
     # ── 3.4b COURT-CIRCUIT FACTUEL — Cerveau2 = source, emails = preuves ──
     if is_factual_search and vault_answer:
         probant_lines: list[str] = []
-        q_keywords = {normalize("NFD", w.lower()).encode("ascii", "ignore").decode("ascii")
-                      for w in re.findall(r"[A-Za-zÀ-Ÿà-ÿ]{3,}", question)}
+        q_keywords: set[str] = set()
+        for w in re.findall(r"[A-Za-zÀ-Ÿà-ÿ]{3,}", question):
+            q_keywords.add(normalize("NFD", w.lower()).encode("ascii", "ignore").decode("ascii"))
+        for raw_num in re.findall(r"[\d\s./-]{6,}", question):
+            digits_only = re.sub(r"\D", "", raw_num)
+            if len(digits_only) >= 6:
+                q_keywords.add(digits_only)
         q_keywords -= {"moi", "vous", "dossier", "client", "question", "reponse",
                        "donne", "donner", "faire", "etre", "avoir", "aller", "comme",
                        "alors", "apres", "avant", "encore", "toujours", "jamais",
@@ -1988,8 +1999,13 @@ RÉPONSE :"""
     probant_rows: list[dict] = []
     if is_factual:
         # Filtre : on garde UNIQUEMENT les emails dont le sujet contient un mot-clé de la question
-        q_keywords = {normalize("NFD", w.lower()).encode("ascii", "ignore").decode("ascii")
-                      for w in re.findall(r"[A-Za-zÀ-Ÿà-ÿ]{3,}", question)}
+        q_keywords: set[str] = set()
+        for w in re.findall(r"[A-Za-zÀ-Ÿà-ÿ]{3,}", question):
+            q_keywords.add(normalize("NFD", w.lower()).encode("ascii", "ignore").decode("ascii"))
+        for raw_num in re.findall(r"[\d\s./-]{6,}", question):
+            digits_only = re.sub(r"\D", "", raw_num)
+            if len(digits_only) >= 6:
+                q_keywords.add(digits_only)
         q_keywords -= {"moi", "vous", "dossier", "client", "question", "reponse",
                        "donne", "donner", "faire", "etre", "avoir", "aller", "comme",
                        "alors", "apres", "avant", "encore", "toujours", "jamais",
