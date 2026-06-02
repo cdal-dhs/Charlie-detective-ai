@@ -1284,7 +1284,7 @@ async def ask_charlie(
                 await _auto_save_fact(db_path, question, debug_msg, dossier_id)
                 return CharlieResult(
                     response_text=debug_msg,
-                    sql=sql, rows=rows, sql_safe=True, sql_error=None,
+                    sql=sql, rows=None, sql_safe=True, sql_error=None,
                     vault_notes=vault_notes, archive_rows=archive_rows,
                 )
 
