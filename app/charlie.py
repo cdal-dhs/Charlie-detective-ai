@@ -394,16 +394,25 @@ async def _search_historical_by_keyword(
     data_dir = db_path.parent
     results: list[dict] = []
     like = f"%{keyword}%"
+    # Numéro : normaliser les colonnes pour matcher / . ou espace
+    if keyword.isdigit():
+        norm = "replace(replace(replace({}, '/', ''), '.', ''), ' ', '')"
+        sql_base = (
+            f"SELECT id, subject, sender, date, body_preview, body_full, category "
+            f"FROM emails WHERE ({norm.format('subject')} LIKE ? OR {norm.format('body_preview')} LIKE ? OR {norm.format('body_full')} LIKE ? OR sender LIKE ?) "
+        )
+    else:
+        sql_base = (
+            "SELECT id, subject, sender, date, body_preview, body_full, category "
+            "FROM emails WHERE (subject LIKE ? OR body_preview LIKE ? OR body_full LIKE ? OR sender LIKE ?) "
+        )
     for db_name in ("boite1.sqlite", "boite2.sqlite", "boite3.sqlite"):
         db_file = data_dir / db_name
         if not db_file.exists():
             continue
         try:
             async with aiosqlite.connect(db_file) as db:
-                sql = (
-                    "SELECT id, subject, sender, date, body_preview, body_full, category "
-                    "FROM emails WHERE (subject LIKE ? OR body_preview LIKE ? OR body_full LIKE ? OR sender LIKE ?) "
-                )
+                sql = sql_base
                 params: list = [like, like, like, like]
                 if year:
                     sql += "AND date LIKE ? "
