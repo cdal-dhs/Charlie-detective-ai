@@ -877,6 +877,9 @@ async def _process_single_mail(
     if category == "newsletter":
         status = "approved"
         priority = "low"
+    elif category == "spam":
+        status = "approved"
+        priority = "low"
     elif category == "autre" and any(kw in text_lower for kw in (
         "invitation", "calendar", "ical", "vcalendar", "event",
         "meeting request", "updated invitation", "invitation updated",
