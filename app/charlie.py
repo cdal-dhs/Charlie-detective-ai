@@ -1252,10 +1252,9 @@ async def ask_charlie(
             return []
 
     vault_answer: str | None = None
-    vault_bypass_result: CharlieResult | None = None
 
     async def _vault_task() -> list:
-        nonlocal vault_answer, vault_bypass_result
+        nonlocal vault_answer
         lim = 15 if (is_identity_request or is_list_request or is_dossier_list or is_factual_search) else settings.cerveau2_limit
         # Pour les questions identitaires, ne pas filtrer par dossier_id
         # car les fiches personnes/entités ne sont pas liées à un dossier
@@ -1281,22 +1280,6 @@ async def ask_charlie(
         )
         vault_answer = ans
         log.info("charlie.vault_returned", question=question[:60], vault_question=vault_question[:60], has_answer=bool(vault_answer), answer_preview=vault_answer[:200] if vault_answer else "(vide)")
-
-        # --- ÉTAPE 1 DEBUG : afficher brut Cerveau2 pour recherches factuelles ---
-        if is_factual_search and vault_answer:
-            _bad_debug = (
-                "je ne trouve pas", "pas trouvé", "aucune information",
-                "pas d'information", "aucune donnée", "aucun résultat",
-            )
-            if not any(p in vault_answer.lower() for p in _bad_debug):
-                debug_msg = f"[DEBUG — Réponse Cerveau2 brute]\n\n{vault_answer.strip()}"
-                await _auto_save_fact(db_path, question, debug_msg, dossier_id)
-                vault_bypass_result = CharlieResult(
-                    response_text=debug_msg,
-                    sql=sql, rows=None, sql_safe=True, sql_error=None,
-                    vault_notes=None, archive_rows=None,
-                )
-                return []
 
         # --- FALLBACK DIRECT : pour les questions identitaires, si la recherche
         # sémantique ne remonte pas la fiche personne, on la demande directement
@@ -1415,9 +1398,41 @@ async def ask_charlie(
         _dossiers_task(),
     )
 
-    # ── 3.4b BYPASS DEBUG Cerveau2 — si le vault a déclenché le mode debug
-    if vault_bypass_result:
-        return vault_bypass_result
+    # ── 3.4b COURT-CIRCUIT FACTUEL — Cerveau2 = source, emails = preuves ──
+    if is_factual_search and vault_answer:
+        probant_lines: list[str] = []
+        q_keywords = {normalize("NFD", w.lower()).encode("ascii", "ignore").decode("ascii")
+                      for w in re.findall(r"[A-Za-zÀ-Ÿà-ÿ]{3,}", question)}
+        q_keywords -= {"moi", "vous", "dossier", "client", "question", "reponse",
+                       "donne", "donner", "faire", "etre", "avoir", "aller", "comme",
+                       "alors", "apres", "avant", "encore", "toujours", "jamais",
+                       "toutes", "toute", "tous", "tout", "plusieurs", "quelques",
+                       "beaucoup", "souvent", "parfois", "maintenant", "aujourd",
+                       "hier", "demain", "matin", "soir", "jour", "semaine", "mois",
+                       "annee", "temps", "heure", "minute", "avec", "depuis", "dans",
+                       "pour", "sur", "sous", "entre", "contre", "vers", "chez",
+                       "retrouv", "trouv", "retrouve", "trouve", "cherche", "chercher",
+                       "liste", "lister", "montre", "montrer", "donne", "donner"}
+        probant_rows: list[dict] = []
+        for r in (rows or []) + (archive_rows or []):
+            subject = (r.get("subject") or "").lower()
+            body = (r.get("body") or r.get("body_preview") or "").lower()
+            if any(kw in subject or kw in body for kw in q_keywords if len(kw) >= 3):
+                probant_rows.append(r)
+        probant_rows = probant_rows[:3]
+        for r in probant_rows:
+            date_str = (r.get("received_at") or r.get("date") or "")[:10]
+            probant_lines.append(f"- {r.get('subject', 'Sans sujet')} ({date_str}) [{r.get('category', '')}]")
+        if probant_lines:
+            full_answer = vault_answer.strip() + "\n\n---\nÉléments probants en base :\n" + "\n".join(probant_lines)
+        else:
+            full_answer = vault_answer.strip()
+        await _auto_save_fact(db_path, question, full_answer, dossier_id)
+        return CharlieResult(
+            response_text=full_answer,
+            sql=sql, rows=rows, sql_safe=True, sql_error=None,
+            vault_notes=vault_notes, archive_rows=archive_rows,
+        )
 
     # ── 3.5 Résolution des liens (nuage de liaison) ──
     linked_notes: list[VaultNote] = []
