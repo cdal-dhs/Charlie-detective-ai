@@ -1305,6 +1305,11 @@ async def ask_charlie(
             yrs = _extract_years(question)
             if kws or yrs:
                 vault_question = " ".join(kws + yrs)
+            # Si le meilleur keyword est un identifiant numérique (score ≥30),
+            # ne pas polluer Cerveau2 avec des mots génériques comme "téléphone"
+            # ou "facture" — le dense search se noie et ne remonte rien.
+            if kws and kws[0].isdigit():
+                vault_question = kws[0]
         notes, ans = await query_vault(
             question=vault_question,
             base_url=settings.cerveau2_base_url,
@@ -1460,11 +1465,15 @@ async def ask_charlie(
                        "retrouv", "trouv", "retrouve", "trouve", "cherche", "chercher",
                        "liste", "lister", "montre", "montrer", "donne", "donner"}
         probant_rows: list[dict] = []
+        seen = set()
         for r in (rows or []) + (archive_rows or []):
             subject = re.sub(r"[/. ]", "", (r.get("subject") or "").lower())
             body = re.sub(r"[/. ]", "", (r.get("body") or r.get("body_preview") or "").lower())
             if any(kw in subject or kw in body for kw in q_keywords if len(kw) >= 3):
-                probant_rows.append(r)
+                dedup_key = (r.get("subject", "").strip(), r.get("sender", "").strip(), r.get("received_at", "").strip())
+                if dedup_key not in seen:
+                    seen.add(dedup_key)
+                    probant_rows.append(r)
         probant_rows = probant_rows[:3]
         for r in probant_rows:
             date_str = (r.get("received_at") or r.get("date") or "")[:10]
