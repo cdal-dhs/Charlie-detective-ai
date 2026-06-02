@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime
 from email.utils import parsedate_to_datetime
@@ -1542,7 +1543,6 @@ async def ask_charlie(
             # Mode synthèse/recherche factuelle : RÉSUMÉ NARRATIF algorithmique
             # On n'envoie PAS une liste technique au LLM — il la recopierait.
             # On envoie un texte narratif qu'il doit synthétiser.
-            from collections import Counter
             cat_counts = Counter(r.get("category") or "inconnu" for r in rows)
             top_cats = ", ".join(f"{k} ({v})" for k, v in cat_counts.most_common(3))
             recent_subjects = [r.get("subject", "Sans sujet") for r in rows[:3]]
@@ -1565,7 +1565,6 @@ async def ask_charlie(
     # Archives historiques — contexte pour le LLM
     if archive_rows:
         if is_list_request:
-            from collections import Counter
             cat_counts = Counter(r.get("category") or "SANS_CAT" for r in archive_rows)
             context_parts.append(f"EMAILS ARCHIVES HISTORIQUES ({len(archive_rows)} email(s)) :")
             context_parts.append("Répartition par catégorie :")
@@ -1605,7 +1604,6 @@ async def ask_charlie(
             context_parts.append("")
         else:
             # Recherche factuelle : RÉSUMÉ NARRATIF algorithmique des archives
-            from collections import Counter
             cat_counts = Counter(r.get("category") or "inconnu" for r in archive_rows)
             top_cats = ", ".join(f"{k} ({v})" for k, v in cat_counts.most_common(3))
             recent_subjects = [r.get("subject", "Sans sujet") for r in archive_rows[:3]]
@@ -1864,57 +1862,47 @@ RÉPONSE :"""
         "on fait quoi", "je t'écoute", "pas de question", "question précise",
         "pas de sujet", "pas de demande", "de quoi tu parles",
     )
-    # Pertinence sémantique : la réponse du vault doit contenir AU MOINS un mot-clé
-    # significatif de la question. Sinon c'est du garbage (ex: Lampaert quand on
-    # demande des factures d'hôtel).
+
+    def _vault_tokens(text: str) -> set[str]:
+        """Extrait les tokens racine d'un texte pour matcher pertinence."""
+        text = text.lower()
+        # Retirer les apostrophes collées (d'hotel → hotel, l'hotel → hotel)
+        text = re.sub(r"[ldmnstj]''?", "", text)
+        words = re.findall(r"[a-zà-ÿ]{3,}", text)
+        roots: set[str] = set()
+        for w in words:
+            # Stemming basique français
+            for suffix in ("es", "s", "e", "er", "re", "é", "ée", "ées", "és"):
+                if w.endswith(suffix) and len(w) > len(suffix) + 2:
+                    w = w[:-len(suffix)]
+                    break
+            if len(w) >= 3:
+                roots.add(w)
+        return roots
+
     def _vault_has_relevance(vault_ans: str, q: str) -> bool:
         if not vault_ans or len(vault_ans.strip()) < 30:
             return False
-        q_words = {normalize("NFD", w.lower()).encode("ascii", "ignore").decode("ascii")
-                   for w in re.findall(r"[A-Za-zÀ-Ÿà-ÿ]{4,}", q)}
-        # Exclure les stop-words courants
-        q_words -= {"moi", "vous", "dossier", "client", "question", "reponse",
-                    "donne", "donner", "faire", "etre", "avoir", "aller", "comme",
-                    "alors", "apres", "avant", "encore", "toujours", "jamais",
-                    "toutes", "toute", "tous", "tout", "plusieurs", "quelques",
-                    "beaucoup", "souvent", "parfois", "maintenant", "aujourd",
-                    "hier", "demain", "matin", "soir", "jour", "semaine", "mois",
-                    "annee", "temps", "heure", "minute", "avec", "depuis", "dans",
-                    "pour", "sur", "sous", "entre", "contre", "vers", "chez",
-                    "retrouve", "trouve", "cherche", "chercher", "liste", "lister",
-                    "montre", "montrer", "donne", "donner"}
-        ans_lower = normalize("NFD", vault_ans.lower()).encode("ascii", "ignore").decode("ascii")
-        for w in q_words:
-            if len(w) >= 4 and w in ans_lower:
-                return True
-        return False
+        q_roots = _vault_tokens(q)
+        # Stop-words à ignorer
+        q_roots -= {
+            "moi", "vous", "dossier", "client", "question", "reponse",
+            "donne", "donner", "faire", "etre", "avoir", "aller", "comme",
+            "alors", "apres", "avant", "encore", "toujours", "jamais",
+            "toutes", "toute", "tous", "tout", "plusieurs", "quelques",
+            "beaucoup", "souvent", "parfois", "maintenant", "aujourd",
+            "hier", "demain", "matin", "soir", "jour", "semaine", "mois",
+            "annee", "temps", "heure", "minute", "avec", "depuis", "dans",
+            "pour", "sur", "sous", "entre", "contre", "vers", "chez",
+            "retrouv", "trouv", "retrouve", "trouve", "cherche", "chercher",
+            "liste", "lister", "montre", "montrer",
+        }
+        ans_roots = _vault_tokens(vault_ans)
+        return bool(q_roots and q_roots & ans_roots)
 
     vault_has_bad = vault_answer and any(p in vault_answer.lower() for p in _BAD_VAULT)
     vault_is_relevant = vault_answer and _vault_has_relevance(vault_answer, question)
     log.info("charlie.vault_check", question=question[:60], has_answer=bool(vault_answer), bad=vault_has_bad, relevant=vault_is_relevant, rows=len(rows), archives=len(archive_rows), is_factual=is_factual_search)
-    if vault_answer and not is_count_request and not vault_has_bad and vault_is_relevant:
-        # Cerveau2 a répondu en direct et de manière utile ET pertinente
-        enriched = vault_answer.strip()
-        if rows or archive_rows:
-            enriched += "\n\n_(Sources complémentaires : "
-            sources: list[str] = []
-            if rows:
-                sources.append(f"{len(rows)} email(s) base courante")
-            if archive_rows:
-                sources.append(f"{len(archive_rows)} archive(s)")
-            enriched += " + ".join(sources) + ")_"
-        log.info("charlie.vault_answer_used", question=question[:60], answer_len=len(enriched))
-        await _auto_save_fact(db_path, question, enriched, dossier_id)
-        return CharlieResult(
-            response_text=enriched,
-            sql=sql,
-            rows=rows,
-            sql_safe=True,
-            sql_error=None,
-            vault_notes=vault_notes,
-            hide_rows=False,
-            archive_rows=archive_rows,
-        )
     if vault_has_bad or not vault_is_relevant:
         log.info("charlie.vault_answer_skipped", question=question[:60],
                  bad=vault_has_bad, relevant=vault_is_relevant,
@@ -1951,43 +1939,97 @@ RÉPONSE :"""
     else:
         format_rule = "7. Daniel demande une SYNTHÈSE ou une INFO. Réponds de manière fluide et directe, en une ou deux phrases maximum."
 
-    # Si Cerveau2 a répondu mais c'est un comptage, on injecte sa réponse dans le contexte
-    vault_context = context
-    if vault_answer and not vault_has_bad and vault_is_relevant:
-        vault_context = f"RÉPONSE DU SECOND CERVEAU (Cerveau2-Det) :\n{vault_answer.strip()}\n\n---\n\n{context}"
-    elif vault_answer and (vault_has_bad or not vault_is_relevant):
-        log.info("charlie.vault_context_purged", question=question[:60],
-                 bad=vault_has_bad, relevant=vault_is_relevant,
-                 preview=vault_answer[:120] if vault_answer else "(vide)")
+    # ── 6.5 Préparer les emails probants pour les recherches factuelles ──
+    is_factual = bool(sql) and " LIKE " in sql
+    probant_rows: list[dict] = []
+    if is_factual:
+        # Filtre : on garde UNIQUEMENT les emails dont le sujet contient un mot-clé de la question
+        q_keywords = {normalize("NFD", w.lower()).encode("ascii", "ignore").decode("ascii")
+                      for w in re.findall(r"[A-Za-zÀ-Ÿà-ÿ]{3,}", question)}
+        q_keywords -= {"moi", "vous", "dossier", "client", "question", "reponse",
+                       "donne", "donner", "faire", "etre", "avoir", "aller", "comme",
+                       "alors", "apres", "avant", "encore", "toujours", "jamais",
+                       "toutes", "toute", "tous", "tout", "plusieurs", "quelques",
+                       "beaucoup", "souvent", "parfois", "maintenant", "aujourd",
+                       "hier", "demain", "matin", "soir", "jour", "semaine", "mois",
+                       "annee", "temps", "heure", "minute", "avec", "depuis", "dans",
+                       "pour", "sur", "sous", "entre", "contre", "vers", "chez",
+                       "retrouv", "trouv", "retrouve", "trouve", "cherche", "chercher",
+                       "liste", "lister", "montre", "montrer", "donne", "donner"}
+        for r in (rows or []) + (archive_rows or []):
+            subject = (r.get("subject") or "").lower()
+            body = (r.get("body") or r.get("body_preview") or "").lower()
+            if any(kw in subject or kw in body for kw in q_keywords if len(kw) >= 3):
+                probant_rows.append(r)
+        probant_rows = probant_rows[:3]  # max 3 preuves
 
     # ── Prompt LLM : vault-first pour les recherches factuelles, complet sinon ──
-    is_factual = bool(sql) and " LIKE " in sql
     if is_factual and vault_answer and not vault_has_bad and vault_is_relevant:
-        # VAULT-FIRST : le Cerveau2 a la réponse. On ne pollue PAS avec les emails.
-        # Le LLM résume la réponse du Cerveau2 en langage naturel.
-        final_prompt = f"""Tu es Charlie, l'assistant de Daniel Hurchon (Detective.be). Version {VERSION}.
+        vault_block = vault_answer.strip()
+        if probant_rows:
+            probant_block = "\n".join(
+                f"- {r.get('subject', 'Sans sujet')} ({r.get('received_at', r.get('date', ''))[:10]}) [{r.get('category', '')}]"
+                for r in probant_rows
+            )
+            final_prompt = f"""Tu es Charlie, l'assistant de Daniel Hurchon (Detective.be). Version {VERSION}.
 
 Question de Daniel : {question}
 
 Ce que le Cerveau2 a trouvé :
-{vault_answer.strip()}
+{vault_block}
 
-Résume cela en 1-2 phrases fluides et directes pour Daniel. Utilise "tu". NE JAMAIS faire de liste à puces. NE JAMAIS recopier des sujets email. Raconte simplement ce que le Cerveau2 sait.
+Emails qui appuient :
+{probant_block}
+
+Consigne : résume en 1-2 phrases fluides. Commence par le Cerveau2. Ajoute les emails comme preuves seulement si pertinents. Utilise "tu". NE JAMAIS faire de liste à puces.
+
+RÉPONSE À DANIEL :"""
+        else:
+            final_prompt = f"""Tu es Charlie, l'assistant de Daniel Hurchon (Detective.be). Version {VERSION}.
+
+Question de Daniel : {question}
+
+Ce que le Cerveau2 a trouvé :
+{vault_block}
+
+Résume cela en 1-2 phrases fluides et directes pour Daniel. Utilise "tu". NE JAMAIS faire de liste à puces.
 
 RÉPONSE À DANIEL :"""
     elif is_factual:
-        # Vault vide ou non pertinent : on utilise le résumé narratif des emails (contexte allégé)
+        # Pas de vault pertinent : on utilise le résumé narratif des emails
+        all_rows = (rows or []) + (archive_rows or [])
+        if all_rows:
+            cat_counts = Counter(r.get("category") or "inconnu" for r in all_rows)
+            top_cats = ", ".join(f"{k} ({v})" for k, v in cat_counts.most_common(3))
+            recent_subjects = [r.get("subject", "Sans sujet") for r in all_rows[:3]]
+            recent_text = " ; ".join(recent_subjects)
+            dates = [r.get("received_at") or r.get("processed_at") or r.get("date") or "" for r in all_rows]
+            dates = [d for d in dates if d]
+            date_range = ""
+            if dates:
+                date_range = f"Période : {dates[-1][:10]} à {dates[0][:10]}."
+            email_block = f"Catégories principales : {top_cats}. {date_range} Sujets récents : {recent_text}."
+        else:
+            email_block = "Aucun email trouvé en base pour cette recherche."
         final_prompt = f"""Tu es Charlie, l'assistant de Daniel Hurchon (Detective.be). Version {VERSION}.
 
 Question de Daniel : {question}
 
 Voici ce que j'ai trouvé en base :
-{context}
+{email_block}
 
 Résume en 1-2 phrases fluides. Utilise "tu". NE JAMAIS faire de liste à puces. SYNTHÉTISE.
 
 RÉPONSE À DANIEL :"""
     else:
+        # Prompt complet pour les autres cas (liste, comptage, identité, résumé dossier)
+        vault_context = context
+        if vault_answer and not vault_has_bad and vault_is_relevant:
+            vault_context = f"RÉPONSE DU SECOND CERVEAU (Cerveau2-Det) :\n{vault_answer.strip()}\n\n---\n\n{context}"
+        elif vault_answer and (vault_has_bad or not vault_is_relevant):
+            log.info("charlie.vault_context_purged", question=question[:60],
+                     bad=vault_has_bad, relevant=vault_is_relevant,
+                     preview=vault_answer[:120] if vault_answer else "(vide)")
         final_prompt = f"""Tu es Charlie, l'assistant IA personnel de Daniel Hurchon, détective privé chez Detective.be. Version {VERSION}.
 Tu t'adresses à Daniel comme à un partenaire : direct, chaleureux, sans langue de bois. Utilise "tu".
 
@@ -2037,21 +2079,14 @@ RÉPONSE À DANIEL :"""
             # Vault-first : le Cerveau2 avait la réponse, le LLM a foiré. On retourne le vault direct.
             response = vault_answer.strip()
         elif is_dossier_summary and (rows or archive_rows):
-            # Dernier recours pour un résumé de dossier : on ne fait JAMAIS un tableau brut.
-            # On retourne un message propre avec les liens vers les emails trouvés.
+            # Dernier recours pour un résumé de dossier : résumé narratif algorithmique
             all_emails = (rows or []) + (archive_rows or [])
             all_emails.sort(key=lambda r: r.get("received_at", r.get("date", "")), reverse=True)
-            lines = [f"J'ai trouvé **{len(all_emails)}** email{'s' if len(all_emails) > 1 else ''} liés au dossier **{dossier_id}**, mais je n'ai pas réussi à les synthétiser automatiquement. Voici les sujets :", ""]
-            for r in all_emails[:10]:
-                subject = r.get("subject") or "Sans sujet"
-                date = r.get("received_at") or r.get("date") or ""
-                line = f"- {subject}"
-                if date:
-                    line += f" ({date})"
-                lines.append(line)
-            if len(all_emails) > 10:
-                lines.append(f"… et {len(all_emails) - 10} autres.")
-            response = "\n".join(lines)
+            subjects = [r.get("subject") or "Sans sujet" for r in all_emails[:5]]
+            response = (
+                f"J'ai trouvé **{len(all_emails)}** email{'s' if len(all_emails) > 1 else ''} liés au dossier **{dossier_id}**. "
+                f"Les sujets récents portent sur : {', '.join(subjects)}."
+            )
         elif is_count_request and (rows or archive_rows):
             sql_cnt = int(next(iter(rows[0].values()))) if rows and len(rows) == 1 and len(rows[0]) == 1 else 0
             arc_cnt = len(archive_rows)
@@ -2073,34 +2108,23 @@ RÉPONSE À DANIEL :"""
             if len(archive_rows) > 25:
                 lines.append(f"… et {len(archive_rows) - 25} autres.")
             response = "\n".join(lines)
-        elif rows:
-            # Secours quand le LLM dit "pas trouvé" malgré des résultats SQL
-            # JAMAIS de liste brute pour les recherches factuelles — résumé narratif algorithmique
-            if bool(sql) and " LIKE " in sql:
-                from collections import Counter
-                cat_counts = Counter(r.get("category") or "inconnu" for r in rows)
-                top_cats = ", ".join(f"{k} ({v})" for k, v in cat_counts.most_common(3))
-                recent_subjects = [r.get("subject", "Sans sujet") for r in rows[:3]]
-                recent_text = " ; ".join(recent_subjects)
-                dates = [r.get("received_at") or r.get("processed_at") or "" for r in rows]
-                dates = [d for d in dates if d]
-                date_range = ""
-                if dates:
-                    date_range = f"La période couverte va de {dates[-1][:10]} à {dates[0][:10]}."
-                if vault_answer and not vault_has_bad and vault_is_relevant:
-                    vault_snippet = vault_answer.strip()[:300]
-                    response = (
-                        f"D'après le Cerveau2 : {vault_snippet}…\n\n"
-                        f"J'ai aussi repéré **{len(rows)}** emails en base, principalement dans les catégories {top_cats}. "
-                        f"{date_range} Les sujets récents portent sur : {recent_text}."
-                    )
-                else:
-                    response = (
-                        f"J'ai repéré **{len(rows)}** emails en base sur ce sujet, principalement dans les catégories {top_cats}. "
-                        f"{date_range} Les sujets récents portent sur : {recent_text}."
-                    )
-            else:
-                response = f"J'ai trouvé **{len(rows)}** élément{'s' if len(rows) > 1 else ''} en base. Tu veux que je te les détaille ?"
+        elif is_factual and (rows or archive_rows):
+            # Fallback narratif pour recherches factuelles — JAMAIS de liste à puces
+            all_rows = (rows or []) + (archive_rows or [])
+            cat_counts = Counter(r.get("category") or "inconnu" for r in all_rows)
+            top_cats = ", ".join(f"{k} ({v})" for k, v in cat_counts.most_common(3))
+            recent_subjects = [r.get("subject", "Sans sujet") for r in all_rows[:3]]
+            recent_text = " ; ".join(recent_subjects)
+            dates = [r.get("received_at") or r.get("processed_at") or r.get("date") or "" for r in all_rows]
+            dates = [d for d in dates if d]
+            date_range = ""
+            if dates:
+                date_range = f"Période : {dates[-1][:10]} à {dates[0][:10]}."
+            response = (
+                f"J'ai repéré **{len(all_rows)}** élément{'s' if len(all_rows) > 1 else ''} en base sur ce sujet, "
+                f"principalement dans les catégories {top_cats}. {date_range} "
+                f"Les sujets récents portent sur : {recent_text}."
+            )
         else:
             response = "Je n'ai pas trouvé d'informations."
 
