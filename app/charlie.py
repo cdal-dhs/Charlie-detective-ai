@@ -1258,6 +1258,8 @@ async def ask_charlie(
         # Pour les questions identitaires, ne pas filtrer par dossier_id
         # car les fiches personnes/entités ne sont pas liées à un dossier
         vault_dossier_id = None if is_identity_request else dossier_id
+        # Timeout plus long pour les recherches factuelles (Cerveau2 génère une réponse LLM)
+        vault_timeout = 30.0 if is_factual_search else 15.0
         notes, ans = await query_vault(
             question=question,
             base_url=settings.cerveau2_base_url,
@@ -1265,8 +1267,10 @@ async def ask_charlie(
             dossier_id=vault_dossier_id,
             limit=lim,
             context_only=False,
+            timeout=vault_timeout,
         )
         vault_answer = ans
+        log.info("charlie.vault_returned", question=question[:60], has_answer=bool(vault_answer), answer_preview=vault_answer[:200] if vault_answer else "(vide)")
 
         # --- FALLBACK DIRECT : pour les questions identitaires, si la recherche
         # sémantique ne remonte pas la fiche personne, on la demande directement
@@ -1852,7 +1856,7 @@ RÉPONSE :"""
 
     # ── 6. Bypass LLM si Cerveau2 a déjà répondu de manière utile ──
     _BAD_VAULT = (
-        "je ne trouve pas", "pas trouvé", "aucune information", "je ne trouve",
+        "je ne trouve pas", "pas trouvé", "aucune information",
         "pas d'information", "aucune donnée", "aucun résultat",
         "ne trouve pas d'information", "pas explicitement identifié",
         "tu n'as pas", "pas posé de question", "dernier message",
@@ -1887,6 +1891,7 @@ RÉPONSE :"""
 
     vault_has_bad = vault_answer and any(p in vault_answer.lower() for p in _BAD_VAULT)
     vault_is_relevant = vault_answer and _vault_has_relevance(vault_answer, question)
+    log.info("charlie.vault_check", question=question[:60], has_answer=bool(vault_answer), bad=vault_has_bad, relevant=vault_is_relevant, rows=len(rows), archives=len(archive_rows), is_factual=is_factual_search)
     if vault_answer and not is_count_request and not vault_has_bad and vault_is_relevant:
         # Cerveau2 a répondu en direct et de manière utile ET pertinente
         enriched = vault_answer.strip()
@@ -2025,6 +2030,7 @@ RÉPONSE À DANIEL :"""
     )
     is_bad_response = any(p in response.lower() for p in _BAD_RESPONSE)
     if not response or (is_bad_response and (rows or archive_rows)):
+        log.info("charlie.llm_guard_triggered", question=question[:60], empty=not response, bad_response=is_bad_response, rows=len(rows), archives=len(archive_rows))
         response = ""
     if not response:
         if is_factual and vault_answer and not vault_has_bad and vault_is_relevant:

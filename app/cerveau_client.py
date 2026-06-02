@@ -36,6 +36,7 @@ async def query_vault(
     dossier_id: str | None = None,
     limit: int = 3,
     context_only: bool = True,
+    timeout: float = 15.0,
 ) -> tuple[list[VaultNote], str | None]:
     """Interroge le vault Cerveau2-Det.
 
@@ -53,7 +54,7 @@ async def query_vault(
         payload["dossier_id"] = dossier_id
 
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(
                 f"{base_url.rstrip('/')}/query",
                 json=payload,
