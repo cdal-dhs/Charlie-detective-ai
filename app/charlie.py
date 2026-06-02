@@ -420,8 +420,7 @@ async def _search_historical_by_keyword(
                 if category:
                     sql += "AND category = ? "
                     params.append(category)
-                sql += "ORDER BY date DESC LIMIT ?"
-                params.append(limit)
+                sql += " LIMIT 200"
                 cursor = await db.execute(sql, tuple(params))
                 rows = await cursor.fetchall()
                 for row in rows:
@@ -467,7 +466,7 @@ async def _search_historical_by_keyword(
             pass
         return datetime.min
     results.sort(key=_parse_date, reverse=True)
-    return results
+    return results[:limit]
 
 
 async def _search_historical_by_category(
@@ -886,6 +885,18 @@ def _build_keyword_sql(question: str) -> str | None:
             likes.append(f"body LIKE '%{kw_safe}%'")
             likes.append(f"body_preview LIKE '%{kw_safe}%'")
 
+    # Si le meilleur keyword est un identifiant numérique (score 30 = numéro),
+    # ne garder que lui dans le WHERE pour éviter que des mots génériques
+    # ("téléphone", "facture") ne polluent les résultats.
+    if keywords and keywords[0][0] >= 30 and keywords[0][1].isdigit():
+        num_kw = keywords[0][1].replace("'", "''")
+        norm = "replace(replace(replace({}, '/', ''), '.', ''), ' ', '')"
+        likes = [
+            f"{norm.format('subject')} LIKE '%{num_kw}%'",
+            f"{norm.format('body')} LIKE '%{num_kw}%'",
+            f"{norm.format('body_preview')} LIKE '%{num_kw}%'",
+        ]
+
     where = " OR ".join(likes)
 
     # Restriction par catégorie quand la question mentionne un type d'email connu
@@ -907,7 +918,7 @@ def _build_keyword_sql(question: str) -> str | None:
     elif len(years) > 1:
         min_y, max_y = years[0], years[-1]
         date_clause = f" AND (processed_at >= '{min_y}-01-01' AND processed_at < '{int(max_y) + 1}-01-01')"
-    return f"SELECT id, subject, sender, received_at, category, status, priority, body_preview, substr(body, 1, 3000) as body FROM mail_processed WHERE ({where}{category_clause}){date_clause} ORDER BY received_at DESC LIMIT 5"
+    return f"SELECT id, subject, sender, received_at, category, status, priority, body_preview, substr(body, 1, 3000) as body FROM mail_processed WHERE ({where}{category_clause}){date_clause} ORDER BY id DESC LIMIT 20"
 
 
 def _normalize(text: str) -> str:
