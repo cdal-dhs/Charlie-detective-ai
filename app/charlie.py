@@ -245,6 +245,9 @@ def is_safe_sql(sql: str) -> bool:
     cleaned = sql.lower().strip()
     if not cleaned.startswith("select"):
         return False
+    # replace(...) est une fonction SQL standard (normalisation de chaînes) ;
+    # seul "replace into" est dangereux, déjà couvert par "insert".
+    cleaned = cleaned.replace("replace(", "")
     return all(dangerous not in cleaned for dangerous in _DANGEROUS_SQL)
 
 
