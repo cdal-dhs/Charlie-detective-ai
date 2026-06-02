@@ -1252,9 +1252,10 @@ async def ask_charlie(
             return []
 
     vault_answer: str | None = None
+    vault_bypass_result: CharlieResult | None = None
 
     async def _vault_task() -> list:
-        nonlocal vault_answer
+        nonlocal vault_answer, vault_bypass_result
         lim = 15 if (is_identity_request or is_list_request or is_dossier_list or is_factual_search) else settings.cerveau2_limit
         # Pour les questions identitaires, ne pas filtrer par dossier_id
         # car les fiches personnes/entités ne sont pas liées à un dossier
@@ -1282,11 +1283,12 @@ async def ask_charlie(
             if not any(p in vault_answer.lower() for p in _bad_debug):
                 debug_msg = f"[DEBUG — Réponse Cerveau2 brute]\n\n{vault_answer.strip()}"
                 await _auto_save_fact(db_path, question, debug_msg, dossier_id)
-                return CharlieResult(
+                vault_bypass_result = CharlieResult(
                     response_text=debug_msg,
                     sql=sql, rows=None, sql_safe=True, sql_error=None,
                     vault_notes=None, archive_rows=None,
                 )
+                return []
 
         # --- FALLBACK DIRECT : pour les questions identitaires, si la recherche
         # sémantique ne remonte pas la fiche personne, on la demande directement
@@ -1404,6 +1406,10 @@ async def ask_charlie(
         _archive_task(),
         _dossiers_task(),
     )
+
+    # ── 3.4b BYPASS DEBUG Cerveau2 — si le vault a déclenché le mode debug
+    if vault_bypass_result:
+        return vault_bypass_result
 
     # ── 3.5 Résolution des liens (nuage de liaison) ──
     linked_notes: list[VaultNote] = []
