@@ -1444,6 +1444,8 @@ async def ask_charlie(
         _bad_vault = (
             "je ne trouve pas", "pas trouvé", "aucune information",
             "pas d'information", "aucune donnée", "aucun résultat",
+            "n'apparaît pas", "n'apparait pas", "ne figure pas",
+            "aucune mention",
         )
         vault_is_bad = any(p in vault_answer.lower() for p in _bad_vault)
         probant_lines: list[str] = []
@@ -1470,14 +1472,30 @@ async def ask_charlie(
             subject = re.sub(r"[/. ]", "", (r.get("subject") or "").lower())
             body = re.sub(r"[/. ]", "", (r.get("body") or r.get("body_preview") or "").lower())
             if any(kw in subject or kw in body for kw in q_keywords if len(kw) >= 3):
-                dedup_key = (r.get("subject", "").strip(), r.get("sender", "").strip(), r.get("received_at", "").strip())
+                # Déduplication sans sender car les archives ont des senders anonymisés
+                # différemment de mail_processed (ex: "elayadi.rachida@live.be" vs "r**h e*a")
+                dedup_key = (r.get("subject", "").strip().lower(), r.get("received_at", "").strip())
                 if dedup_key not in seen:
                     seen.add(dedup_key)
                     probant_rows.append(r)
         probant_rows = probant_rows[:3]
         for r in probant_rows:
             date_str = (r.get("received_at") or r.get("date") or "")[:10]
-            probant_lines.append(f"- {r.get('subject', 'Sans sujet')} ({date_str}) [{r.get('category', '')}]")
+            sender = (r.get("sender") or "").strip()
+            # Extraire le nom d'affichage si format "Nom <email>"
+            sender_name = sender.split("<")[0].strip() if "<" in sender else sender
+            if sender_name and sender_name != sender:
+                probant_lines.append(f"- {r.get('subject', 'Sans sujet')} — {sender_name} ({date_str})")
+            else:
+                probant_lines.append(f"- {r.get('subject', 'Sans sujet')} ({date_str})")
+        # Si Cerveau2 dit "pas trouvé" mais que le numéro recherché apparaît dans sa
+        # réponse, c'est un faux négatif du LLM — on considère que l'info est là.
+        if vault_is_bad:
+            for raw_num in re.findall(r"[\d\s./-]{6,}", question):
+                digits_only = re.sub(r"\D", "", raw_num)
+                if len(digits_only) >= 6 and digits_only in vault_answer:
+                    vault_is_bad = False
+                    break
         if vault_is_bad:
             if probant_lines:
                 full_answer = "Je n'ai pas trouvé dans le cerveau, mais voici les emails liés en base :\n\n" + "\n".join(probant_lines)
