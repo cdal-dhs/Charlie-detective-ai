@@ -1285,7 +1285,7 @@ async def ask_charlie(
                 return CharlieResult(
                     response_text=debug_msg,
                     sql=sql, rows=None, sql_safe=True, sql_error=None,
-                    vault_notes=vault_notes, archive_rows=archive_rows,
+                    vault_notes=None, archive_rows=None,
                 )
 
         # --- FALLBACK DIRECT : pour les questions identitaires, si la recherche
