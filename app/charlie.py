@@ -1273,6 +1273,21 @@ async def ask_charlie(
         vault_answer = ans
         log.info("charlie.vault_returned", question=question[:60], has_answer=bool(vault_answer), answer_preview=vault_answer[:200] if vault_answer else "(vide)")
 
+        # --- ÉTAPE 1 DEBUG : afficher brut Cerveau2 pour recherches factuelles ---
+        if is_factual_search and vault_answer:
+            _bad_debug = (
+                "je ne trouve pas", "pas trouvé", "aucune information",
+                "pas d'information", "aucune donnée", "aucun résultat",
+            )
+            if not any(p in vault_answer.lower() for p in _bad_debug):
+                debug_msg = f"[DEBUG — Réponse Cerveau2 brute]\n\n{vault_answer.strip()}"
+                await _auto_save_fact(db_path, question, debug_msg, dossier_id)
+                return CharlieResult(
+                    response_text=debug_msg,
+                    sql=sql, rows=rows, sql_safe=True, sql_error=None,
+                    vault_notes=vault_notes, archive_rows=archive_rows,
+                )
+
         # --- FALLBACK DIRECT : pour les questions identitaires, si la recherche
         # sémantique ne remonte pas la fiche personne, on la demande directement
         # par son chemin. Cela contourne les problèmes d'indexation sqlite-vec.
