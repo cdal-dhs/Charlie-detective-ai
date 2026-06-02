@@ -866,9 +866,16 @@ def _build_keyword_sql(question: str) -> str | None:
     likes = []
     for _, kw in keywords[:5]:
         kw_safe = kw.replace("'", "''")
-        likes.append(f"subject LIKE '%{kw_safe}%'")
-        likes.append(f"body LIKE '%{kw_safe}%'")
-        likes.append(f"body_preview LIKE '%{kw_safe}%'")
+        if kw.isdigit():
+            # Normaliser la colonne pour matcher les formats avec / . ou espace
+            norm = "replace(replace(replace({}, '/', ''), '.', ''), ' ', '')"
+            likes.append(f"{norm.format('subject')} LIKE '%{kw_safe}%'")
+            likes.append(f"{norm.format('body')} LIKE '%{kw_safe}%'")
+            likes.append(f"{norm.format('body_preview')} LIKE '%{kw_safe}%'")
+        else:
+            likes.append(f"subject LIKE '%{kw_safe}%'")
+            likes.append(f"body LIKE '%{kw_safe}%'")
+            likes.append(f"body_preview LIKE '%{kw_safe}%'")
 
     where = " OR ".join(likes)
 
@@ -1406,6 +1413,11 @@ async def ask_charlie(
 
     # ── 3.4b COURT-CIRCUIT FACTUEL — Cerveau2 = source, emails = preuves ──
     if is_factual_search and vault_answer:
+        _bad_vault = (
+            "je ne trouve pas", "pas trouvé", "aucune information",
+            "pas d'information", "aucune donnée", "aucun résultat",
+        )
+        vault_is_bad = any(p in vault_answer.lower() for p in _bad_vault)
         probant_lines: list[str] = []
         q_keywords: set[str] = set()
         for w in re.findall(r"[A-Za-zÀ-Ÿà-ÿ]{3,}", question):
@@ -1426,15 +1438,20 @@ async def ask_charlie(
                        "liste", "lister", "montre", "montrer", "donne", "donner"}
         probant_rows: list[dict] = []
         for r in (rows or []) + (archive_rows or []):
-            subject = (r.get("subject") or "").lower()
-            body = (r.get("body") or r.get("body_preview") or "").lower()
+            subject = re.sub(r"[/. ]", "", (r.get("subject") or "").lower())
+            body = re.sub(r"[/. ]", "", (r.get("body") or r.get("body_preview") or "").lower())
             if any(kw in subject or kw in body for kw in q_keywords if len(kw) >= 3):
                 probant_rows.append(r)
         probant_rows = probant_rows[:3]
         for r in probant_rows:
             date_str = (r.get("received_at") or r.get("date") or "")[:10]
             probant_lines.append(f"- {r.get('subject', 'Sans sujet')} ({date_str}) [{r.get('category', '')}]")
-        if probant_lines:
+        if vault_is_bad:
+            if probant_lines:
+                full_answer = "Je n'ai pas trouvé dans le cerveau, mais voici les emails liés en base :\n\n" + "\n".join(probant_lines)
+            else:
+                full_answer = "Je n'ai trouvé aucune information sur ce sujet dans les sources disponibles."
+        elif probant_lines:
             full_answer = vault_answer.strip() + "\n\n---\nÉléments probants en base :\n" + "\n".join(probant_lines)
         else:
             full_answer = vault_answer.strip()
