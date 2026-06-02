@@ -1262,8 +1262,16 @@ async def ask_charlie(
         vault_dossier_id = None if is_identity_request else dossier_id
         # Timeout plus long pour les recherches factuelles (Cerveau2 génère une réponse LLM)
         vault_timeout = 30.0 if is_factual_search else 15.0
+        # Question allégée pour Cerveau2 en mode recherche factuelle
+        # (le dense search se noie avec trop de concepts → on envoie les mots-clés + années)
+        vault_question = question
+        if is_factual_search:
+            kws = [kw for _, kw in _extract_keywords(question)[:5]]
+            yrs = _extract_years(question)
+            if kws or yrs:
+                vault_question = " ".join(kws + yrs)
         notes, ans = await query_vault(
-            question=question,
+            question=vault_question,
             base_url=settings.cerveau2_base_url,
             api_secret=settings.cerveau2_api_secret,
             dossier_id=vault_dossier_id,
@@ -1272,7 +1280,7 @@ async def ask_charlie(
             timeout=vault_timeout,
         )
         vault_answer = ans
-        log.info("charlie.vault_returned", question=question[:60], has_answer=bool(vault_answer), answer_preview=vault_answer[:200] if vault_answer else "(vide)")
+        log.info("charlie.vault_returned", question=question[:60], vault_question=vault_question[:60], has_answer=bool(vault_answer), answer_preview=vault_answer[:200] if vault_answer else "(vide)")
 
         # --- ÉTAPE 1 DEBUG : afficher brut Cerveau2 pour recherches factuelles ---
         if is_factual_search and vault_answer:
