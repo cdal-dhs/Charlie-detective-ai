@@ -1445,7 +1445,7 @@ async def ask_charlie(
             "je ne trouve pas", "pas trouvé", "aucune information",
             "pas d'information", "aucune donnée", "aucun résultat",
             "n'apparaît pas", "n'apparait pas", "ne figure pas",
-            "aucune mention",
+            "aucune mention", "n'apparaît", "ne figure",
         )
         vault_is_bad = any(p in vault_answer.lower() for p in _bad_vault)
         probant_lines: list[str] = []
@@ -1502,7 +1502,12 @@ async def ask_charlie(
             else:
                 full_answer = "Je n'ai trouvé aucune information sur ce sujet dans les sources disponibles."
         elif probant_lines:
-            full_answer = vault_answer.strip() + "\n\n---\nÉléments probants en base :\n" + "\n".join(probant_lines)
+            # Si Cerveau2 contient encore des négations (malgré le faux négatif),
+            # on préfère une réponse propre basée sur les emails probants.
+            if any(p in vault_answer.lower() for p in _bad_vault):
+                full_answer = "Voici ce que j'ai trouvé :\n\n" + "\n".join(probant_lines)
+            else:
+                full_answer = vault_answer.strip() + "\n\n---\nÉléments probants en base :\n" + "\n".join(probant_lines)
         else:
             full_answer = vault_answer.strip()
         await _auto_save_fact(db_path, question, full_answer, dossier_id)
