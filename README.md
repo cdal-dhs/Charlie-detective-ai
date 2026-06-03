@@ -182,11 +182,12 @@ DETECTIVE_BE/
 
 ## Statut
 
-✅ **Production active** — `detective.digitalhs.biz` — **v1.20.10**
+✅ **Production active** — `detective.digitalhs.biz` — **v1.21.2**
 
 - **Pipeline IMAP** : polling 3 boîtes, classification 8 catégories, priorité intelligente, skip+flag historique avant 20/05/2026
-- **Génération brouillon** : style Daniel, multilingue FR/NL/EN, fallback OpenRouter, date/heure originale incluse
+- **Génération brouillon** : style Daniel, **aide lecture multilingue (v1.21.0)** — pour mails NL/EN/DE/ES/etc., brouillon enrichi avec 4 blocs (email d'origine + traduction FR + proposition FR + traduction langue source). Réponse toujours en FR (langue de travail de Daniel).
 - **Livraison V2a — Drafts IMAP** : dépôt direct dans la boîte source avec flag `\Draft`, vérification post-dépôt, fallback Resend (v1.18.5)
+- **Endpoint retry-draft (v1.21.0)** : `POST /api/drafts/{id}/retry` pour régénérer un brouillon manquant (cas deadlock poller)
 - **Cockpit web** : inbox filtrable (200 mails), conversation avec viewer pièces jointes, bloc Charlie remonté à droite
 - **Chat AI Charlie** :
   - SQL programmatique bypass LLM (comptages + statuts pending/urgent + recherche par mot-clé factuelle)
@@ -204,6 +205,7 @@ DETECTIVE_BE/
   - **Fix v1.18.6** : mapping priorité `high→urgent`/`low→faible`, timeout 120s, troncage body 150K, log réponse 422
   - Recherche sans troncation, insensible aux accents, blindé injection
   - Extraction auto fiches entreprise (regex) + contact (LLM) → voir [`docs/CERVEAU2_EXTRACTION.md`](docs/CERVEAU2_EXTRACTION.md)
+- **LLM kimi-k2.6:cloud (v1.21.1+)** : modèle de raisonnement Ollama Pro Cloud. Extraction `reasoning_content` + post-traitement `_clean_reasoning()` (30+ patterns, v1.21.2) qui filtre les traces de raisonnement parasites.
 - **Dashboard admin** : stats, settings LLM, audit logs, télémétrie poller, backup Cerveau2
 
 Voir `docs/ROADMAP.md` pour la roadmap V2b/V2c (feedback loop qualité Daniel, latence Charlie).
@@ -212,7 +214,7 @@ Voir `docs/ROADMAP.md` pour la roadmap V2b/V2c (feedback loop qualité Daniel, l
 
 ## Versions
 
-Version source de vérité : **`app/_version.py`** (`VERSION = "1.20.10"`).
+Version source de vérité : **`app/_version.py`** (`VERSION = "1.21.2"`).
 
 Le badge affiché dans le cockpit est lu dynamiquement depuis `app/_version.py`. **Tolérance zéro** sur la désynchronisation.
 

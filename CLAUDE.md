@@ -44,20 +44,21 @@
 
 ## 3. Stack technique
 
-État au **2026-06-03 (v1.20.10)**. La SPEC.md d'origine est désalignée sur certains points — **cette section fait foi**.
+État au **2026-06-03 (v1.21.2)**. La SPEC.md d'origine est désalignée sur certains points — **cette section fait foi**.
 
 | Couche | Choix |
 |---|---|
 | Runtime | Python ≥ 3.11 (VPS = 3.11, Mac CDAL = 3.14) |
 | Concurrence | `asyncio` |
 | IMAP | `aioimaplib` |
-| LLM router | **LiteLLM** |
-| LLM principal (pipeline : classifier, generator) | **`openai/kimi-k2`** via Ollama Pro Cloud (20€/mois), provider `openai/` + `api_base=https://ollama.com/v1` |
-| LLM chat Charlie (cockpit + Slack Bot) | **`openai/kimi-k2`** (même provider — bascule v1.19.3, gemma4:31b faisait des refus systématiques) |
-| LLM fallback | **`openai/glm-5.1`** via Ollama Pro Cloud (Claude Sonnet 4 est 404 sur OpenRouter) |
+| LLM router | **LiteLLM** + post-traitement `_clean_reasoning()` (filtre les traces de raisonnement kimi-k2.6) |
+| LLM principal (pipeline : classifier, generator) | **`openai/kimi-k2.6:cloud`** via Ollama Pro Cloud (20€/mois), provider `openai/` + `api_base=https://ollama.com/v1` — **raisonnement activé, voir §6 "LLM Ollama"** |
+| LLM chat Charlie (cockpit + Slack Bot) | **`openai/kimi-k2.6:cloud`** (même provider — bascule v1.19.3, gemma4:31b faisait des refus systématiques) |
+| LLM fallback | **`openai/glm-5.1:cloud`** via Ollama Pro Cloud (Claude Sonnet 4 est 404 sur OpenRouter) |
 | Embeddings | **`openai/text-embedding-3-small`** via OpenRouter (API stateless — image Docker ~800MB au lieu de ~4GB avec sentence-transformers local) |
 | Vector store | **`sqlite-vec`** (extension SQLite, vit dans les DB existantes) |
-| Détection langue | **`langdetect`** (remplace fasttext qui ne build pas sur Mac ARM) |
+| Détection langue | **`langdetect`** (remplace fasttext qui ne build pas sur Mac ARM) — supporte **toutes langues BCP-47** (v1.21.0+) |
+| Aide lecture multilingue | **`app/pipeline/translator.py` + `app/pipeline/draft_renderer.py`** (v1.21.0) — mail ≠ FR → 4 blocs dans brouillon (NL original + FR + proposition FR + NL traduite) |
 | Email outbound — **livraison brouillon** | **IMAP Drafts** (V2a livrée) : `app/delivery/imap_draft.py`, flag `\Draft`, auto-découverte dossier via `LIST` |
 | Email outbound — fallback + alertes | **Resend API** (`agent@digitalhs.biz`) |
 | Canal Boss ↔ Charlie | **Slack Bot** (`slack_bolt`) sur `#detective` — Telegram module conservé inactif |
@@ -67,7 +68,7 @@
 | Service prod | **Docker + Docker Compose + Traefik** (VPS Hostinger KVM8) |
 | Logs | `structlog` (JSON structuré, rotation 7j) |
 | Config | `pydantic-settings` depuis `.env` |
-| Version | Source unique `app/_version.py` (`VERSION = "1.20.10"`) — **tolérance zéro** sur `pyproject.toml` qui reste figé en `1.9.5` (volontaire) |
+| Version | Source unique `app/_version.py` (`VERSION = "1.21.2"`) — **tolérance zéro** sur `pyproject.toml` qui reste figé en `1.9.5` (volontaire) |
 
 **Ne PAS introduire** sans discussion explicite : Kubernetes, Swarm, Celery, Redis, Postgres, ORM lourd, framework JS front (React/Vue/Angular). Le périmètre Docker actuel (1 service Compose + Traefik externe) est figé.
 
@@ -152,6 +153,12 @@ python -m scripts.run_telegram_bot.py
 ### LLM — Ollama Pro Cloud
 ⚠️ **Provider litellm pour Ollama Cloud = `openai/<model>` + `api_base=https://ollama.com/v1`**. **JAMAIS** `ollama_chat/<model>` qui force litellm vers `localhost:11434` (Ollama local — inexistant sur le VPS). Si un nouveau modèle ne répond pas, vérifier immédiatement le provider et l'`api_base`.
 
+⚠️ **kimi-k2.6:cloud est un *reasoning model*** (v1.21.1+) : sa réponse finale est dans `message.reasoning_content`, pas dans `message.content` (qui reste vide). Le wrapper `complete()` dans `app/llm/router.py` extrait automatiquement `reasoning_content` quand `content` est vide.
+
+⚠️ **Post-traitement `_clean_reasoning()`** (v1.21.2) : 30+ patterns regex filtrent les traces de raisonnement typiques (FR + EN + listes + guillemets + auto-critique "Version plus X :", "C'est mieux.", "Refonte :", etc.). Sans ce nettoyage, les brouillons sont pollués par des métadiscours du LLM ("L'utilisateur demande...", "The user wants...", "Let me analyze..."). **Si un nouveau modèle reasoning est ajouté, enrichir les patterns dans `_REASONING_LINE_PATTERNS`**.
+
+⚠️ **Nom du modèle = `kimi-k2.6:cloud`** (avec `.6` et `:cloud`). **JAMAIS** `kimi-k2` (404), `gemma4:31b` (obsolète), `claude-sonnet-4` (404 OpenRouter).
+
 ### Cerveau2
 ⚠️ **Ingestion 100% des emails + PJ** : tout mail traité (peu importe la catégorie) doit être envoyé à Cerveau2 via `feed_correspondance()`, et toute pièce jointe via `feed_document()`. Zéro tolérance sur le skip — c'est ce qui alimente le second cerveau de Daniel.
 ⚠️ **Recherche factuelle** : pour recherche par numéro/nom propre, n'envoyer à Cerveau2 **que l'identifiant précis** (ex: `"0488411192"`, pas `"retrouve le dossier avec téléphone 0488/411192"`). Le dense retrieval calcule un vecteur moyen de TOUS les concepts (implicit AND) — les documents qui ne contiennent pas tous les mots ont un score faible. Voir `docs/CERVEAU2_RECHERCHE_FACTUELLE.md`.
@@ -162,7 +169,9 @@ python -m scripts.run_telegram_bot.py
 ⚠️ **Entités Cerveau2 non indexées** : les fiches `04_entities/personnes/*.md` créées manuellement ne sont PAS dans `chunk_embeddings` (sqlite-vec). Le fallback direct `GET /notes/{path}` dans Charlie contourne ce problème (cf. `_vault_task()`). La vraie réindexation a échoué plusieurs fois sur le VPS (volume mount, extension sqlite3 vec0) — ne pas retenter sans s'être coordonné avec CDAL.
 
 ### Multilingue
-⚠️ **Multilingue obligatoire** : la réponse générée DOIT être dans la langue détectée du mail entrant (FR/NL/EN). Tester systématiquement les 3 langues.
+⚠️ **Multilingue obligatoire** : la réponse générée est TOUJOURS en **français** (langue de travail de Daniel). Si le mail entrant est en NL/EN/DE/ES/autre, le brouillon est enrichi (v1.21.0) avec 4 blocs : email d'origine + traduction FR + proposition FR + traduction dans la langue source. Voir `app/pipeline/translator.py` et `app/pipeline/draft_renderer.py`.
+
+⚠️ **Détection langue étendue** (v1.21.0+) : `Language = str` au lieu de `Literal["fr","nl","en"]` — toutes langues BCP-47 supportées (allemand, espagnol, italien, portugais, etc.). Libellé humain via `language_label()`.
 
 ### Déploiement
 ⚠️ **JAMAIS builder l'image Docker sur le VPS de production.** Le VPS (`69.62.110.165`) est un VPS de PROD — un build Docker consomme tout le CPU/RAM et le site devient inaccessible pendant 10-30 min. Toujours builder en local (Mac CDAL, M4 Max 48 GB) puis pousser l'image compilée vers le VPS :
@@ -188,7 +197,7 @@ Le script `scripts/deploy-to-vps.sh` intègre ce workflow. **Ne jamais utiliser 
 
 ## 7. État courant du projet
 
-État au **2026-06-03 — v1.20.10** déployée en prod. Voir `HANDOVER.md` pour le détail complet, `CHANGELOG.md` pour l'historique, `docs/ROADMAP.md` pour la roadmap à jour.
+État au **2026-06-03 — v1.21.2** déployée en prod. Voir `HANDOVER.md` pour le détail complet, `CHANGELOG.md` pour l'historique, `docs/ROADMAP.md` pour la roadmap à jour.
 
 ### ✅ Livré
 - **S1 → S4 terminées** : infra & data, pipeline IMAP, RAG + génération, prod 24/7 sur KVM8.
@@ -197,6 +206,9 @@ Le script `scripts/deploy-to-vps.sh` intègre ce workflow. **Ne jamais utiliser 
 - **Cockpit web** : `detective.digitalhs.biz` — inbox filtrable, conversation détaillée avec viewer PJ, chat AI Charlie, dashboard admin (stats, settings LLM, audit logs, télémétrie, backup Cerveau2).
 - **Slack Bot Charlie AI** : @mention + DM sur `#detective` (le module Telegram est conservé inactif).
 - **Charlie — recherche robuste** : SQL programmatique bypass (comptages, statuts pending, listes dossiers), résumé de dossier narratif LLM, garde anti-hallucination, garde anti-"pas trouvé" malgré données présentes, scoring mots-clés avec bonus noms concrets / pénalité verbes, déduplication probants, recherche numérique par numéro.
+- **Aide lecture multilingue v1.21.0** : pour les mails NL/EN/DE/ES/etc., brouillon enrichi avec 4 blocs (email d'origine + traduction FR + proposition FR + traduction langue source). Daniel n'a plus à déchiffrer une langue qu'il ne maîtrise pas.
+- **Endpoint retry-draft v1.21.0** : `POST /api/drafts/{id}/retry` permet de régénérer un brouillon manquant (cas deadlock poller).
+- **LLM kimi-k2.6:cloud stable v1.21.1+** : bascule depuis gemma4:31b (obsolète) + claude-sonnet-4 (404). Extraction `reasoning_content` + post-traitement `_clean_reasoning()` v1.21.2 (filtre 30+ patterns de traces de raisonnement).
 
 ### ⏳ En cours
 - **V2b — Polishing cockpit** : filtres inbox (3 boîtes cochées par défaut), latence Charlie < 5s (parallélisation Cerveau2 + SQL déjà faite).
@@ -204,6 +216,7 @@ Le script `scripts/deploy-to-vps.sh` intègre ce workflow. **Ne jamais utiliser 
 
 ### ⬜ À venir
 - **V3** : module factures (extraction montant/échéance/fournisseur), bot WhatsApp client, dashboard web supervision dédié, suppression mails > 28 jours, architecture multi-sub-agents avec LLM différencié par tâche.
+- **Bug connu** : `pairs_vec` table missing sur `boite2.sqlite` — RAG retrieval échoue (rag=0) sur cette boîte. À investiguer hors-scope v1.21.x.
 
 ---
 

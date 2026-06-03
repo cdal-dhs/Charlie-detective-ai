@@ -1,7 +1,7 @@
 # HANDOVER — Detective.be Agent IA (Charlie)
 
 > Document de transfert pour Claude Opus 4.7 ou tout agent ultérieur.  
-> Dernière mise à jour : **2026-06-02** · Version courante : **V1.20.10** · Déployé sur : `detective.digitalhs.biz`
+> Dernière mise à jour : **2026-06-03** · Version courante : **V1.21.2** · Déployé sur : `detective.digitalhs.biz`
 
 ---
 
@@ -19,7 +19,7 @@
 
 ---
 
-## 2. Architecture actuelle (V1.20.10)
+## 2. Architecture actuelle (V1.21.2)
 
 ```
 [3 boîtes Infomaniak IMAP] ──polling 5min──► [Worker asyncio Python]
@@ -29,7 +29,9 @@
         [Pipeline IMAP]                    [Cockpit web FastAPI]              [Cerveau2 API]
           prefilter ──► classifier          /inbox, /conversation, /admin      /query, /ingest
           priority ──► generator            /api/charlie/ask                 vault Markdown
-          delivery (Resend/Slack)           /api/charlie/feedback            sqlite-vec
+          translator (NL/EN/DE/ES...)      /api/drafts/{id}/retry            sqlite-vec
+          renderer (4 blocs multilingues)  /api/charlie/feedback
+          delivery (IMAP Drafts / Resend)
                                                     │
                                             [agent_state.db]
                                             mail_processed
@@ -41,14 +43,18 @@
 
 | Fichier | Rôle critique | À savoir |
 |---|---|---|
-| `app/_version.py` | **Source unique de vérité** version | `VERSION = "1.20.10"`. Tolérance zéro sur la désynchronisation. |
+| `app/_version.py` | **Source unique de vérité** version | `VERSION = "1.21.2"`. Tolérance zéro sur la désynchronisation. |
 | `app/charlie.py` | **Cœur intelligent Charlie AI** | Pipeline `ask_charlie()` : extraction entités → SQL programmatique (bypass LLM pour comptages + statuts) + vault Cerveau2 (fallback direct GET pour entités non indexées) + archives + corrections + mémoire → nuage de liaison familial → **résumé de dossier narratif LLM** (v1.19.1) → garde anti-vide + garde anti-"pas trouvé" |
 | `app/charlie_memory.py` | **Mémoire persistante** | Table `charlie_memory` (feedback good/bad, corrections, auto-save). |
 | `app/cerveau_client.py` | **Client HTTP Cerveau2** | `query_vault()`, `get_vault_note()` (fallback direct par chemin), `feed_correspondance()`, `feed_document()`. Bearer Token statique. |
-| `app/config.py` | **Configuration pydantic-settings** | `llm_model_chat = "openai/gemma4:31b"` (Ollama Pro, cloud). Provider `openai/` + `api_base=https://ollama.com/v1`. |
-| `app/llm/router.py` | **Wrapper LiteLLM** | `complete()` avec fallback automatique vers `llm_model_fallback`. |
-| `app/web/api.py` | **Endpoints HTMX + Charlie** | `charlie_ask()` et `charlie_feedback()` — `hx-disabled-elt` pour éviter double-clic. |
-| `app/workers/imap_poller.py` | **Polling IMAP** | 1 task asyncio par boîte, flag `AgentProcessed` (sans `$` — Infomaniak rejette `$`). |
+| `app/config.py` | **Configuration pydantic-settings** | `llm_model_chat = "openai/kimi-k2.6:cloud"` (Ollama Pro, cloud). Provider `openai/` + `api_base=https://ollama.com/v1`. **v1.21.1** : bascule depuis `gemma4:31b` (obsolète) + correction du nom du modèle. |
+| `app/llm/router.py` | **Wrapper LiteLLM** | `complete()` avec fallback automatique vers `llm_model_fallback` + extraction `reasoning_content` (kimi-k2.6 reasoning) + post-traitement `_clean_reasoning()` (30+ patterns pour filtrer les traces de raisonnement). |
+| `app/pipeline/translator.py` | **Aide lecture multilingue (v1.21.0)** | `translate_to_fr()` + `translate_from_fr()` avec garde-fous try/except, troncature 12K. Utilisé si langue mail ≠ FR. |
+| `app/pipeline/draft_renderer.py` | **Rendu brouillon enrichi (v1.21.0)** | Compose 4 blocs : email d'origine + traduction FR + proposition FR + traduction langue source. |
+| `app/pipeline/generator.py` | **Génération brouillon** | Appelle `translate_to_fr` + `translate_from_fr` en parallèle (`asyncio.gather`) si langue ≠ FR, puis `render_draft_with_translations`. Retourne `GenerationResult(draft, raw_draft)`. |
+| `app/pipeline/language.py` | **Détection langue** | `Language = str` (toutes BCP-47), `language_label()` pour affichage humain. |
+| `app/web/api.py` | **Endpoints HTMX + Charlie** | `charlie_ask()`, `charlie_feedback()`, `draft_generate()` (utilise body complet + force=True), **NOUVEAU** `POST /api/drafts/{id}/retry` (force la régénération). |
+| `app/workers/imap_poller.py` | **Polling IMAP** | 1 task asyncio par boîte, flag `AgentProcessed` (sans `$` — Infomaniak rejette `$`). Appelle `generate_draft()` pour `demande_client` → brouillon enrichi. |
 | `scripts/deploy-to-vps.sh` | **Déploiement one-shot** | Pre-flight checks, sync data (exclut `agent_state.db`), build, healthcheck. |
 
 ---
@@ -145,14 +151,15 @@ if not response and rows:
 | Python | 3.11+ | VPS = 3.11, Mac CDAL = 3.14 |
 | Concurrence | `asyncio` | Tout est `async def` |
 | IMAP | `aioimaplib` | 2.0.1 |
-| LLM router | **LiteLLM** | 1.85.0 |
-| LLM chat (Charlie AI) | **gemma4:31b** via Ollama Pro Cloud | `openai/gemma4:31b` |
-| LLM fallback | **glm-5.1** via Ollama Pro Cloud | `openai/glm-5.1` |
-| LLM pipeline (classifier) | Kimi K2 via Ollama Pro Cloud | `openai/kimi-k2` |
-| Embeddings | `intfloat/multilingual-e5-large` | sentence-transformers, local CPU |
+| LLM router | **LiteLLM** | 1.85.0 + post-traitement `_clean_reasoning()` (filtre traces raisonnement) |
+| LLM chat + pipeline (Charlie AI) | **kimi-k2.6:cloud** via Ollama Pro Cloud | `openai/kimi-k2.6:cloud` (**v1.21.1** : reasoning model, extraction `reasoning_content`) |
+| LLM fallback | **glm-5.1:cloud** via Ollama Pro Cloud | `openai/glm-5.1:cloud` |
+| Embeddings | `text-embedding-3-small` via OpenRouter | API stateless, image Docker ~800MB au lieu de ~4GB avec sentence-transformers local |
 | Vector store | `sqlite-vec` | 0.1.9, vit dans les DB existantes |
-| Détection langue | `langdetect` | Remplace fasttext (ne build pas sur Mac ARM) |
-| Email outbound | **Resend API** | `agent@digitalhs.biz` |
+| Détection langue | `langdetect` | v1.21.0+ : `Language = str` (toutes BCP-47) |
+| Aide lecture multilingue | `app/pipeline/translator.py` + `draft_renderer.py` | v1.21.0 : 4 blocs pour mails NL/EN/DE/ES/etc. |
+| Email outbound principal | **IMAP Drafts** (V2a) | Brouillon dans `Drafts` de la boîte source, flag `\Draft` |
+| Email outbound fallback | **Resend API** | `agent@digitalhs.biz`, alertes système |
 | Web framework | **FastAPI** | 0.136.1 |
 | Templating | **Jinja2** + HTMX | Pas de React |
 | CSS | **Tailwind CSS** | CDN |
@@ -333,7 +340,7 @@ Le poller IMAP ne traite que les mails reçus depuis cette date. Les archives hi
 
 ---
 
-## 9. Bugs connus et points de vigilance (2026-06-02, V1.20.10)
+## 9. Bugs connus et points de vigilance (2026-06-03, V1.21.2)
 
 | # | Problème | Statut | Fichier concerné | Notes |
 |---|---|---|---|---|
@@ -348,29 +355,52 @@ Le poller IMAP ne traite que les mails reçus depuis cette date. Les archives hi
 | 9 | **Recherche numérique non fonctionnelle** — `is_safe_sql()` rejetait les SQL avec `replace(...)` (normalisation des numéros), le tri `received_at DESC` était lexicographique (pas chronologique), et le `OR` avec "téléphone" polluait les résultats | ✅ Corrigé V1.20.6 | `app/charlie.py` | `is_safe_sql` ignore `replace(` avant le check de mots dangereux. `ORDER BY id DESC` remplace `received_at DESC`. Si keyword numérique, le WHERE ne garde que ce numéro. |
 | 10 | **Doublons dans les probants** — un même email existait dans `mail_processed` et `boite2.sqlite` (sender anonymisé différemment) | ✅ Corrigé V1.20.8 | `app/charlie.py` | Déduplication par `(subject.lower(), received_at)` sans `sender`. |
 | 11 | **Faux négatif Cerveau2** — le LLM de synthèse disait "pas trouvé" alors que le numéro était dans le `context` retourné | ✅ Corrigé V1.20.8 | `app/charlie.py` | Détection : si `_bad_vault` match mais que le numéro recherché est dans `vault_answer` → considérer que l'info est là. Court-circuit de la réponse contradictoire. |
+| 12 | **Mail #430 (Beheydt) classifié `demande_client` mais sans `ai_draft`** | ✅ Corrigé V1.21.0 | `app/workers/imap_poller.py` | Cas deadlock poller — l'endpoint `POST /api/drafts/{id}/retry` permet de régénérer manuellement. `draft_generate` utilise désormais `body` complet (au lieu de `body_preview` 2K). |
+| 13 | **Demande de Daniel : aide lecture mails non-FR** — Daniel a des difficultés avec NL/EN/DE/ES | ✅ Corrigé V1.21.0 | `app/pipeline/translator.py` + `draft_renderer.py` | Brouillon enrichi avec 4 blocs : email d'origine + traduction FR + proposition FR + traduction langue source. `Language = str` (toutes BCP-47). |
+| 14 | **kimi-k2 inexistant sur Ollama Cloud** — `openai/kimi-k2` retournait 404 | ✅ Corrigé V1.21.1 | `app/config.py` + `.env.production` | Vrai nom = `kimi-k2.6:cloud`. Idem pour `glm-5.1` → `glm-5.1:cloud`. `ollama_pro_base_url` corrigé de `/api` vers `/v1`. Table `app_settings` prod purgée des 3 entrées obsolètes. |
+| 15 | **kimi-k2.6:cloud est un reasoning model** — réponse dans `reasoning_content` pas dans `content` → fallback systématique vers glm-5.1 | ✅ Corrigé V1.21.1 | `app/llm/router.py` | Extraction : si `content` vide, fallback sur `reasoning_content`. |
+| 16 | **Traces de raisonnement kimi-k2.6 polluent les brouillons** — "L'utilisateur demande...", "The user wants...", "Refonte :", "Version plus X :", "C'est mieux.", etc. | ✅ Corrigé V1.21.2 | `app/llm/router.py` | 30+ patterns regex dans `_clean_reasoning()` filtrent les artefacts. EN + FR + listes + guillemets + auto-critique post-mail. |
 
-### Point de vigilance #1 — Provider litellm pour Ollama Cloud (CRITIQUE v1.19.1)
-`ollama_chat/gemma4:31b` force litellm vers `localhost:11434` (Ollama **local**). Le provider correct pour Ollama **Cloud** est `openai/gemma4:31b` avec `api_base=https://ollama.com/v1`.
-**Si un nouveau modèle ne répond pas** → vérifier immédiatement le provider (openai/ vs ollama_chat/) et l'URL api_base.
+### Point de vigilance #1 — Provider litellm pour Ollama Cloud (CRITIQUE v1.21.1)
+`ollama_chat/<model>` force litellm vers `localhost:11434` (Ollama **local**). Le provider correct pour Ollama **Cloud** est `openai/<model>` avec `api_base=https://ollama.com/v1`.
+**Vrai nom des modèles** (v1.21.1+) : `openai/kimi-k2.6:cloud` (principal + classifier + chat), `openai/glm-5.1:cloud` (fallback). **JAMAIS** `kimi-k2` (404), `gemma4:31b` (obsolète), `claude-sonnet-4` (404 OpenRouter).
+**Si un nouveau modèle ne répond pas** → vérifier immédiatement le provider (openai/ vs ollama_chat/), l'URL api_base (`/v1` pas `/api`), et que le nom de modèle existe sur ollama.com/library.
 
-### Point de vigilance #2 — deepseek-v4-pro remplacé par gemma4:31b
-Le modèle deepseek-v4-pro (via Ollama Pro) **ne savait pas synthétiser** en paragraphe narratif (retournait vide ou reproduisait des tableaux). Il a été remplacé par **gemma4:31b** qui produit des résumés fluides. Si gemma4 échoue, le fallback est **glm-5.1** (toujours sur Ollama Cloud).
+### Point de vigilance #2 — kimi-k2.6:cloud est un reasoning model
+Sa réponse finale est dans `message.reasoning_content`, pas dans `message.content` (vide). Le wrapper `complete()` extrait automatiquement, MAIS il faut :
+- Soit utiliser un autre modèle non-reasoning si on veut du contenu direct
+- Soit accepter le coût (raisonnement = plus de tokens) + le post-traitement `_clean_reasoning()`
 
-### Point de vigilance #3 — mail_processed ne contient que les emails post-cutoff
+### Point de vigilance #3 — Traces de raisonnement kimi-k2.6 (CRITIQUE v1.21.2)
+Le modèle produit des métadiscours parasites : "L'utilisateur demande...", "Let me analyze...", "Points importants :", "Refonte :", "Version plus X :", "C'est mieux.", etc. Le post-traitement `_clean_reasoning()` dans `app/llm/router.py` filtre ~30 patterns, **MAIS** si un nouveau type d'artefact apparaît (autre modèle, autre langue, etc.), il faut **enrichir `_REASONING_LINE_PATTERNS`** dans ce fichier. Le cleaning n'est jamais "complet" — c'est une bataille continue.
+
+### Point de vigilance #4 — mail_processed ne contient que les emails post-cutoff
 La base courante `agent_state.db/mail_processed` ne contient que les emails post-cutoff (2026-05-15). Les vraies données sont dans `boite1.sqlite`.  
 **Conséquence** : pour les questions sur 2026, les archives historiques sont la source principale. Le SQL local retourne souvent 0.
 
-### Point de vigilance #4 — Cerveau2 peut être down
+### Point de vigilance #5 — Cerveau2 peut être down
 Le client `query_vault()` est dégradation silencieuse. Si Cerveau2 est indisponible, Charlie répond avec SQL + mémoire seuls. Vérifier les logs `cerveau.query_failed`.
 
-### Point de vigilance #5 — Entités Cerveau2 non indexées dans sqlite-vec
+### Point de vigilance #6 — Entités Cerveau2 non indexées dans sqlite-vec
 Les fiches `04_entities/personnes/*.md` créées manuellement ne sont pas dans l'index sémantique. Le fallback direct `GET /notes/{path}` contourne ce problème, mais la **vraie solution** serait de réindexer le vault Cerveau2. Toutes les tentatives sur le VPS ont échoué (problèmes volume mount, extension sqlite3 vec0 manquante).
 
-### Point de vigilance #6 — Dense search Cerveau2 = implicit AND (CRITIQUE v1.20.10)
+### Point de vigilance #7 — Dense search Cerveau2 = implicit AND (CRITIQUE v1.20.10)
 Quand on envoie une phrase complète à Cerveau2 (`"retrouve le dossier avec téléphone 0488/411192"`), le dense retrieval calcule un vecteur moyen de TOUS les concepts. Les documents qui ne contiennent pas tous les mots ont un score faible. **Solution** : pour les recherches factuelles, n'envoyer que les identifiants précis (`"0488411192"`) — voir `docs/CERVEAU2_RECHERCHE_FACTUELLE.md`.
 
-### Point de vigilance #7 — Faux négatifs du LLM de synthèse Cerveau2
+### Point de vigilance #8 — Faux négatifs du LLM de synthèse Cerveau2
 Le LLM de synthèse Cerveau2 peut écrire "je ne trouve pas" alors que le document est dans le `context`. C'est un biais du modèle, pas un bug du retrieval. **Solution** : vérifier si le numéro/nom recherché est présent dans `vault_answer` (la chaîne brute retournée par Cerveau2) malgré les patterns négatifs — voir `_bad_vault` et la logique de faux négatif dans `app/charlie.py`.
+
+### Point de vigilance #9 — `pairs_vec` table missing sur `boite2.sqlite` (NOUVEAU v1.21.2)
+Le RAG retrieval échoue (rag=0) sur la boîte `detective_belgium` car la table `pairs_vec` n'existe pas dans `boite2.sqlite`. Conséquence : mails de cette boîte → brouillon moins bon (pas de cas historiques similaires). À investiguer hors-scope. Cause probable : ancien `boite2.sqlite` créé avant l'activation de sqlite-vec, jamais réindexé.
+
+### Point de vigilance #10 — Tables `mail_processed` `app_settings` peuvent être stale
+Si tu modifies `app/config.py` (défauts `llm_model_*`), il faut aussi **purger la table `app_settings` en prod** (clé `llm_model_default`, `llm_model_classifier`, `llm_model_fallback`) — sinon les valeurs runtime en DB écrasent tes défauts. Procédure :
+```python
+import sqlite3
+conn = sqlite3.connect("/app/data/agent_state.db")
+conn.execute("DELETE FROM app_settings WHERE key LIKE 'llm_model%'")
+conn.commit()
+```
 
 ---
 
