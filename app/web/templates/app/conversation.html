@@ -169,9 +169,10 @@
 
           <button
             class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm"
-            hx-post="/api/drafts/{{ mail.id }}/regenerate"
-            hx-target="#action-result"
-            hx-swap="innerHTML"
+            hx-post="/api/drafts/{{ mail.id }}/retry"
+            hx-target="#ai-draft-section"
+            hx-swap="outerHTML"
+            hx-confirm="Régénérer le brouillon (avec traductions si langue ≠ FR) ?"
           >Régénérer</button>
 
           <button

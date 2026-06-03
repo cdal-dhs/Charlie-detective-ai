@@ -18,7 +18,8 @@ PERSONALITY_PATH = Path(__file__).parent.parent / "prompts" / "personality_danie
 
 @dataclass
 class GenerationResult:
-    draft: str
+    draft: str  # texte final affiché (enrichi avec traductions si ≠ FR)
+    raw_draft: str  # proposition FR brute, sans enrichissement
     language: Language
     rag_pairs: list[RetrievedPair]
     model_used: str
@@ -77,10 +78,13 @@ def _build_messages(
     vault_notes: list[VaultNote],
 ) -> list[dict]:
     soul_section = _load_soul_for_brand(mailbox.brand)
+    # On génère TOUJOURS en français (langue de travail de Daniel).
+    # Si le mail entrant est dans une autre langue, le module translator
+    # ajoutera traductions + cadre multilingue autour du brouillon.
     system = (
         _load_personality()
         + f"\n\nMarque/boîte source : {mailbox.brand}"
-        + f"\nLangue de réponse OBLIGATOIRE : {language}"
+        + f"\nLangue de réponse OBLIGATOIRE : français (la langue de travail de Daniel)"
         + (f"\n\n{soul_section}" if soul_section else "")
     )
     vault_section = _format_vault_context(vault_notes)
@@ -90,8 +94,9 @@ def _build_messages(
         + f"--- NOUVEAU MAIL À TRAITER ---\n"
         f"De : {sender}\n"
         f"Sujet : {incoming_subject}\n"
+        f"Langue du mail entrant : {language}\n"
         f"Corps :\n{incoming_body}\n\n"
-        f"Génère UN brouillon de réponse en {language}, signé au nom de {mailbox.brand}, "
+        f"Génère UN brouillon de réponse EN FRANÇAIS, signé au nom de {mailbox.brand}, "
         f"dans le style de Daniel illustré par les cas ci-dessus. "
         f"Renvoie UNIQUEMENT le corps du message, sans préambule, sans 'Sujet:', sans markdown."
     )
@@ -134,9 +139,40 @@ async def generate_draft(
         max_tokens=1500,
         temperature=0.4,
     )
-    log.info("generator.draft", length=len(draft), preview=draft[:200])
+    raw_draft = draft.strip()
+    log.info("generator.draft", length=len(raw_draft), preview=raw_draft[:200])
+
+    # --- Enrichissement multilingue pour aide à la lecture Daniel ---
+    # Si la langue détectée ≠ FR, on ajoute en-tête (mail original) + traductions.
+    final_draft = raw_draft
+    if language != "fr":
+        from app.pipeline.translator import translate_from_fr, translate_to_fr
+        from app.pipeline.draft_renderer import render_draft_with_translations
+
+        # Lancer les 2 traductions en parallèle
+        translation_to_fr_task = translate_to_fr(incoming_body, language)
+        translation_from_fr_task = translate_from_fr(raw_draft, language)
+        translation_to_fr, translation_from_fr = await asyncio.gather(
+            translation_to_fr_task, translation_from_fr_task
+        )
+
+        final_draft = render_draft_with_translations(
+            incoming_body=incoming_body,
+            draft_fr=raw_draft,
+            source_lang=language,
+            incoming_subject=incoming_subject,
+            translation_to_fr=translation_to_fr,
+            translation_from_fr=translation_from_fr,
+        )
+        log.info(
+            "generator.draft_enriched",
+            language=language,
+            final_length=len(final_draft),
+        )
+
     return GenerationResult(
-        draft=draft.strip(),
+        draft=final_draft,
+        raw_draft=raw_draft,
         language=language,
         rag_pairs=pairs,
         model_used=llm_default,

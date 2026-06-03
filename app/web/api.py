@@ -231,11 +231,12 @@ def _ai_draft_html(draft_text: str) -> str:
 async def draft_generate(
     request: Request,
     mail_id: int,
+    force: bool = False,
     db: aiosqlite.Connection = Depends(get_db),  # noqa: B008
     user: dict = Depends(require_operator),  # noqa: B008
 ) -> HTMLResponse:
     async with db.execute(
-        "SELECT id, mailbox_name, subject, sender, category, body_preview, ai_draft "
+        "SELECT id, mailbox_name, subject, sender, category, body_preview, body, ai_draft "
         "FROM mail_processed WHERE id = ?",
         (mail_id,),
     ) as cursor:
@@ -243,12 +244,14 @@ async def draft_generate(
     if row is None:
         raise HTTPException(status_code=404, detail="Mail not found")
 
-    _, mailbox_name, subject, sender, category, body_preview, existing_draft = row
+    _, mailbox_name, subject, sender, category, body_preview, body, existing_draft = row
 
-    if existing_draft:
+    if existing_draft and not force:
         return HTMLResponse(_ai_draft_html(existing_draft))
 
-    if not body_preview:
+    # v1.21.0 — utiliser le body complet si dispo (au lieu de body_preview tronqué 2K)
+    full_body = body or body_preview or ""
+    if not full_body:
         return HTMLResponse(
             '<div class="p-3 bg-red-900/40 border border-red-800 rounded '
             'text-red-300 text-sm">Pas de contenu disponible pour générer un brouillon.</div>'
@@ -268,10 +271,10 @@ async def draft_generate(
         )
 
     try:
-        language = detect_language(body_preview, default=mailbox.default_lang)
+        language = detect_language(full_body, default=mailbox.default_lang)
         result = await generate_draft(
             incoming_subject=subject or "",
-            incoming_body=body_preview,
+            incoming_body=full_body,
             sender=sender or "",
             mailbox=mailbox,
             language=language,
@@ -285,7 +288,7 @@ async def draft_generate(
         )
 
     await db.execute(
-        "UPDATE mail_processed SET ai_draft = ? WHERE id = ?",
+        "UPDATE mail_processed SET ai_draft = ?, draft_generated = 1 WHERE id = ?",
         (result.draft, mail_id),
     )
     await db.commit()
@@ -293,10 +296,25 @@ async def draft_generate(
     ip = request.client.host if request.client else None
     await audit_log(
         db, user["id"], "draft_generate", "mail_processed", str(mail_id),
-        f"model={result.model_used} lang={language}", ip, request.headers.get("user-agent"),
+        f"model={result.model_used} lang={language} force={force}", ip, request.headers.get("user-agent"),
     )
 
     return HTMLResponse(_ai_draft_html(result.draft))
+
+
+@router.post("/drafts/{mail_id}/retry")
+async def draft_retry(
+    request: Request,
+    mail_id: int,
+    db: aiosqlite.Connection = Depends(get_db),  # noqa: B008
+    user: dict = Depends(require_operator),  # noqa: B008
+) -> HTMLResponse:
+    """Force la régénération d'un brouillon, même si un brouillon existe déjà.
+
+    Cas d'usage : un mail a été classifié `demande_client` mais le brouillon
+    n'a pas été généré (ex: cycle interrompu, exception silencieuse).
+    """
+    return await draft_generate(request=request, mail_id=mail_id, force=True, db=db, user=user)
 
 
 @router.post("/drafts/{mail_id}/regenerate")
