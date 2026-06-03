@@ -20,6 +20,8 @@ _REASONING_LINE_PATTERNS = [
     re.compile(r"^Je\s+(dois|vais|peux|peux\s+pas|m'assure|réponds|rédige)\b", re.IGNORECASE),
     re.compile(r"^Réponse\s+possible\s*:", re.IGNORECASE),
     re.compile(r"^Points?\s+importants?\s*:", re.IGNORECASE),
+    re.compile(r"^Points?\s+clés?\s*:", re.IGNORECASE),
+    re.compile(r"^Ce\s+qu'il\s+faut\b", re.IGNORECASE),
     re.compile(r"^Structure\s+(possible|suggérée)?\s*:", re.IGNORECASE),
     re.compile(r"^Ton\s+\w+\s*:", re.IGNORECASE),
     re.compile(r"^Brouillon\s*:", re.IGNORECASE),
