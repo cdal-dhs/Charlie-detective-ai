@@ -108,6 +108,13 @@ def _clean_reasoning(text: str) -> str:
     # Réduire les lignes vides multiples
     result = re.sub(r"\n{3,}", "\n\n", result).strip()
 
+    # Nettoyer guillemets résiduels autour de la signature (artefact kimi-k2.6)
+    # Ex: 'Daniel Hurchon"' → 'Daniel Hurchon', '"Daniel Hurchon' → 'Daniel Hurchon'
+    result = re.sub(r'^"+', "", result, flags=re.MULTILINE)
+    result = re.sub(r'"+$', "", result, flags=re.MULTILINE)
+    result = re.sub(r'"\s*$', "", result)
+    result = re.sub(r'^\s*"', "", result)
+
     # Dernière passe : tronquer après une signature si on détecte une auto-critique
     # post-mail (le LLM se corrige après avoir écrit le mail).
     # Patterns : "Version plus X :", "C'est mieux.", "C'est parfait.", "C'est bon.",
