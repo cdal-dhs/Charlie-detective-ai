@@ -16,20 +16,31 @@ _ollama_alert_sent = False
 # qui laissent des traces dans reasoning_content. On les filtre en post-traitement.
 _REASONING_LINE_PATTERNS = [
     re.compile(r"^L'utilisateur\s+(me\s+)?demande\b", re.IGNORECASE),
-    re.compile(r"^Je\s+(dois|vais|peux|peux\s+pas)\b", re.IGNORECASE),
+    re.compile(r"^L'utilisateur\s+n'a\s+pas\b", re.IGNORECASE),
+    re.compile(r"^Je\s+(dois|vais|peux|peux\s+pas|m'assure|réponds|rédige)\b", re.IGNORECASE),
     re.compile(r"^Réponse\s+possible\s*:", re.IGNORECASE),
     re.compile(r"^Points?\s+importants?\s*:", re.IGNORECASE),
     re.compile(r"^Structure\s+(possible|suggérée)?\s*:", re.IGNORECASE),
     re.compile(r"^Ton\s+\w+\s*:", re.IGNORECASE),
     re.compile(r"^Brouillon\s*:", re.IGNORECASE),
-    re.compile(r"^Voici\s+(comment|ma|le|la|les|un|une|ce|cela)\b", re.IGNORECASE),
-    re.compile(r"^C'est\s+(une|un|le|la|les|plus|assez)\b", re.IGNORECASE),
-    re.compile(r"^Cela\s+(répond|est|permet|donne)\b", re.IGNORECASE),
+    re.compile(r"^Refonte\s*:", re.IGNORECASE),
+    re.compile(r"^Exemple\s*:", re.IGNORECASE),
+    re.compile(r"^Version\s+\w+\s*:", re.IGNORECASE),
+    re.compile(r"^Mais\s+en\s+version\b", re.IGNORECASE),
+    re.compile(r"^Voici\s+(comment|ma|le|la|les|un|une|ce|cela|le\s+résultat|la\s+réponse)\b", re.IGNORECASE),
+    re.compile(r"^C'est\s+(une|un|le|la|les|plus|assez|direct|clair|prêt)\b", re.IGNORECASE),
+    re.compile(r"^Cela\s+(répond|est|permet|donne|semble)\b", re.IGNORECASE),
     re.compile(r"^Il\s+faut\b", re.IGNORECASE),
     re.compile(r"^Note\s*:", re.IGNORECASE),
-    re.compile(r"^Je\s+m'assure\b", re.IGNORECASE),
+    re.compile(r"^Vérification\s*:", re.IGNORECASE),
     re.compile(r"^Formulation\s+proposée", re.IGNORECASE),
+    re.compile(r"^Attendez\b", re.IGNORECASE),
+    re.compile(r"^Attendons\b", re.IGNORECASE),
+    re.compile(r"^Je\s+m'assure\b", re.IGNORECASE),
+    re.compile(r"^Je\s+peux\b", re.IGNORECASE),
     re.compile(r"^\d+\.\s+", re.IGNORECASE),  # listes numérotées type "1. Ton..."
+    re.compile(r"^[-•]\s+", re.IGNORECASE),  # listes à puces
+    re.compile(r'^".*"$', re.IGNORECASE),  # ligne entre guillemets = exemple
 ]
 
 
