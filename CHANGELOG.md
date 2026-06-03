@@ -1,5 +1,20 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.21.1] — 2026-06-03 (hotfix critique — modèle kimi-k2.6:cloud + reasoning_content)
+
+### Fixé
+- **Nom du modèle Ollama corrigé** : le vrai nom est `kimi-k2.6:cloud` (et non `kimi-k2`). Le `.env.production` du VPS utilisait en plus `gemma4:31b` (obsolète) et `claude-sonnet-4` (404 sur OpenRouter).
+- **Extraction `reasoning_content` pour kimi-k2.6:cloud** : ce modèle est un *reasoning model* — sa réponse finale est dans `message.reasoning_content` et `message.content` reste vide. Notre wrapper litellm ne lisait que `.content` → fallback systématique vers `glm-5.1` (plus lent). Fix : si `.content` est vide, fallback sur `.reasoning_content`.
+- **Base URL Ollama Pro** : défaut était `https://ollama.com/api` (mauvais), corrigé à `https://ollama.com/v1` (endpoint OpenAI-compatible attendu par litellm).
+- **Table `app_settings` purgée** : 3 lignes obsolètes (`llm_model_default`, `llm_model_classifier`, `llm_model_fallback`) pointaient sur les anciens noms → supprimées pour retomber sur les défauts corrigés.
+
+### Changé
+- **`app/config.py`** : défauts `llm_model_default/fallback/classifier/chat` = `openai/kimi-k2.6:cloud` + `openai/glm-5.1:cloud`.
+- **`.env.example`** : aligné sur la prod (noms corrects, base URL correcte).
+- **VPS `.env.production`** : corrigé en SSH (cf. procédure).
+
+---
+
 ## [1.21.0] — 2026-06-03 (aide à la lecture multilingue pour Daniel + retry-draft endpoint)
 
 ### Ajouté
