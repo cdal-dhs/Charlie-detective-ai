@@ -12,6 +12,8 @@ data/*.db-shm
 data/*.sqlite-journal
 data/*.sqlite-wal
 data/*.sqlite-shm
+# Import initial des DB anonymisées (jamais commité — DB d'origine, volumineuses, stockées hors repo)
+db_import/
 # Pièces jointes extraites des emails (ne pas supprimer par git clean)
 data/attachments/*
 !data/attachments/.gitkeep
