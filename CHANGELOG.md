@@ -1,5 +1,18 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.21.2] — 2026-06-03 (hotfix — nettoyage traces de raisonnement kimi-k2.6)
+
+### Fixé
+- **Traces de raisonnement kimi-k2.6 dans le contenu retourné** : le modèle produit des artefacts type "L'utilisateur demande...", "Points importants :", "Structure possible :", "The user wants...", "Let me analyze...", "Refonte :", "Version plus X :", "C'est mieux." etc. qui polluaient les brouillons de réponse.
+- **Auto-critique post-mail** : si le LLM écrit un mail puis le reprend ("Version plus Hurchon :", "C'est mieux.", "Refonte :"), on garde la **première** version et on tronque juste avant la critique.
+- **Guillemets résiduels autour de la signature** : "Daniel Hurchon\"" → "Daniel Hurchon".
+- **Patterns multilingues** : kimi-k2.6 raisonne en anglais sur des inputs FR/NL → ajout patterns EN (The user, Let me, I need, But wait, Given the style, etc.).
+
+### Ajouté
+- **`_clean_reasoning()` dans `app/llm/router.py`** : 30+ patterns regex qui identifient les traces de raisonnement typiques (FR + EN + listes + guillemets + auto-critique).
+
+---
+
 ## [1.21.1] — 2026-06-03 (hotfix critique — modèle kimi-k2.6:cloud + reasoning_content)
 
 ### Fixé
