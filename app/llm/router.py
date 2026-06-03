@@ -1,4 +1,5 @@
 import os
+import re
 
 import structlog
 from litellm import acompletion
@@ -10,6 +11,90 @@ from app.settings_store import get_llm_models
 log = structlog.get_logger()
 
 _ollama_alert_sent = False
+
+# Patterns de raisonnement typiques des modèles de type "reasoning" (kimi-k2.6:cloud, etc.)
+# qui laissent des traces dans reasoning_content. On les filtre en post-traitement.
+_REASONING_LINE_PATTERNS = [
+    re.compile(r"^L'utilisateur\s+(me\s+)?demande\b", re.IGNORECASE),
+    re.compile(r"^Je\s+(dois|vais|peux|peux\s+pas)\b", re.IGNORECASE),
+    re.compile(r"^Réponse\s+possible\s*:", re.IGNORECASE),
+    re.compile(r"^Points?\s+importants?\s*:", re.IGNORECASE),
+    re.compile(r"^Structure\s+(possible|suggérée)?\s*:", re.IGNORECASE),
+    re.compile(r"^Ton\s+\w+\s*:", re.IGNORECASE),
+    re.compile(r"^Brouillon\s*:", re.IGNORECASE),
+    re.compile(r"^Voici\s+(comment|ma|le|la|les|un|une|ce|cela)\b", re.IGNORECASE),
+    re.compile(r"^C'est\s+(une|un|le|la|les|plus|assez)\b", re.IGNORECASE),
+    re.compile(r"^Cela\s+(répond|est|permet|donne)\b", re.IGNORECASE),
+    re.compile(r"^Il\s+faut\b", re.IGNORECASE),
+    re.compile(r"^Note\s*:", re.IGNORECASE),
+    re.compile(r"^Je\s+m'assure\b", re.IGNORECASE),
+    re.compile(r"^Formulation\s+proposée", re.IGNORECASE),
+    re.compile(r"^\d+\.\s+", re.IGNORECASE),  # listes numérotées type "1. Ton..."
+]
+
+
+def _is_reasoning_line(line: str) -> bool:
+    """Vrai si la ligne ressemble à une trace de raisonnement du LLM."""
+    stripped = line.strip()
+    if not stripped:
+        return False
+    return any(p.match(stripped) for p in _REASONING_LINE_PATTERNS)
+
+
+def _clean_reasoning(text: str) -> str:
+    """Nettoie le texte des traces de raisonnement typiques (kimi-k2.6:cloud).
+
+    Stratégie :
+    1. Split en lignes
+    2. Si une ligne matche un pattern de raisonnement, on l'enlève
+    3. On enlève les paragraphes consécutifs de raisonnement (>2 lignes d'affilée)
+    4. On garde la dernière "tranche" non-raisonnement
+    5. Trim des lignes vides multiples
+    """
+    if not text:
+        return text
+
+    lines = text.split("\n")
+    # Marquer les lignes de raisonnement
+    cleaned: list[str] = []
+    skip_until_blank = False
+    for line in lines:
+        if _is_reasoning_line(line):
+            skip_until_blank = True
+            continue
+        if skip_until_blank:
+            # continuer à skipper tant qu'on a des lignes de raisonnement consécutives
+            if line.strip() == "":
+                skip_until_blank = False
+            continue
+        cleaned.append(line)
+
+    result = "\n".join(cleaned)
+
+    # Stratégie 2 : si on a encore beaucoup de texte "méta" avant la réponse,
+    # on garde seulement le dernier tiers
+    if len(result) > 500:
+        # Si on détecte un "saut" clair (plusieurs paragraphes non-mail au début),
+        # on tronque au premier vrai paragraphe
+        # Heuristique : un paragraphe de mail commence souvent par "Madame", "Monsieur",
+        # "Cher", "Chère", "Bonjour", "Beste", "Geachte", "Dear", "Hello", "Bedankt",
+        # ou directement par du contenu narratif.
+        mail_starters = (
+            "Madame", "Monsieur", "Cher", "Chère", "Bonjour", "Bonsoir",
+            "Beste", "Geachte", "Dear", "Hello", "Hi ", "Bedankt", "Dank",
+            "Merci pour", "Je vous", "Je vous remercie",
+        )
+        # Chercher le 1er paragraphe qui commence par un mail starter
+        for starter in mail_starters:
+            idx = result.find(f"\n{starter}")
+            if idx > 0 and idx < len(result) * 0.7:
+                # Si on trouve un starter dans les 70% du texte, on coupe avant
+                result = result[idx + 1:].strip()
+                break
+
+    # Réduire les lignes vides multiples
+    result = re.sub(r"\n{3,}", "\n\n", result).strip()
+    return result
 
 
 def _ensure_env() -> None:
@@ -51,11 +136,13 @@ async def complete(
             **extra,
         )
         # kimi-k2.6:cloud (reasoning) met sa réponse dans reasoning_content
-        # et laisse content vide. On extrait des 2 sources.
+        # et laisse content vide. On extrait des 2 sources, puis on nettoie
+        # les traces de raisonnement.
         msg = resp.choices[0].message
         content = msg.content or ""
         if not content and getattr(msg, "reasoning_content", None):
             content = msg.reasoning_content
+        content = _clean_reasoning(content)
         log.info("llm.response", model=model, length=len(content))
         return content
     except Exception as e:
@@ -96,5 +183,6 @@ async def complete(
         content = msg.content or ""
         if not content and getattr(msg, "reasoning_content", None):
             content = msg.reasoning_content
+        content = _clean_reasoning(content)
         log.info("llm.fallback_response", fallback=fallback_model, length=len(content))
         return content
