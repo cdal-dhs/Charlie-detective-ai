@@ -1,5 +1,8 @@
 [project]
 name = "detective-agent"
+# ⚠️ SENTINELLE — NE PAS BUMPER.
+# La version de l'application vit dans app/_version.py (source unique de vérité).
+# Ce champ est figé en 1.9.5 volontairement. Voir CLAUDE.md §3 et HANDOVER.md §2.
 version = "1.9.5"
 description = "Agent IA email pour Detective.be — classification + brouillons de réponse style Daniel Hurchon"
 requires-python = ">=3.11"
