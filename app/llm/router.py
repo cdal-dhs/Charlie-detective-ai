@@ -50,7 +50,12 @@ async def complete(
             temperature=temperature,
             **extra,
         )
-        content = resp.choices[0].message.content or ""
+        # kimi-k2.6:cloud (reasoning) met sa réponse dans reasoning_content
+        # et laisse content vide. On extrait des 2 sources.
+        msg = resp.choices[0].message
+        content = msg.content or ""
+        if not content and getattr(msg, "reasoning_content", None):
+            content = msg.reasoning_content
         log.info("llm.response", model=model, length=len(content))
         return content
     except Exception as e:
@@ -87,6 +92,9 @@ async def complete(
             temperature=temperature,
             **fb_extra,
         )
-        content = resp.choices[0].message.content or ""
+        msg = resp.choices[0].message
+        content = msg.content or ""
+        if not content and getattr(msg, "reasoning_content", None):
+            content = msg.reasoning_content
         log.info("llm.fallback_response", fallback=fallback_model, length=len(content))
         return content
