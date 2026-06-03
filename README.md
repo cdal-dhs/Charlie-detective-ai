@@ -182,7 +182,7 @@ DETECTIVE_BE/
 
 ## Statut
 
-✅ **Production active** — `detective.digitalhs.biz` — **v1.19.3**
+✅ **Production active** — `detective.digitalhs.biz` — **v1.20.10**
 
 - **Pipeline IMAP** : polling 3 boîtes, classification 8 catégories, priorité intelligente, skip+flag historique avant 20/05/2026
 - **Génération brouillon** : style Daniel, multilingue FR/NL/EN, fallback OpenRouter, date/heure originale incluse
@@ -212,7 +212,7 @@ Voir `docs/ROADMAP.md` pour la roadmap V2b/V2c (feedback loop qualité Daniel, l
 
 ## Versions
 
-Version source de vérité : **`app/_version.py`** (`VERSION = "1.19.3"`).
+Version source de vérité : **`app/_version.py`** (`VERSION = "1.20.10"`).
 
 Le badge affiché dans le cockpit est lu dynamiquement depuis `app/_version.py`. **Tolérance zéro** sur la désynchronisation.
 
@@ -222,6 +222,7 @@ Voir [`CHANGELOG.md`](CHANGELOG.md) pour l'historique détaillé.
 
 ## Documentation Cerveau2
 
+- [`docs/CERVEAU2_RECHERCHE_FACTUELLE.md`](docs/CERVEAU2_RECHERCHE_FACTUELLE.md) — **Recherche factuelle via Cerveau2** (dense search = implicit AND, faux négatifs LLM, normalisation numéros, déduplication)
 - [`docs/CERVEAU2_EXTRACTION.md`](docs/CERVEAU2_EXTRACTION.md) — **Comment traiter et extraire les informations** (fiches entreprise, contact, wikilinks, ingestion PJ)
 - [`docs/CERVEAU2_API.md`](docs/CERVEAU2_API.md) — Référence API interne (endpoints, formats, mappings)
 - [`docs/CERVEAU2_INTEGRATION.md`](docs/CERVEAU2_INTEGRATION.md) — Guide d'intégration pour agents externes (Hermes, etc.)

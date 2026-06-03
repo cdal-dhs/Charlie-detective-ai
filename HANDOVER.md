@@ -1,7 +1,7 @@
 # HANDOVER — Detective.be Agent IA (Charlie)
 
 > Document de transfert pour Claude Opus 4.7 ou tout agent ultérieur.  
-> Dernière mise à jour : **2026-05-30** · Version courante : **V1.19.1** · Déployé sur : `detective.digitalhs.biz`
+> Dernière mise à jour : **2026-06-02** · Version courante : **V1.20.10** · Déployé sur : `detective.digitalhs.biz`
 
 ---
 
@@ -19,7 +19,7 @@
 
 ---
 
-## 2. Architecture actuelle (V1.19.1)
+## 2. Architecture actuelle (V1.20.10)
 
 ```
 [3 boîtes Infomaniak IMAP] ──polling 5min──► [Worker asyncio Python]
@@ -41,7 +41,7 @@
 
 | Fichier | Rôle critique | À savoir |
 |---|---|---|
-| `app/_version.py` | **Source unique de vérité** version | `VERSION = "1.19.1"`. Tolérance zéro sur la désynchronisation. |
+| `app/_version.py` | **Source unique de vérité** version | `VERSION = "1.20.10"`. Tolérance zéro sur la désynchronisation. |
 | `app/charlie.py` | **Cœur intelligent Charlie AI** | Pipeline `ask_charlie()` : extraction entités → SQL programmatique (bypass LLM pour comptages + statuts) + vault Cerveau2 (fallback direct GET pour entités non indexées) + archives + corrections + mémoire → nuage de liaison familial → **résumé de dossier narratif LLM** (v1.19.1) → garde anti-vide + garde anti-"pas trouvé" |
 | `app/charlie_memory.py` | **Mémoire persistante** | Table `charlie_memory` (feedback good/bad, corrections, auto-save). |
 | `app/cerveau_client.py` | **Client HTTP Cerveau2** | `query_vault()`, `get_vault_note()` (fallback direct par chemin), `feed_correspondance()`, `feed_document()`. Bearer Token statique. |
@@ -333,7 +333,7 @@ Le poller IMAP ne traite que les mails reçus depuis cette date. Les archives hi
 
 ---
 
-## 9. Bugs connus et points de vigilance (2026-05-30, V1.19.1)
+## 9. Bugs connus et points de vigilance (2026-06-02, V1.20.10)
 
 | # | Problème | Statut | Fichier concerné | Notes |
 |---|---|---|---|---|
@@ -345,6 +345,9 @@ Le poller IMAP ne traite que les mails reçus depuis cette date. Les archives hi
 | 6 | **Count ADF = 0** car SQL cherchait `subject LIKE '%ADF%'` mais emails ADF viennent de `@groupeadf.com` | ✅ Corrigé V1.14.1 | `CHARLIE_SYSTEM_PROMPT` | Mode B recherche aussi dans `sender`. |
 | 7 | **Corrections écrasaient les questions analytiques** | ✅ Corrigé V1.14.0 | `_summarize_results()` | Bypass correction ne s'applique que si `_is_identity_query()`. |
 | 8 | **Mauvais mot-clé dans `_build_keyword_sql`** — verbes d'action ("retrouve", "donne") choisis à la place de noms concrets ("hotel", "facture") → SQL non pertinent, tableau affiché sous réponse vault | ✅ Corrigé V1.19.1 | `app/charlie.py` | Nouvelle fonction `_extract_keywords()` avec scoring sémantique : bonus +15 noms concrets, pénalité −15 verbes d'action. Dédoublonnage `_build_keyword_sql` + `_archive_task`. Masquage tableau quand réponse principale vient du vault (`hide_rows=True`). |
+| 9 | **Recherche numérique non fonctionnelle** — `is_safe_sql()` rejetait les SQL avec `replace(...)` (normalisation des numéros), le tri `received_at DESC` était lexicographique (pas chronologique), et le `OR` avec "téléphone" polluait les résultats | ✅ Corrigé V1.20.6 | `app/charlie.py` | `is_safe_sql` ignore `replace(` avant le check de mots dangereux. `ORDER BY id DESC` remplace `received_at DESC`. Si keyword numérique, le WHERE ne garde que ce numéro. |
+| 10 | **Doublons dans les probants** — un même email existait dans `mail_processed` et `boite2.sqlite` (sender anonymisé différemment) | ✅ Corrigé V1.20.8 | `app/charlie.py` | Déduplication par `(subject.lower(), received_at)` sans `sender`. |
+| 11 | **Faux négatif Cerveau2** — le LLM de synthèse disait "pas trouvé" alors que le numéro était dans le `context` retourné | ✅ Corrigé V1.20.8 | `app/charlie.py` | Détection : si `_bad_vault` match mais que le numéro recherché est dans `vault_answer` → considérer que l'info est là. Court-circuit de la réponse contradictoire. |
 
 ### Point de vigilance #1 — Provider litellm pour Ollama Cloud (CRITIQUE v1.19.1)
 `ollama_chat/gemma4:31b` force litellm vers `localhost:11434` (Ollama **local**). Le provider correct pour Ollama **Cloud** est `openai/gemma4:31b` avec `api_base=https://ollama.com/v1`.
@@ -362,6 +365,12 @@ Le client `query_vault()` est dégradation silencieuse. Si Cerveau2 est indispon
 
 ### Point de vigilance #5 — Entités Cerveau2 non indexées dans sqlite-vec
 Les fiches `04_entities/personnes/*.md` créées manuellement ne sont pas dans l'index sémantique. Le fallback direct `GET /notes/{path}` contourne ce problème, mais la **vraie solution** serait de réindexer le vault Cerveau2. Toutes les tentatives sur le VPS ont échoué (problèmes volume mount, extension sqlite3 vec0 manquante).
+
+### Point de vigilance #6 — Dense search Cerveau2 = implicit AND (CRITIQUE v1.20.10)
+Quand on envoie une phrase complète à Cerveau2 (`"retrouve le dossier avec téléphone 0488/411192"`), le dense retrieval calcule un vecteur moyen de TOUS les concepts. Les documents qui ne contiennent pas tous les mots ont un score faible. **Solution** : pour les recherches factuelles, n'envoyer que les identifiants précis (`"0488411192"`) — voir `docs/CERVEAU2_RECHERCHE_FACTUELLE.md`.
+
+### Point de vigilance #7 — Faux négatifs du LLM de synthèse Cerveau2
+Le LLM de synthèse Cerveau2 peut écrire "je ne trouve pas" alors que le document est dans le `context`. C'est un biais du modèle, pas un bug du retrieval. **Solution** : vérifier si le numéro/nom recherché est présent dans `vault_answer` (la chaîne brute retournée par Cerveau2) malgré les patterns négatifs — voir `_bad_vault` et la logique de faux négatif dans `app/charlie.py`.
 
 ---
 
@@ -436,4 +445,4 @@ Avant de modifier quoi que ce soit :
 
 ---
 
-*Document généré le 2026-05-30 pour la V1.19.1 de Detective.be Agent IA.*
+*Document généré le 2026-06-02 pour la V1.20.10 de Detective.be Agent IA.*
