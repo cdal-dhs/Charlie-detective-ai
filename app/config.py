@@ -38,12 +38,12 @@ class Settings(BaseSettings):
     mailbox_3_default_lang: str = "fr"
 
     ollama_pro_api_key: str = ""
-    ollama_pro_base_url: str = "https://ollama.com/api"
-    llm_model_default: str = "openai/kimi-k2"
+    ollama_pro_base_url: str = "https://ollama.com/v1"
+    llm_model_default: str = "openai/kimi-k2.6:cloud"
     openrouter_api_key: str = ""
-    llm_model_fallback: str = "openai/glm-5.1"
-    llm_model_classifier: str = "openai/kimi-k2"
-    llm_model_chat: str = "openai/kimi-k2"
+    llm_model_fallback: str = "openai/glm-5.1:cloud"
+    llm_model_classifier: str = "openai/kimi-k2.6:cloud"
+    llm_model_chat: str = "openai/kimi-k2.6:cloud"
 
     resend_api_key: str = ""
     resend_from: str = "agent@digitalhs.biz"
