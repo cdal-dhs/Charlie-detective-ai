@@ -105,6 +105,22 @@ def _clean_reasoning(text: str) -> str:
 
     # Réduire les lignes vides multiples
     result = re.sub(r"\n{3,}", "\n\n", result).strip()
+
+    # Dernière passe : tronquer après une signature si on détecte une auto-critique
+    # post-mail (le LLM se corrige après avoir écrit le mail).
+    # Patterns : "Version plus X :", "C'est mieux.", "C'est parfait.", "C'est bon.",
+    # "En fait, ...", "Je préfère...", "Attendez", "Je vais reformuler"
+    auto_critique = re.search(
+        r"\n\s*(Version\s+\w+|En\s+fait|Je\s+préfère|Je\s+vais\s+reformuler|"
+        r"C'est\s+(mieux|parfait|bon|direct|clair|plus\s+\w+)|"
+        r"Attendez|Refonte|Alternative\s*:|Ou\s+alors\s*:)",
+        result,
+        re.IGNORECASE,
+    )
+    if auto_critique and auto_critique.start() > 100:
+        # Couper juste avant la critique, garder la première version
+        result = result[: auto_critique.start()].rstrip()
+
     return result
 
 
