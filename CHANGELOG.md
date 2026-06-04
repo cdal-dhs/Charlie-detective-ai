@@ -1,5 +1,44 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.21.3] — 2026-06-04 (hotfix prod — poller IMAP cassé depuis ~26h)
+
+### Contexte
+Le poller IMAP crashe sur **chaque** mail de la boîte `detective_belgique` depuis le déploiement v1.21.2. **0 brouillon généré** depuis ~26h, 13 retries en boucle sur certains UIDs (9368, 9376, 5914). Daniel s'est plaint de l'absence de propositions de réponse. **3 bugs cumulés** identifiés et corrigés, plus un système d'alerte pour qu'on soit prévenu la prochaine fois.
+
+### Fixé
+- **Crash `LookupError` sur charset `unknown-8bit`** (38 occurrences en 200 logs) : `_decode_header` ne savait pas gérer les charsets exotiques (RFC 2047 incompliant). Patch : chaîne de fallback `charset → utf-8 → latin-1 → replace` + `try/except HeaderParseError` autour de `decode_header()`.
+- **Crash `sqlite3.ProgrammingError: type 'Header' is not supported`** (12 occurrences) : quand `subject`/`sender`/`received_at` sont des `email.header.Header` au lieu de `str`, sqlite refuse la sérialisation. Patch : coercion `str()` défensive à l'entrée de `_persist` (ceinture + bretelles) + à l'acquisition de `received_at` (`str(msg.get("Date", "") or "")`).
+- **Retry éternel structurel** : le flag `AgentProcessed` n'était posé qu'en cas de succès complet. Tout crash en cours pipeline → mail rejoué toutes les 5 min indéfiniment. Patch : nouveau flag `AgentAttempted` posé dans la branche `except` du try/except englobant → libère la queue IMAP, classe le mail comme "à inspecter manuellement" sans le rejouer en boucle. Le mail d'alerte explique comment retirer le flag via IMAP/Thunderbird pour forcer le rejeu.
+- **`_is_verified_demande_client`** : `str()` défensif autour de `msg.get("From")` et `msg.get("Subject")` (cohérence avec le reste du pipeline).
+
+### Ajouté
+- **Try/except englobant dans `_process_single_mail`** : enveloppe tout le corps du pipeline. En cas d'exception :
+  - `log.exception("poller.mail_crash", ...)` + télémétrie `poller_mail_crash` en DB (thread-safe via `asyncio.to_thread`)
+  - Incrément du compteur `consecutive_errors` dans `HealthState`
+  - **Alerte Resend à `cdal@digitalhs.biz`** si le compteur dépasse `poller_alert_threshold=5`
+  - Pose du flag `AgentAttempted` → libère la queue
+  - Retour `"error"` pour ne pas gonfler les `cycle_stats`
+- **Compteur d'erreurs consécutives par boîte** dans `app/healthcheck.py` : `mark_error(mailbox)`, `reset_errors(mailbox)`, `error_snapshot()`, exposé dans `health.snapshot()`.
+- **Alerte email poller persistant** dans `app/alerts.py` : `alert_poller_persistent_failure(mailbox_name, error_count, last_error, sample_uids)`. **Anti-spam 1h/boîte** (cooldown 3600s). Le mail contient : dernière erreur, échantillon d'UIDs, action requise (retirer le flag `AgentAttempted` via IMAP/Thunderbird).
+- **Helper `_maybe_alert_poller_failure`** : fire-and-forget via `asyncio.create_task()` (n'await pas l'envoi Resend pour ne pas figer le poller).
+- **Reset automatique** du compteur quand un cycle traite au moins 1 mail avec succès (pas de reset sur cycle vide, qui est suspect d'un autre bug en amont).
+- **Setting `poller_alert_threshold: int = 5`** dans `app/config.py` (ajustable code uniquement, pas env).
+- **Constante `AGENT_ATTEMPTED_FLAG = "AgentAttempted"`** dans `app/workers/imap_poller.py` (sans `$`, conforme Infomaniak).
+- **19 tests de résilience** dans `tests/test_imap_poller_resilience.py` :
+  - 4 tests `_decode_header` (charsets exotiques, fallback, garbage, vide)
+  - 3 tests `_persist` avec `Header` objects
+  - 3 tests `_process_single_mail` (try/except, télémétrie, pas d'`AgentAttempted` sur succès)
+  - 6 tests compteur d'erreurs + alerte (seuil, reset, anti-spam)
+  - 3 tests anti-spam 1h/boîte de l'alerte Resend
+
+### Changé
+- **`_process_single_mail`** : corps indenté d'un niveau pour wrapper dans le `try/except`. Le comportement nominal est strictement identique en cas de succès.
+
+### Note opérationnelle
+Le flag `AgentAttempted` a été posé sur les UIDs 9368/9376/5914 (et tous les autres en boucle de retry) au moment du deploy. Pour les rejouer après correction de la cause racine : retirer le flag manuellement via IMAP/Thunderbird (clic droit sur le mail → Flags → "AgentAttempted"). Procédure documentée dans le mail d'alerte.
+
+---
+
 ## [1.21.2] — 2026-06-03 (hotfix — nettoyage traces de raisonnement kimi-k2.6)
 
 ### Fixé

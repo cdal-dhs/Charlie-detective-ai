@@ -6,6 +6,7 @@ import re
 import sqlite3
 from datetime import datetime
 from email import header, message_from_bytes
+from email.errors import HeaderParseError
 from email.message import Message
 from email.utils import parseaddr, parsedate_to_datetime
 from pathlib import Path
@@ -30,12 +31,12 @@ from app.pipeline.priority import assign_priority
 
 # Signaux de coordonnées contact dans un body (tél belge, code postal, adresse)
 _CONTACT_SIGNALS_RE = re.compile(
-    r'(?:'
-    r'0\d[\d\s/\.\-]{6,12}|'               # mobile belge 04xx/...
-    r'\+32[\s\d]{8,15}|'                   # +32 ...
-    r'\b\d{4}\s+[A-ZÀ-Ÿa-z][a-zà-ÿ]|'    # code postal + ville
-    r'(?:Rue|Avenue|Boulevard|Chaussée|Place|Drève|Chemin|Av\.)\s'
-    r')',
+    r"(?:"
+    r"0\d[\d\s/\.\-]{6,12}|"  # mobile belge 04xx/...
+    r"\+32[\s\d]{8,15}|"  # +32 ...
+    r"\b\d{4}\s+[A-ZÀ-Ÿa-z][a-zà-ÿ]|"  # code postal + ville
+    r"(?:Rue|Avenue|Boulevard|Chaussée|Place|Drève|Chemin|Av\.)\s"
+    r")",
     re.IGNORECASE,
 )
 
@@ -49,6 +50,9 @@ _MARQUE_CERVEAU2 = {
 log = structlog.get_logger()
 
 AGENT_FLAG = "AgentProcessed"
+# v1.21.3 : flag posé après crash d'un mail pour libérer la queue IMAP
+# (le mail ne sera pas rejoué indéfiniment, et il n'est pas non plus classé comme traité).
+AGENT_ATTEMPTED_FLAG = "AgentAttempted"
 IMAP_RETRY_ATTEMPTS = 3
 
 # Emails système auto-générés à ignorer (ne pas insérer en DB)
@@ -56,24 +60,61 @@ _SYSTEM_SENDERS = ("noreply@resend.digitalhs.biz",)
 
 # Expéditeurs qui ne peuvent JAMAIS être un vrai client
 _SERVICE_SENDERS = (
-    "infomaniak", "ovh", "stripe", "paypal", "amazon", "microsoft",
-    "google", "apple", "meta", "facebook", "linkedin", "twitter", "x.com",
-    "github", "gitlab", "sendgrid", "mailgun", "brevo", "mailchimp",
-    "hubspot", "zendesk", "intercom", "freshdesk",
+    "infomaniak",
+    "ovh",
+    "stripe",
+    "paypal",
+    "amazon",
+    "microsoft",
+    "google",
+    "apple",
+    "meta",
+    "facebook",
+    "linkedin",
+    "twitter",
+    "x.com",
+    "github",
+    "gitlab",
+    "sendgrid",
+    "mailgun",
+    "brevo",
+    "mailchimp",
+    "hubspot",
+    "zendesk",
+    "intercom",
+    "freshdesk",
 )
 
 
 def _decode_header(value: str) -> str:
-    """Décode un header MIME RFC 2047 (ex: =?UTF-8?Q?...?=)."""
+    """Décode un header MIME RFC 2047 (ex: =?UTF-8?Q?...?=).
+
+    v1.21.3 : chaîne de fallback charset → utf-8 → latin-1 → replace pour absorber
+    les clients mail exotiques qui émettent 'unknown-8bit' (cause du bug prod).
+    """
     if not value:
         return ""
-    decoded_parts = header.decode_header(value)
+    try:
+        decoded_parts = header.decode_header(value)
+    except (HeaderParseError, ValueError):
+        return str(value)
     result = []
     for part, charset in decoded_parts:
         if isinstance(part, bytes):
-            result.append(part.decode(charset or "utf-8", errors="replace"))
+            decoded = False
+            for enc in (charset, "utf-8", "latin-1"):
+                if not enc:
+                    continue
+                try:
+                    result.append(part.decode(enc, errors="strict"))
+                    decoded = True
+                    break
+                except (LookupError, UnicodeDecodeError):
+                    continue
+            if not decoded:
+                result.append(part.decode("utf-8", errors="replace"))
         else:
-            result.append(part)
+            result.append(str(part))
     return "".join(result)
 
 
@@ -179,11 +220,16 @@ def _is_system_email(sender: str) -> bool:
     return any(s in sender_norm for s in _SYSTEM_SENDERS)
 
 
-def _normalize_contact_key(email: str | None, tel: str | None, nom: str, dossier_id: str | None) -> str:
+def _normalize_contact_key(
+    email: str | None, tel: str | None, nom: str, dossier_id: str | None
+) -> str:
     """Clé de dédup stable : email > tel > nom+dossier."""
     import unicodedata
+
     def strip_accents(s: str) -> str:
-        return "".join(c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn")
+        return "".join(
+            c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn"
+        )
 
     if email:
         return f"contact-{hashlib.md5(email.lower().strip().encode(), usedforsecurity=False).hexdigest()[:12]}"
@@ -389,9 +435,10 @@ async def _extract_and_feed_contact(
         return
 
     import json
+
     data: dict = {}
     try:
-        json_match = re.search(r'\{[^{}]*\}', raw or "", re.DOTALL)
+        json_match = re.search(r"\{[^{}]*\}", raw or "", re.DOTALL)
         if json_match:
             data = json.loads(json_match.group())
     except (json.JSONDecodeError, AttributeError):
@@ -403,7 +450,9 @@ async def _extract_and_feed_contact(
     nom = data.get("nom") or ""
     prenom = data.get("prenom") or ""
     nom_complet = " ".join(filter(None, [prenom, nom])) or sender
-    doc_id = _normalize_contact_key(data.get("email"), data.get("telephone"), nom_complet, dossier_id)
+    doc_id = _normalize_contact_key(
+        data.get("email"), data.get("telephone"), nom_complet, dossier_id
+    )
 
     lines = [
         f"# Fiche contact — {nom_complet}",
@@ -418,7 +467,9 @@ async def _extract_and_feed_contact(
     if data.get("adresse"):
         lines.append(f"- **Adresse** : {data['adresse']}")
     if data.get("code_postal") or data.get("ville"):
-        lines.append(f"- **Localité** : {data.get('code_postal', '')} {data.get('ville', '')}".strip())
+        lines.append(
+            f"- **Localité** : {data.get('code_postal', '')} {data.get('ville', '')}".strip()
+        )
     if data.get("telephone"):
         lines.append(f"- **Téléphone** : {data['telephone']}")
     if data.get("email"):
@@ -474,7 +525,17 @@ def _persist(
     priority: str = "normal",
     status: str = "pending",
 ) -> int:
-    """Persiste le mail. En cas de conflit, ne JAMAIS écraser category/priority/status cockpit."""
+    """Persiste le mail. En cas de conflit, ne JAMAIS écraser category/priority/status cockpit.
+
+    v1.21.3 : coercion str() défensive sur subject/sender/received_at
+    (sqlite3 ne sait pas binder email.header.Header → crash prod observé sur uid 5914).
+    """
+    subject = str(subject) if subject is not None else ""
+    sender = str(sender) if sender is not None else ""
+    received_at = str(received_at) if received_at is not None else ""
+    body_preview = str(body_preview) if body_preview is not None else ""
+    body = str(body) if body is not None else ""
+    ai_draft = str(ai_draft) if ai_draft is not None else ""
     conn = sqlite3.connect(db_path)
     try:
         # Vérifier existence
@@ -509,8 +570,20 @@ def _persist(
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id
             """,
-            (imap_uid, mailbox_name, subject, sender, received_at, category, draft_generated,
-             body_preview, body, ai_draft, status, priority),
+            (
+                imap_uid,
+                mailbox_name,
+                subject,
+                sender,
+                received_at,
+                category,
+                draft_generated,
+                body_preview,
+                body,
+                ai_draft,
+                status,
+                priority,
+            ),
         )
         row = cursor.fetchone()
         conn.commit()
@@ -545,7 +618,7 @@ async def _poll_once(mailbox: MailboxConfig) -> None:
             if attempt == IMAP_RETRY_ATTEMPTS:
                 log.error("poller.gave_up", mailbox=mailbox.name, error=str(e))
                 return
-            backoff = 2 ** attempt
+            backoff = 2**attempt
             log.warning(
                 "poller.retry",
                 mailbox=mailbox.name,
@@ -667,8 +740,8 @@ def _is_verified_demande_client(category: str, msg: Message) -> bool:
     if category != "demande_client":
         return False
 
-    sender = (msg.get("From", "") or "").lower()
-    subject = (msg.get("Subject", "") or "").lower()
+    sender = str(msg.get("From", "") or "").lower()
+    subject = str(msg.get("Subject", "") or "").lower()
 
     # Expéditeur de service connu
     if any(s in sender for s in _SERVICE_SENDERS):
@@ -678,9 +751,19 @@ def _is_verified_demande_client(category: str, msg: Message) -> bool:
         return False
     # Sujets typiques d'emails automatiques
     auto_keywords = (
-        "renouvellement", "renewal", "confirmation", "reçu", "receipt",
-        "facture", "invoice", "votre abonnement", "your subscription",
-        "payment received", "paiement reçu", "alerte", "notification",
+        "renouvellement",
+        "renewal",
+        "confirmation",
+        "reçu",
+        "receipt",
+        "facture",
+        "invoice",
+        "votre abonnement",
+        "your subscription",
+        "payment received",
+        "paiement reçu",
+        "alerte",
+        "notification",
     )
     return not any(kw in subject for kw in auto_keywords)
 
@@ -755,6 +838,8 @@ async def _process_mailbox(mailbox: MailboxConfig) -> None:
                 breakdown=cycle_stats,
             )
             details = f"processed={sum(cycle_stats.values())} breakdown={cycle_stats}"
+            # v1.21.3 : reset compteur d'erreurs consécutives si ≥ 1 mail OK
+            health.reset_errors(mailbox.name)
         else:
             log.info("poller.cycle_empty", mailbox=mailbox.name)
             details = "processed=0"
@@ -775,6 +860,31 @@ async def _process_mailbox(mailbox: MailboxConfig) -> None:
         raise
 
 
+async def _maybe_alert_poller_failure(
+    mailbox: MailboxConfig,
+    consecutive_errors: int,
+    last_error: str,
+    sample_uids: list[str],
+) -> None:
+    """Déclenche l'alerte poller (Resend) quand le seuil est franchi. Fire-and-forget.
+
+    v1.21.3 : asyncio.create_task() ne fige pas la hot path du poller.
+    """
+    settings = get_settings()
+    if consecutive_errors < settings.poller_alert_threshold:
+        return
+    from app.alerts import alert_poller_persistent_failure
+
+    asyncio.create_task(
+        alert_poller_persistent_failure(
+            mailbox_name=mailbox.name,
+            error_count=consecutive_errors,
+            last_error=last_error,
+            sample_uids=sample_uids[:5],
+        )
+    )
+
+
 async def _process_single_mail(
     client: aioimaplib.IMAP4,
     uid: str,
@@ -782,385 +892,449 @@ async def _process_single_mail(
 ) -> str:
     settings = get_settings()
     language = mailbox.default_lang
-    fetch_resp = await client.fetch(uid, "RFC822")
-    if fetch_resp.result != "OK":
-        raise RuntimeError(f"FETCH {uid} failed: {fetch_resp}")
+    try:
+        fetch_resp = await client.fetch(uid, "RFC822")
+        if fetch_resp.result != "OK":
+            raise RuntimeError(f"FETCH {uid} failed: {fetch_resp}")
 
-    if len(fetch_resp.lines) < 2:
-        raise RuntimeError(f"FETCH {uid} returned empty body")
+        if len(fetch_resp.lines) < 2:
+            raise RuntimeError(f"FETCH {uid} returned empty body")
 
-    rfc822_bytes = fetch_resp.lines[1]
-    msg = message_from_bytes(rfc822_bytes)
+        rfc822_bytes = fetch_resp.lines[1]
+        msg = message_from_bytes(rfc822_bytes)
 
-    sender_raw = msg.get("From", "")
-    subject_raw = msg.get("Subject", "")
-    sender = _decode_header(parseaddr(sender_raw)[1] or sender_raw)
-    subject = _decode_header(subject_raw)
-    received_at = msg.get("Date", "")
+        sender_raw = msg.get("From", "")
+        subject_raw = msg.get("Subject", "")
+        sender = _decode_header(parseaddr(sender_raw)[1] or sender_raw)
+        subject = _decode_header(subject_raw)
+        received_at = str(msg.get("Date", "") or "")
 
-    # Filtre date critique : ne traiter que les mails depuis le 20 mai 2026.
-    # Les mails plus vieux sont flaggés comme traités pour nettoyer le backlog.
-    if received_at:
-        try:
-            dt = parsedate_to_datetime(received_at)
-            if dt.date() < datetime(2026, 5, 20).date():
-                if not settings.dry_run:
-                    store_resp = await client.store(uid, "+FLAGS", f"({AGENT_FLAG})")
-                    if store_resp.result != "OK":
-                        log.warning("poller.flag_failed", mailbox=mailbox.name, uid=uid, response=store_resp)
-                log.info("poller.date_skipped", mailbox=mailbox.name, uid=uid, date=received_at[:10], reason="before_2026-05-20")
-                return "skipped"
-        except Exception:
-            pass  # Si parsing échoue, on traite quand même
+        # Filtre date critique : ne traiter que les mails depuis le 20 mai 2026.
+        # Les mails plus vieux sont flaggés comme traités pour nettoyer le backlog.
+        if received_at:
+            try:
+                dt = parsedate_to_datetime(received_at)
+                if dt.date() < datetime(2026, 5, 20).date():
+                    if not settings.dry_run:
+                        store_resp = await client.store(uid, "+FLAGS", f"({AGENT_FLAG})")
+                        if store_resp.result != "OK":
+                            log.warning(
+                                "poller.flag_failed",
+                                mailbox=mailbox.name,
+                                uid=uid,
+                                response=store_resp,
+                            )
+                    log.info(
+                        "poller.date_skipped",
+                        mailbox=mailbox.name,
+                        uid=uid,
+                        date=received_at[:10],
+                        reason="before_2026-05-20",
+                    )
+                    return "skipped"
+            except Exception:
+                pass  # Si parsing échoue, on traite quand même
 
-    message_id = msg.get("Message-ID", "")
-    body = _get_body_text(msg)
+        message_id = msg.get("Message-ID", "")
+        body = _get_body_text(msg)
 
-    # Skip système : emails auto-générés (magic links Resend, etc.)
-    if _is_system_email(sender):
-        log.info(
-            "poller.system_email_skipped",
-            mailbox=mailbox.name,
-            uid=uid,
-            sender=sender,
-            subject=subject,
-        )
-        if not settings.dry_run:
-            store_resp = await client.store(uid, "+FLAGS", f"({AGENT_FLAG})")
-            if store_resp.result != "OK":
-                log.warning("poller.flag_failed", mailbox=mailbox.name, uid=uid, response=store_resp)
-        return "skipped"
-
-    log.info(
-        "poller.new_mail",
-        mailbox=mailbox.name,
-        uid=uid,
-        sender=sender,
-        subject=subject,
-        message_id=message_id,
-    )
-
-    prefilter_category = quick_classify(msg)
-    if prefilter_category:
-        # Garde anti-faux-positif phishing : si l'expéditeur est déjà connu
-        # (présent dans mail_processed), ne pas forcer phishing via prefilter.
-        # On laisse le LLM classifier décider à la place.
-        if prefilter_category == "phishing" and await asyncio.to_thread(
-            _is_known_sender, settings.db_agent_state, sender
-        ):
-            category = await classify(subject, body, sender)
+        # Skip système : emails auto-générés (magic links Resend, etc.)
+        if _is_system_email(sender):
             log.info(
-                "poller.prefilter_phishing_guard",
+                "poller.system_email_skipped",
                 mailbox=mailbox.name,
                 uid=uid,
                 sender=sender,
-                llm_category=category,
+                subject=subject,
             )
-        else:
-            category = prefilter_category
-            log.info("poller.prefilter", mailbox=mailbox.name, uid=uid, category=category)
-    else:
-        category = await classify(subject, body, sender)
-        log.info("poller.classified", mailbox=mailbox.name, uid=uid, category=category)
+            if not settings.dry_run:
+                store_resp = await client.store(uid, "+FLAGS", f"({AGENT_FLAG})")
+                if store_resp.result != "OK":
+                    log.warning(
+                        "poller.flag_failed", mailbox=mailbox.name, uid=uid, response=store_resp
+                    )
+            return "skipped"
 
-    priority = assign_priority(category, subject, body, sender)
-    # Garde-fous inconditionnels
-    if category == "demande_client":
-        priority = "high"          # business vital
-    elif category == "phishing":
-        priority = "high"          # menace sécurité
-    elif category == "autre":
-        priority = "low"           # rien à traiter
-    # Newsletter / calendrier : auto-approved + low priority (rien à traiter)
-    status = "pending"
-    text_lower = f"{subject} {body}".lower()
-    if category == "newsletter":
-        status = "approved"
-        priority = "low"
-    elif category == "spam":
-        status = "approved"
-        priority = "low"
-    elif category == "autre" and any(kw in text_lower for kw in (
-        "invitation", "calendar", "ical", "vcalendar", "event",
-        "meeting request", "updated invitation", "invitation updated",
-        "accepté", "refusé", "tentative", "provisoire",
-    )):
-        status = "approved"
-        priority = "low"
-    log.info("poller.priority", mailbox=mailbox.name, uid=uid, category=category, priority=priority)
-
-    is_new = not await asyncio.to_thread(
-        _mail_exists, settings.db_agent_state, uid, mailbox.name
-    )
-
-    body_preview = body[:2000] if body else ""
-    draft_generated = 0
-    verified_draft = False
-    gen = None
-    if category == "demande_client" and is_new:
-        language = detect_language(body, default=mailbox.default_lang)
-        gen = await generate_draft(subject, body, sender, mailbox, language, category)
-        draft_generated = 1
-        verified_draft = _is_verified_demande_client(category, msg)
-
-    ai_draft_text = ""
-    if category == "demande_client" and draft_generated:
-        ai_draft_text = gen.draft
-
-    mail_id = await asyncio.to_thread(
-        _persist,
-        settings.db_agent_state,
-        uid,
-        mailbox.name,
-        subject,
-        sender,
-        received_at,
-        category,
-        draft_generated,
-        body_preview,
-        body,
-        ai_draft_text,
-        priority,
-        status,
-    )
-
-    # --- Sauvegarde locale des pièces jointes (tous les emails) ---
-    attachments = _extract_attachments(msg)
-    if attachments:
-        await asyncio.to_thread(
-            _save_attachments,
-            settings.db_agent_state,
-            mail_id,
-            attachments,
-            settings.data_dir,
-        )
         log.info(
-            "poller.attachments_saved",
+            "poller.new_mail",
             mailbox=mailbox.name,
             uid=uid,
-            count=len(attachments),
-            mail_id=mail_id,
-        )
-
-    # --- Alimentation Cerveau2 (tout sauf newsletter / phishing) ---
-    if category not in ("newsletter", "phishing") and not settings.dry_run:
-        dossier_id = derive_dossier_id(
             sender=sender,
             subject=subject,
-            marque=mailbox.name,
+            message_id=message_id,
         )
-        date_str = ""
-        heure_str = ""
-        try:
-            dt = parsedate_to_datetime(received_at)
-            date_str = dt.strftime("%Y-%m-%d")
-            heure_str = dt.strftime("%H:%M")
-        except Exception:
-            date_str = received_at[:10] if received_at else ""
-            heure_str = ""
 
-        _marque = _MARQUE_CERVEAU2.get(mailbox.name, mailbox.name)
+        prefilter_category = quick_classify(msg)
+        if prefilter_category:
+            # Garde anti-faux-positif phishing : si l'expéditeur est déjà connu
+            # (présent dans mail_processed), ne pas forcer phishing via prefilter.
+            # On laisse le LLM classifier décider à la place.
+            if prefilter_category == "phishing" and await asyncio.to_thread(
+                _is_known_sender, settings.db_agent_state, sender
+            ):
+                category = await classify(subject, body, sender)
+                log.info(
+                    "poller.prefilter_phishing_guard",
+                    mailbox=mailbox.name,
+                    uid=uid,
+                    sender=sender,
+                    llm_category=category,
+                )
+            else:
+                category = prefilter_category
+                log.info("poller.prefilter", mailbox=mailbox.name, uid=uid, category=category)
+        else:
+            category = await classify(subject, body, sender)
+            log.info("poller.classified", mailbox=mailbox.name, uid=uid, category=category)
 
-        _task = asyncio.create_task(  # noqa: RUF006
-            feed_correspondance(
-                message_id=message_id or f"{mailbox.name}_{uid}",
-                direction="in",
-                date=date_str,
-                heure=heure_str,
-                expediteur=sender,
-                destinataire=mailbox.user,
-                objet=subject,
-                body=body,
-                marque=_marque,
-                dossier_id=dossier_id,
-                categorie=category,
-                zone="jaune",
-                langue=language,
-                priorite=priority,
-                base_url=settings.cerveau2_base_url,
-                api_secret=settings.cerveau2_api_secret,
+        priority = assign_priority(category, subject, body, sender)
+        # Garde-fous inconditionnels
+        if category == "demande_client":
+            priority = "high"  # business vital
+        elif category == "phishing":
+            priority = "high"  # menace sécurité
+        elif category == "autre":
+            priority = "low"  # rien à traiter
+        # Newsletter / calendrier : auto-approved + low priority (rien à traiter)
+        status = "pending"
+        text_lower = f"{subject} {body}".lower()
+        if category == "newsletter":
+            status = "approved"
+            priority = "low"
+        elif category == "spam":
+            status = "approved"
+            priority = "low"
+        elif category == "autre" and any(
+            kw in text_lower
+            for kw in (
+                "invitation",
+                "calendar",
+                "ical",
+                "vcalendar",
+                "event",
+                "meeting request",
+                "updated invitation",
+                "invitation updated",
+                "accepté",
+                "refusé",
+                "tentative",
+                "provisoire",
             )
+        ):
+            status = "approved"
+            priority = "low"
+        log.info(
+            "poller.priority", mailbox=mailbox.name, uid=uid, category=category, priority=priority
         )
 
-        # --- Extraction fiche entreprise depuis le body (regex, pas de LLM) ---
-        asyncio.create_task(  # noqa: RUF006
-            _extract_and_feed_entreprise(
-                text=body,
-                subject=subject,
-                dossier_id=dossier_id,
-                marque=_marque,
-                date_str=date_str,
-                base_url=settings.cerveau2_base_url,
-                api_secret=settings.cerveau2_api_secret,
-                source_label="email",
+        is_new = not await asyncio.to_thread(
+            _mail_exists, settings.db_agent_state, uid, mailbox.name
+        )
+
+        body_preview = body[:2000] if body else ""
+        draft_generated = 0
+        verified_draft = False
+        gen = None
+        if category == "demande_client" and is_new:
+            language = detect_language(body, default=mailbox.default_lang)
+            gen = await generate_draft(subject, body, sender, mailbox, language, category)
+            draft_generated = 1
+            verified_draft = _is_verified_demande_client(category, msg)
+
+        ai_draft_text = ""
+        if category == "demande_client" and draft_generated:
+            ai_draft_text = gen.draft
+
+        mail_id = await asyncio.to_thread(
+            _persist,
+            settings.db_agent_state,
+            uid,
+            mailbox.name,
+            subject,
+            sender,
+            received_at,
+            category,
+            draft_generated,
+            body_preview,
+            body,
+            ai_draft_text,
+            priority,
+            status,
+        )
+
+        # --- Sauvegarde locale des pièces jointes (tous les emails) ---
+        attachments = _extract_attachments(msg)
+        if attachments:
+            await asyncio.to_thread(
+                _save_attachments,
+                settings.db_agent_state,
+                mail_id,
+                attachments,
+                settings.data_dir,
             )
-        )
+            log.info(
+                "poller.attachments_saved",
+                mailbox=mailbox.name,
+                uid=uid,
+                count=len(attachments),
+                mail_id=mail_id,
+            )
 
-        # --- Extraction fiche contact depuis le body (tous sauf newsletter/phishing) ---
-        asyncio.create_task(  # noqa: RUF006
-            _extract_and_feed_contact(
-                text=body,
-                subject=subject,
+        # --- Alimentation Cerveau2 (tout sauf newsletter / phishing) ---
+        if category not in ("newsletter", "phishing") and not settings.dry_run:
+            dossier_id = derive_dossier_id(
                 sender=sender,
-                dossier_id=dossier_id,
-                marque=_marque,
-                date_str=date_str,
-                base_url=settings.cerveau2_base_url,
-                api_secret=settings.cerveau2_api_secret,
-                source_label="email",
+                subject=subject,
+                marque=mailbox.name,
             )
-        )
+            date_str = ""
+            heure_str = ""
+            try:
+                dt = parsedate_to_datetime(received_at)
+                date_str = dt.strftime("%Y-%m-%d")
+                heure_str = dt.strftime("%H:%M")
+            except Exception:
+                date_str = received_at[:10] if received_at else ""
+                heure_str = ""
 
-        # --- Pièces jointes -> Cerveau2 (skip newsletter / phishing : bruit) ---
-        if category not in ("newsletter", "phishing"):
-            for att_filename, att_data in attachments:
-                att_text = extract_text_bytes(att_data, att_filename)
-                att_extractable = bool(att_text and att_text.strip())
-                if not att_extractable:
-                    # Fallback : même non extractable, on ingère avec métadonnées pour référence
-                    att_text = (
-                        f"[Pièce jointe non extractable automatiquement]\n"
-                        f"Fichier : {att_filename}\n"
-                        f"Taille : {len(att_data)} octets\n"
-                        f"Type : {Path(att_filename).suffix.lower() or 'inconnu'}"
+            _marque = _MARQUE_CERVEAU2.get(mailbox.name, mailbox.name)
+
+            _task = asyncio.create_task(  # noqa: RUF006
+                feed_correspondance(
+                    message_id=message_id or f"{mailbox.name}_{uid}",
+                    direction="in",
+                    date=date_str,
+                    heure=heure_str,
+                    expediteur=sender,
+                    destinataire=mailbox.user,
+                    objet=subject,
+                    body=body,
+                    marque=_marque,
+                    dossier_id=dossier_id,
+                    categorie=category,
+                    zone="jaune",
+                    langue=language,
+                    priorite=priority,
+                    base_url=settings.cerveau2_base_url,
+                    api_secret=settings.cerveau2_api_secret,
+                )
+            )
+
+            # --- Extraction fiche entreprise depuis le body (regex, pas de LLM) ---
+            asyncio.create_task(  # noqa: RUF006
+                _extract_and_feed_entreprise(
+                    text=body,
+                    subject=subject,
+                    dossier_id=dossier_id,
+                    marque=_marque,
+                    date_str=date_str,
+                    base_url=settings.cerveau2_base_url,
+                    api_secret=settings.cerveau2_api_secret,
+                    source_label="email",
+                )
+            )
+
+            # --- Extraction fiche contact depuis le body (tous sauf newsletter/phishing) ---
+            asyncio.create_task(  # noqa: RUF006
+                _extract_and_feed_contact(
+                    text=body,
+                    subject=subject,
+                    sender=sender,
+                    dossier_id=dossier_id,
+                    marque=_marque,
+                    date_str=date_str,
+                    base_url=settings.cerveau2_base_url,
+                    api_secret=settings.cerveau2_api_secret,
+                    source_label="email",
+                )
+            )
+
+            # --- Pièces jointes -> Cerveau2 (skip newsletter / phishing : bruit) ---
+            if category not in ("newsletter", "phishing"):
+                for att_filename, att_data in attachments:
+                    att_text = extract_text_bytes(att_data, att_filename)
+                    att_extractable = bool(att_text and att_text.strip())
+                    if not att_extractable:
+                        # Fallback : même non extractable, on ingère avec métadonnées pour référence
+                        att_text = (
+                            f"[Pièce jointe non extractable automatiquement]\n"
+                            f"Fichier : {att_filename}\n"
+                            f"Taille : {len(att_data)} octets\n"
+                            f"Type : {Path(att_filename).suffix.lower() or 'inconnu'}"
+                        )
+                        log.info(
+                            "poller.attachment_unextractable",
+                            mailbox=mailbox.name,
+                            uid=uid,
+                            filename=att_filename,
+                            dossier_id=dossier_id,
+                            size=len(att_data),
+                        )
+
+                    # Hash déterministe (MD5) pour doc_id stable entre les redémarrages
+                    att_hash = hashlib.md5(
+                        f"{mail_id}:{att_filename}".encode(), usedforsecurity=False
+                    ).hexdigest()[:12]
+                    att_id = f"att-{mail_id}-{att_hash}"
+
+                    asyncio.create_task(  # noqa: RUF006
+                        feed_document(
+                            doc_id=att_id,
+                            type="document",
+                            dossier_id=dossier_id,
+                            marque=_marque,
+                            date=date_str,
+                            titre=f"[PJ] {att_filename}",
+                            body=att_text,
+                            metadata={
+                                "source": "piece_jointe_email",
+                                "parent_message_id": message_id or f"{mailbox.name}_{uid}",
+                                "filename": att_filename,
+                                "size_bytes": len(att_data),
+                            },
+                            zone="jaune",
+                            langue=language,
+                            base_url=settings.cerveau2_base_url,
+                            api_secret=settings.cerveau2_api_secret,
+                        )
                     )
                     log.info(
-                        "poller.attachment_unextractable",
+                        "poller.attachment_ingested",
                         mailbox=mailbox.name,
                         uid=uid,
                         filename=att_filename,
                         dossier_id=dossier_id,
                         size=len(att_data),
-                    )
-
-                # Hash déterministe (MD5) pour doc_id stable entre les redémarrages
-                att_hash = hashlib.md5(
-                    f"{mail_id}:{att_filename}".encode(), usedforsecurity=False
-                ).hexdigest()[:12]
-                att_id = f"att-{mail_id}-{att_hash}"
-
-                asyncio.create_task(  # noqa: RUF006
-                    feed_document(
                         doc_id=att_id,
-                        type="document",
-                        dossier_id=dossier_id,
-                        marque=_marque,
-                        date=date_str,
-                        titre=f"[PJ] {att_filename}",
-                        body=att_text,
-                        metadata={
-                            "source": "piece_jointe_email",
-                            "parent_message_id": message_id or f"{mailbox.name}_{uid}",
-                            "filename": att_filename,
-                            "size_bytes": len(att_data),
-                        },
-                        zone="jaune",
-                        langue=language,
-                        base_url=settings.cerveau2_base_url,
-                        api_secret=settings.cerveau2_api_secret,
                     )
+
+                    # --- Extraction fiche entreprise depuis la pièce jointe ---
+                    if att_extractable:
+                        asyncio.create_task(  # noqa: RUF006
+                            _extract_and_feed_entreprise(
+                                text=att_text,
+                                subject=att_filename,
+                                dossier_id=dossier_id,
+                                marque=_marque,
+                                date_str=date_str,
+                                base_url=settings.cerveau2_base_url,
+                                api_secret=settings.cerveau2_api_secret,
+                                source_label=f"pièce jointe [{att_filename}]",
+                            )
+                        )
+
+                    # --- Extraction fiche contact depuis la pièce jointe (si texte extractable) ---
+                    if att_extractable:
+                        asyncio.create_task(  # noqa: RUF006
+                            _extract_and_feed_contact(
+                                text=att_text,
+                                subject=att_filename,
+                                sender=sender,
+                                dossier_id=dossier_id,
+                                marque=_marque,
+                                date_str=date_str,
+                                base_url=settings.cerveau2_base_url,
+                                api_secret=settings.cerveau2_api_secret,
+                                source_label=f"pièce jointe [{att_filename}]",
+                            )
+                        )
+
+        if category == "demande_client" and is_new and not settings.dry_run:
+            incoming = IncomingMail(
+                sender=sender,
+                subject=subject,
+                body=body,
+                received_at=received_at,
+                message_id=message_id,
+            )
+            draft_ok = await append_draft(
+                incoming, mailbox, gen, mail_id=mail_id, imap_client=client
+            )
+            _log_telemetry(
+                db_path=settings.db_agent_state,
+                event_type="draft_deposited" if draft_ok else "draft_failed",
+                mailbox_name=mailbox.name,
+                details=f"mail_id={mail_id} sender={sender} subject={subject[:60]}",
+            )
+            if not draft_ok:
+                await notify_draft(incoming, mailbox, gen, mail_id=mail_id)
+                await alert_imap_draft_failure(
+                    mailbox_name=mailbox.name,
+                    mail_id=mail_id,
+                    sender=sender,
+                    subject=subject,
+                    error_hint="Connexion IMAP secondaire rejetée (probable) ou LIST/APPEND échoué",
                 )
+            if verified_draft:
+                await notify_slack_draft(
+                    draft_id=mail_id,
+                    sender=sender,
+                    subject=subject,
+                    category=category,
+                    body_preview=body_preview,
+                    base_url=settings.public_base_url.rstrip("/")
+                    if settings.public_base_url
+                    else "",
+                )
+            else:
                 log.info(
-                    "poller.attachment_ingested",
+                    "slack.notify_skipped",
                     mailbox=mailbox.name,
                     uid=uid,
-                    filename=att_filename,
-                    dossier_id=dossier_id,
-                    size=len(att_data),
-                    doc_id=att_id,
+                    reason="unverified_automatic_email",
+                    sender=sender,
+                    subject=subject,
                 )
-
-                # --- Extraction fiche entreprise depuis la pièce jointe ---
-                if att_extractable:
-                    asyncio.create_task(  # noqa: RUF006
-                        _extract_and_feed_entreprise(
-                            text=att_text,
-                            subject=att_filename,
-                            dossier_id=dossier_id,
-                            marque=_marque,
-                            date_str=date_str,
-                            base_url=settings.cerveau2_base_url,
-                            api_secret=settings.cerveau2_api_secret,
-                            source_label=f"pièce jointe [{att_filename}]",
-                        )
-                    )
-
-                # --- Extraction fiche contact depuis la pièce jointe (si texte extractable) ---
-                if att_extractable:
-                    asyncio.create_task(  # noqa: RUF006
-                        _extract_and_feed_contact(
-                            text=att_text,
-                            subject=att_filename,
-                            sender=sender,
-                            dossier_id=dossier_id,
-                            marque=_marque,
-                            date_str=date_str,
-                            base_url=settings.cerveau2_base_url,
-                            api_secret=settings.cerveau2_api_secret,
-                            source_label=f"pièce jointe [{att_filename}]",
-                        )
-                    )
-
-    if category == "demande_client" and is_new and not settings.dry_run:
-        incoming = IncomingMail(
-            sender=sender,
-            subject=subject,
-            body=body,
-            received_at=received_at,
-            message_id=message_id,
-        )
-        draft_ok = await append_draft(
-            incoming, mailbox, gen, mail_id=mail_id, imap_client=client
-        )
-        _log_telemetry(
-            db_path=settings.db_agent_state,
-            event_type="draft_deposited" if draft_ok else "draft_failed",
-            mailbox_name=mailbox.name,
-            details=f"mail_id={mail_id} sender={sender} subject={subject[:60]}",
-        )
-        if not draft_ok:
-            await notify_draft(incoming, mailbox, gen, mail_id=mail_id)
-            await alert_imap_draft_failure(
-                mailbox_name=mailbox.name,
-                mail_id=mail_id,
-                sender=sender,
-                subject=subject,
-                error_hint="Connexion IMAP secondaire rejetée (probable) ou LIST/APPEND échoué",
-            )
-        if verified_draft:
-            await notify_slack_draft(
-                draft_id=mail_id,
-                sender=sender,
-                subject=subject,
-                category=category,
-                body_preview=body_preview,
-                base_url=settings.public_base_url.rstrip("/")
-                if settings.public_base_url
-                else "",
-            )
-        else:
+        elif category == "demande_client" and is_new and settings.dry_run:
             log.info(
-                "slack.notify_skipped",
+                "dry_run.skip_draft",
                 mailbox=mailbox.name,
                 uid=uid,
-                reason="unverified_automatic_email",
-                sender=sender,
-                subject=subject,
+                recipient=settings.draft_recipient,
+                verified=verified_draft,
             )
-    elif category == "demande_client" and is_new and settings.dry_run:
-        log.info(
-            "dry_run.skip_draft",
-            mailbox=mailbox.name,
-            uid=uid,
-            recipient=settings.draft_recipient,
-            verified=verified_draft,
-        )
 
-    if not settings.dry_run:
-        store_resp = await client.store(uid, "+FLAGS", f"({AGENT_FLAG})")
-        if store_resp.result != "OK":
-            log.warning("poller.flag_failed", mailbox=mailbox.name, uid=uid, response=store_resp)
-    else:
-        log.info("dry_run.skip_flag", mailbox=mailbox.name, uid=uid)
+        if not settings.dry_run:
+            store_resp = await client.store(uid, "+FLAGS", f"({AGENT_FLAG})")
+            if store_resp.result != "OK":
+                log.warning(
+                    "poller.flag_failed", mailbox=mailbox.name, uid=uid, response=store_resp
+                )
+        else:
+            log.info("dry_run.skip_flag", mailbox=mailbox.name, uid=uid)
 
-    return category
+        return category
+    except Exception as e:
+        # v1.21.3 : try/except englobant. Libère la queue IMAP (flag AgentAttempted)
+        # pour ne PAS rejouer ce mail indéfiniment, écrit la télémétrie de crash,
+        # incrémente le compteur d'erreurs consécutives, et alerte si seuil franchi.
+        log.exception("poller.mail_crash", mailbox=mailbox.name, uid=uid, error=str(e))
+        try:
+            await asyncio.to_thread(
+                _log_telemetry,
+                settings.db_agent_state,
+                "poller_mail_crash",
+                mailbox.name,
+                f"uid={uid} error={type(e).__name__}: {e}",
+            )
+        except Exception:
+            pass
+        consecutive_errors = health.mark_error(mailbox.name)
+        last_err = f"{type(e).__name__}: {e}"
+        try:
+            await _maybe_alert_poller_failure(mailbox, consecutive_errors, last_err, [uid])
+        except Exception:
+            pass
+        if not settings.dry_run:
+            try:
+                store_resp = await client.store(uid, "+FLAGS", f"({AGENT_ATTEMPTED_FLAG})")
+                if store_resp.result != "OK":
+                    log.warning("poller.flag_attempted_failed", mailbox=mailbox.name, uid=uid)
+            except Exception as flag_err:
+                log.warning(
+                    "poller.flag_attempted_store_error",
+                    mailbox=mailbox.name,
+                    uid=uid,
+                    error=str(flag_err),
+                )
+        return "error"

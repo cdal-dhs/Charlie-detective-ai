@@ -56,6 +56,11 @@ class Settings(BaseSettings):
 
     poll_interval_seconds: int = 300
 
+    # --- Poller — seuil d'alerte erreurs consécutives (v1.21.3) ---
+    # Au-dessus de N crashes successifs sur 1 boîte → email Resend à cdal@digitalhs.biz.
+    # Ajustable code uniquement (pas env). Anti-spam 1h/boîte côté alerts.py.
+    poller_alert_threshold: int = 5
+
     data_dir: Path = Path("./data")
     db_boite_1: Path = Path("./data/boite1.sqlite")
     db_boite_2: Path = Path("./data/boite2.sqlite")
@@ -71,8 +76,8 @@ class Settings(BaseSettings):
 
     slack_webhook_url: str = ""
 
-    slack_bot_token: str = ""          # xoxb-... Bot User OAuth Token
-    slack_signing_secret: str = ""      # Signing secret de l'app Slack
+    slack_bot_token: str = ""  # xoxb-... Bot User OAuth Token
+    slack_signing_secret: str = ""  # Signing secret de l'app Slack
 
     cerveau2_base_url: str = ""
     cerveau2_api_secret: str = ""

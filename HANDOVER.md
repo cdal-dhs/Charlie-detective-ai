@@ -1,7 +1,7 @@
 # HANDOVER — Detective.be Agent IA (Charlie)
 
 > Document de transfert pour Claude Opus 4.7 ou tout agent ultérieur.  
-> Dernière mise à jour : **2026-06-03** · Version courante : **V1.21.2** · Déployé sur : `detective.digitalhs.biz`
+> Dernière mise à jour : **2026-06-04** · Version courante : **V1.21.3** · Déployé sur : `detective.digitalhs.biz`
 
 ---
 
@@ -19,7 +19,7 @@
 
 ---
 
-## 2. Architecture actuelle (V1.21.2)
+## 2. Architecture actuelle (V1.21.3)
 
 ```
 [3 boîtes Infomaniak IMAP] ──polling 5min──► [Worker asyncio Python]
@@ -340,7 +340,7 @@ Le poller IMAP ne traite que les mails reçus depuis cette date. Les archives hi
 
 ---
 
-## 9. Bugs connus et points de vigilance (2026-06-03, V1.21.2)
+## 9. Bugs connus et points de vigilance (2026-06-04, V1.21.3)
 
 | # | Problème | Statut | Fichier concerné | Notes |
 |---|---|---|---|---|

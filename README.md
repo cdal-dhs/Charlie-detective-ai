@@ -182,7 +182,7 @@ DETECTIVE_BE/
 
 ## Statut
 
-✅ **Production active** — `detective.digitalhs.biz` — **v1.21.2**
+✅ **Production active** — `detective.digitalhs.biz` — **v1.21.3**
 
 - **Pipeline IMAP** : polling 3 boîtes, classification 8 catégories, priorité intelligente, skip+flag historique avant 20/05/2026
 - **Génération brouillon** : style Daniel, **aide lecture multilingue (v1.21.0)** — pour mails NL/EN/DE/ES/etc., brouillon enrichi avec 4 blocs (email d'origine + traduction FR + proposition FR + traduction langue source). Réponse toujours en FR (langue de travail de Daniel).
