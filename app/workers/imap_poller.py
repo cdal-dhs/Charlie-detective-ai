@@ -909,12 +909,12 @@ async def _process_single_mail(
         subject = _decode_header(subject_raw)
         received_at = str(msg.get("Date", "") or "")
 
-        # Filtre date critique : ne traiter que les mails depuis le 20 mai 2026.
+        # Filtre date critique : ne traiter que les mails depuis le 1er juin 2026.
         # Les mails plus vieux sont flaggés comme traités pour nettoyer le backlog.
         if received_at:
             try:
                 dt = parsedate_to_datetime(received_at)
-                if dt.date() < datetime(2026, 5, 20).date():
+                if dt.date() < datetime(2026, 6, 1).date():
                     if not settings.dry_run:
                         store_resp = await client.store(uid, "+FLAGS", f"({AGENT_FLAG})")
                         if store_resp.result != "OK":
@@ -929,7 +929,7 @@ async def _process_single_mail(
                         mailbox=mailbox.name,
                         uid=uid,
                         date=received_at[:10],
-                        reason="before_2026-05-20",
+                        reason="before_2026-06-01",
                     )
                     return "skipped"
             except Exception:

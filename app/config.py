@@ -86,9 +86,9 @@ class Settings(BaseSettings):
     dry_run: bool = False
 
     # --- Date limite de traitement ---
-    # Format ISO : 2026-05-01 — Charlie ne traite que les mails reçus depuis cette date.
+    # Format ISO : 2026-06-01 — Charlie ne traite que les mails reçus depuis cette date.
     # Vide = pas de filtre (tout l'historique).
-    process_since_date: str = ""  # ex: 2026-05-01
+    process_since_date: str = ""  # ex: 2026-06-01
 
     log_level: str = "INFO"
     log_dir: Path = Path("./logs")

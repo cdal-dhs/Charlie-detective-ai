@@ -1,5 +1,23 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.21.4] — 2026-06-04 (filtre date 1er juin 2026 — Daniel veut les mails du 01/06 à aujourd'hui)
+
+### Contexte
+Après le hotfix v1.21.3 (poller IMAP cassé depuis ~26h), Daniel rappelle qu'il veut **uniquement les mails du 1er juin 2026 à aujourd'hui** (4 juin). Le code hardcodait `datetime(2026, 5, 20)` comme date limite, donc les mails de fin mai étaient skippés. Décision CDAL : passer à **1er juin 2026 strict**.
+
+### Changé
+- **`app/workers/imap_poller.py`** : date limite passée de `datetime(2026, 5, 20)` à `datetime(2026, 6, 1)`. Le log `poller.date_skipped` utilise maintenant `reason="before_2026-06-01"`.
+- **`.env.example`** : `PROCESS_SINCE_DATE=2026-06-01` (aligné sur la décision).
+- **`app/config.py`** : commentaires mis à jour (exemples pointent sur `2026-06-01`).
+
+### À faire manuellement
+Les 4 mails historique (UIDs 4910, 5914, 9368, 9376) sont **datés d'avant le 1er juin 2026** → le filtre va les skipper à nouveau. Si Daniel veut les traiter quand même, retirer le flag `AgentProcessed` via Thunderbird. Sinon, ils restent skippés (comportement souhaité).
+
+### Note opérationnelle
+Aucun autre changement. Le hotfix v1.21.3 (3 bugs IMAP + alerte) est conservé tel quel. Le bump mineur v1.21.3 → v1.21.4 documente le changement de date.
+
+---
+
 ## [1.21.3] — 2026-06-04 (hotfix prod — poller IMAP cassé depuis ~26h)
 
 ### Contexte
