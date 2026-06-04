@@ -37,6 +37,7 @@
   - `docs/CERVEAU2_INTEGRATION.md` — guide d'intégration pour agents externes.
   - `docs/CERVEAU2_EXTRACTION.md` — comment traiter/extraire les informations.
   - `docs/CERVEAU2_RECHERCHE_FACTUELLE.md` — **recherche factuelle via Cerveau2** (dense search = implicit AND, normalisation numéros, faux négatifs LLM, déduplication — patterns et pièges, à lire avant toute recherche par numéro/nom propre).
+  - `docs/PATTERNS_FROM_CHARLIE_V1.21.3.md` — **patterns réutilisables pour Second Cerveau Pro** (3 bugs IMAP génériques + observabilité + 19 tests, à backporter dans tout nouveau client).
 
 > Si tu hésites sur un choix d'archi, **c'est `HANDOVER.md` qui tranche** sur l'état réel. Si une décision n'est documentée nulle part, demande à CDAL avant d'inventer.
 

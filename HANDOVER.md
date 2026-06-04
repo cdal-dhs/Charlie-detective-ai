@@ -360,6 +360,8 @@ Le poller IMAP ne traite que les mails reçus depuis cette date. Les archives hi
 | 14 | **kimi-k2 inexistant sur Ollama Cloud** — `openai/kimi-k2` retournait 404 | ✅ Corrigé V1.21.1 | `app/config.py` + `.env.production` | Vrai nom = `kimi-k2.6:cloud`. Idem pour `glm-5.1` → `glm-5.1:cloud`. `ollama_pro_base_url` corrigé de `/api` vers `/v1`. Table `app_settings` prod purgée des 3 entrées obsolètes. |
 | 15 | **kimi-k2.6:cloud est un reasoning model** — réponse dans `reasoning_content` pas dans `content` → fallback systématique vers glm-5.1 | ✅ Corrigé V1.21.1 | `app/llm/router.py` | Extraction : si `content` vide, fallback sur `reasoning_content`. |
 | 16 | **Traces de raisonnement kimi-k2.6 polluent les brouillons** — "L'utilisateur demande...", "The user wants...", "Refonte :", "Version plus X :", "C'est mieux.", etc. | ✅ Corrigé V1.21.2 | `app/llm/router.py` | 30+ patterns regex dans `_clean_reasoning()` filtrent les artefacts. EN + FR + listes + guillemets + auto-critique post-mail. |
+| 17 | **Poller IMAP crash en boucle sur la boîte `detective_belgique`** depuis ~26h (3 bugs cumulés) — 0 brouillon généré, 13 retries sur certains UIDs | ✅ Corrigé V1.21.3 | `app/workers/imap_poller.py` + `app/alerts.py` + `app/healthcheck.py` | Bug 1 : `_decode_header` crash sur charset `unknown-8bit` (LookupError). Bug 2 : `_persist` crash sur `Header` objects (sqlite3.ProgrammingError). Bug 3 : retry éternel (flag `AgentProcessed` posé qu'en cas de succès → crash = rejoué toutes les 5 min indéfiniment). Fix : 5 patches + try/except englobant + nouveau flag `AgentAttempted` (libère la queue après crash). 19 tests de résilience. **Visibilité** : compteur `consecutive_errors` + alerte Resend à `cdal@digitalhs.biz` si ≥5 crashes/boîte (anti-spam 1h/boîte). |
+| 18 | **Filtre date hardcodé incohérent** — code dit `datetime(2026, 5, 20)`, `.env.example` dit `PROCESS_SINCE_DATE=2026-05-01`, Daniel veut 1er juin strict | ✅ Corrigé V1.21.4 | `app/workers/imap_poller.py` + `.env.example` | Date passée à `datetime(2026, 6, 1)`. Log `poller.date_skipped` reason=`before_2026-06-01`. `.env.example` aligné à `2026-06-01`. |
 
 ### Point de vigilance #1 — Provider litellm pour Ollama Cloud (CRITIQUE v1.21.1)
 `ollama_chat/<model>` force litellm vers `localhost:11434` (Ollama **local**). Le provider correct pour Ollama **Cloud** est `openai/<model>` avec `api_base=https://ollama.com/v1`.
@@ -401,6 +403,16 @@ conn = sqlite3.connect("/app/data/agent_state.db")
 conn.execute("DELETE FROM app_settings WHERE key LIKE 'llm_model%'")
 conn.commit()
 ```
+
+### Point de vigilance #11 — Périmètre Cerveau2 (NOUVEAU v1.21.3)
+**Important** : le hotfix v1.21.3 (poller IMAP) et le fix v1.21.4 (filtre date) sont **100% côté Charlie** (instance Detective.be). Aucun changement n'a été fait dans :
+- `app/cerveau_client.py` (wrapper HTTP Charlie → Cerveau2)
+- `app/cerveau_feed.py` (wrapper d'ingestion)
+- Le serveur `CERVEAU2-DEtective` (`/Users/cdal/DEV_APP_CLAUDE/CERVEAU2-DEtective/`, v0.8.2)
+- Le produit `SECONDCERVEAU-PRO` (`/Users/cdal/DEV_APP_CLAUDE/SECONDCERVEAU-PRO/`)
+- L'instance `CDAL2` (`/Users/cdal/DEV_APP_CLAUDE/CDAL2/`)
+
+Le serveur Cerveau2 n'est pas affecté par ces fixes. Si tu réutilises Charlie comme base pour un nouveau client (via `SECONDCERVEAU-PRO`), les patches `_decode_header` / `_persist` / try-except poller / compteur erreurs / alerte Resend sont **réutilisables** — voir `docs/PATTERNS_FROM_CHARLIE_V1.21.3.md` pour le détail d'implémentation.
 
 ---
 

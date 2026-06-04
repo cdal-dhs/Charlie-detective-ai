@@ -1,9 +1,11 @@
 # Changelog Charlie AI — Detective.be
 
-## [1.21.4] — 2026-06-04 (filtre date 1er juin 2026 — Daniel veut les mails du 01/06 à aujourd'hui)
+## [1.21.4] — 2026-06-04 (filtre date 1er juin 2026 + doc patterns réutilisables)
 
 ### Contexte
 Après le hotfix v1.21.3 (poller IMAP cassé depuis ~26h), Daniel rappelle qu'il veut **uniquement les mails du 1er juin 2026 à aujourd'hui** (4 juin). Le code hardcodait `datetime(2026, 5, 20)` comme date limite, donc les mails de fin mai étaient skippés. Décision CDAL : passer à **1er juin 2026 strict**.
+
+En parallèle, CDAL demande de **documenter les patterns réutilisables** depuis ce hotfix, car il développe en parallèle le produit **Second Cerveau Pro** (`SECONDCERVEAU-PRO/`) et l'instance `CDAL2/`. Tout client Second Cerveau Pro qui scrape IMAP doit intégrer ces patches.
 
 ### Changé
 - **`app/workers/imap_poller.py`** : date limite passée de `datetime(2026, 5, 20)` à `datetime(2026, 6, 1)`. Le log `poller.date_skipped` utilise maintenant `reason="before_2026-06-01"`.
@@ -15,6 +17,12 @@ Les 4 mails historique (UIDs 4910, 5914, 9368, 9376) sont **datés d'avant le 1e
 
 ### Note opérationnelle
 Aucun autre changement. Le hotfix v1.21.3 (3 bugs IMAP + alerte) est conservé tel quel. Le bump mineur v1.21.3 → v1.21.4 documente le changement de date.
+
+### Ajouté (doc)
+- **`docs/PATTERNS_FROM_CHARLIE_V1.21.3.md`** : note technique complète sur les 3 bugs IMAP génériques (charset unknown-8bit, sqlite3 Header binding, retry éternel) + observabilité (compteur d'erreurs + alerte Resend) + 19 tests. **Cible** : backport dans Second Cerveau Pro / CDAL2 / tout nouveau client IMAP.
+- **`docs/CERVEAU2_INTEGRATION.md` section 9** : pointe vers `PATTERNS_FROM_CHARLIE_V1.21.3.md` pour les agents externes qui scrapent IMAP.
+- **`HANDOVER.md` section 9 "Point de vigilance #11"** : clarifie que v1.21.3 et v1.21.4 sont **100% côté Charlie**, **0 changement** dans `app/cerveau_client.py`, `CERVEAU2-DEtective/`, `SECONDCERVEAU-PRO/`, `CDAL2/`.
+- **`CLAUDE.md` section "Documentation Cerveau2"** : ajout du lien vers le nouveau doc.
 
 ---
 

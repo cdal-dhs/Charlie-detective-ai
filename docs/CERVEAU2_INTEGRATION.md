@@ -265,3 +265,13 @@ async def save_email_to_cerveau(payload: dict) -> bool:
 Intégrateur : CDAL (`cdal@digitalhs.biz`)
 Responsable vault : CDAL
 Changements d'architecture : toujours via PR + review avant merge
+
+---
+
+## 9. Patterns réutilisables pour agents externes (v1.21.3+)
+
+Si ton agent externe scrape aussi des boîtes IMAP (Outlook, Gmail, Infomaniak, OVH), **intègre ces patterns** avant la première mise en prod :
+
+- `docs/PATTERNS_FROM_CHARLIE_V1.21.3.md` — 3 bugs génériques Python `email` (charset unknown-8bit, sqlite3 Header binding, retry éternel) + observabilité (compteur d'erreurs + alerte Resend) + 19 tests.
+
+**Coût d'intégration** : ~200 lignes Python + 1 alerte Resend. ROI : 26h d'incidents silencieux évités (cf. incident Charlie du 2026-06-04).
