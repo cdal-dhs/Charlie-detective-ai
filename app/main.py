@@ -5,6 +5,8 @@ from pathlib import Path
 
 import structlog
 
+from app._version import VERSION
+from app.alerts import notify_shutdown, notify_startup
 from app.charlie_memory import init_memory_table
 from app.config import get_settings
 from app.delivery.slack_bot import init_slack_bot
@@ -36,9 +38,16 @@ async def main() -> None:
         soul_dst.write_text(soul_src.read_text(encoding="utf-8"), encoding="utf-8")
 
     log = structlog.get_logger()
-    log.info("agent.start", mailboxes=[m.name for m in settings.mailboxes()])
+    log.info("agent.start", mailboxes=[m.name for m in settings.mailboxes()], version=VERSION)
 
     init_slack_bot()
+
+    # Notification au démarrage (couvre le cas 'Charlie a redémarré après un crash')
+    # v1.21.5 : best-effort, ne lève pas si Slack indispo
+    try:
+        await notify_startup(VERSION)
+    except Exception as e:
+        log.warning("agent.startup_notify_failed", error=str(e))
 
     stop_event = asyncio.Event()
 
@@ -57,6 +66,12 @@ async def main() -> None:
 
     await stop_event.wait()
     log.info("agent.stop_requested")
+
+    # Notification à l'arrêt (best-effort)
+    try:
+        await notify_shutdown("stop_requested")
+    except Exception as e:
+        log.warning("agent.shutdown_notify_failed", error=str(e))
 
     for task in [*poller_tasks, web_task, soul_task, disk_task, att_task]:
         task.cancel()

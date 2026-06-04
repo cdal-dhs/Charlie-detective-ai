@@ -45,7 +45,7 @@
 
 ## 3. Stack technique
 
-État au **2026-06-04 (v1.21.4)**. La SPEC.md d'origine est désalignée sur certains points — **cette section fait foi**.
+État au **2026-06-04 (v1.21.5)**. La SPEC.md d'origine est désalignée sur certains points — **cette section fait foi**.
 
 | Couche | Choix |
 |---|---|
@@ -69,7 +69,7 @@
 | Service prod | **Docker + Docker Compose + Traefik** (VPS Hostinger KVM8) |
 | Logs | `structlog` (JSON structuré, rotation 7j) |
 | Config | `pydantic-settings` depuis `.env` |
-| Version | Source unique `app/_version.py` (`VERSION = "1.21.4"`) — **tolérance zéro** sur `pyproject.toml` qui reste figé en `1.9.5` (volontaire) |
+| Version | Source unique `app/_version.py` (`VERSION = "1.21.5"`) — **tolérance zéro** sur `pyproject.toml` qui reste figé en `1.9.5` (volontaire) |
 
 **Ne PAS introduire** sans discussion explicite : Kubernetes, Swarm, Celery, Redis, Postgres, ORM lourd, framework JS front (React/Vue/Angular). Le périmètre Docker actuel (1 service Compose + Traefik externe) est figé.
 
@@ -198,7 +198,7 @@ Le script `scripts/deploy-to-vps.sh` intègre ce workflow. **Ne jamais utiliser 
 
 ## 7. État courant du projet
 
-État au **2026-06-04 — v1.21.4** déployée en prod. Voir `HANDOVER.md` pour le détail complet, `CHANGELOG.md` pour l'historique, `docs/ROADMAP.md` pour la roadmap à jour.
+État au **2026-06-04 — v1.21.5** déployée en prod. Voir `HANDOVER.md` pour le détail complet, `CHANGELOG.md` pour l'historique, `docs/ROADMAP.md` pour la roadmap à jour.
 
 ### ✅ Livré
 - **S1 → S4 terminées** : infra & data, pipeline IMAP, RAG + génération, prod 24/7 sur KVM8.

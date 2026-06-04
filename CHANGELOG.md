@@ -1,5 +1,34 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.21.5] — 2026-06-04 (zéro crash silencieux — alertes multi-canaux + heartbeat)
+
+### Contexte
+CDAL : « il faut s'assurer que plus jamais de crash sans être prévenu : c'est impossible et interdit ». Le hotfix v1.21.3 alertait déjà par email Resend après 5 crashes/boîte, mais **un seul canal = un seul SPOF**. Si Resend tombe ou si CDAL ne lit pas ses emails pendant 3 jours, on rate l'alerte. Et si Charlie crash COMPLÈTEMENT (OOM, kill -9), aucune alerte in-app ne s'exécute. **v1.21.5 ajoute 2 niveaux de redondance** (Slack + heartbeat au démarrage) et prépare le terrain pour le watchdog externe (cron VPS) qui sera ajouté demain.
+
+### Ajouté
+- **Alerte Slack en parallèle de Resend** : nouvelle fonction `_send_slack_crash_alert()` dans `app/alerts.py`. Appelée automatiquement depuis `alert_poller_persistent_failure()` après l'envoi Resend réussi. **Best-effort** : si Slack est down, on log un warning et on continue. Canal = Webhook Slack (déjà câblé, pas de setup additionnel côté Slack). Format message : `:rotating_light: Poller IMAP — échecs consécutifs (N erreurs sur mailbox) + dernière erreur + UIDs + action`.
+- **`notify_startup(version)` dans `app/alerts.py`** : notification Slack au démarrage réussi de l'agent (`:white_check_mark: Charlie AI démarré — v1.21.5`). **Couvre le cas "Charlie a redémarré après un crash"** : si CDAL voit passer 2 startups en 5 min sur Slack, il sait qu'il y a un problème. Best-effort.
+- **`notify_shutdown(reason)` dans `app/alerts.py`** : notification Slack à l'arrêt propre (`:wave: Charlie AI arrêté — raison : stop_requested`). Permet de distinguer arrêt intentionnel vs crash. Best-effort.
+- **Appel dans `app/main.py`** : `notify_startup(VERSION)` après l'init complète, `notify_shutdown(...)` après `stop_event.wait()`. Les deux sont wrappés en `try/except` pour ne pas bloquer le démarrage/arrêt.
+- **Log `agent.startup_notify_failed` / `agent.shutdown_notify_failed`** : trace claire si la notif Slack a planté (utile pour debug).
+
+### Préparé pour demain (non déployé, TODO S+1)
+- **Watchdog externe** : cron VPS qui curl `/health` toutes les 60s et alerte si 3 checks consécutifs échouent. Couvre OOM, kill -9, deadlock asyncio, disque plein. Alerte même si Charlie est totalement HS.
+- **Uptime checker externe** : exposer `/healthz` via Traefik + inscription à Healthchecks.io (gratuit, < 5 min de setup). Vérifie de l'extérieur, pas depuis le VPS lui-même.
+- **Cleanup auto disk + images Docker** : cron hebdo `/usr/local/bin/detective-docker-clean.sh` (analogue à `magicreator-docker-clean.sh` qui existe déjà).
+
+### Inchangé (toujours actif)
+- v1.21.3 : alerte email Resend à `cdal@digitalhs.biz` si ≥5 crashes/boîte (anti-spam 1h/boîte)
+- v1.21.3 : compteur `consecutive_errors` dans `HealthState`
+- v1.21.3 : 19 tests de résilience verts
+
+### Note opérationnelle
+- Bump 1.21.4 → 1.21.5 (mineur) documente l'ajout des alertes Slack.
+- Le webhook Slack `SLACK_WEBHOOK_URL` est déjà configuré en prod (.env.production). Pas de changement de secrets.
+- Si tu reçois trop de notifications Slack au démarrage (ex: restart toutes les 5 min), c'est qu'il y a un crashloop → aller voir les logs VPS `docker logs --tail=100 detective-agent`.
+
+---
+
 ## [1.21.4] — 2026-06-04 (filtre date 1er juin 2026 + doc patterns réutilisables)
 
 ### Contexte

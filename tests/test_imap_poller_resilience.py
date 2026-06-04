@@ -566,8 +566,9 @@ async def test_alert_poller_persistent_failure_sends_email(monkeypatch):
         sample_uids=["1234", "5678"],
     )
 
-    assert mock_post.call_count == 1
-    payload = mock_post.call_args.kwargs["json"]
+    # v1.21.5 : 1 POST Resend + 1 POST Slack (canal secondaire) = 2 appels
+    assert mock_post.call_count == 2
+    payload = mock_post.call_args_list[0].kwargs["json"]
     assert "🚨" in payload["subject"]
     assert "cdal@digitalhs.biz" in payload["to"]
     assert "5 erreurs" in payload["subject"]
@@ -629,5 +630,5 @@ async def test_alert_poller_persistent_failure_fires_after_cooldown(monkeypatch)
         sample_uids=["1234"],
     )
 
-    # Envoi OK car > 1h
-    assert mock_post.call_count == 1
+    # Envoi OK car > 1h. v1.21.5 : 1 POST Resend + 1 POST Slack = 2
+    assert mock_post.call_count == 2

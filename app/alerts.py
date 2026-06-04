@@ -1,8 +1,8 @@
 import html
 from datetime import UTC, datetime
 
-import structlog
 import httpx
+import structlog
 
 from app.config import get_settings
 
@@ -182,5 +182,73 @@ async def alert_poller_persistent_failure(
             r.raise_for_status()
         _last_poller_alert_sent[mailbox_name] = datetime.now(UTC)
         log.info("alert.poller_failure_sent", mailbox=mailbox_name, error_count=error_count)
+        # Envoi aussi sur Slack (canal secondaire, en parallèle de Resend) — v1.21.5
+        await _send_slack_crash_alert(mailbox_name, error_count, last_error, sample_uids)
     except Exception as e:
         log.error("alert.poller_failure_send_error", error=str(e))
+
+
+async def _send_slack_crash_alert(
+    mailbox_name: str,
+    error_count: int,
+    last_error: str,
+    sample_uids: list[str],
+) -> None:
+    """Envoie aussi l'alerte sur Slack (via Webhook). Best-effort : ne lève pas.
+
+    Si Slack est down ou si le Webhook manque, on log un warning et on continue —
+    l'email Resend est resté la source primaire.
+    """
+    try:
+        from app.delivery.slack_notifier import send_slack_message
+
+        uids = ", ".join(f"`{uid}`" for uid in sample_uids[:5]) or "N/A"
+        text = (
+            f":rotating_light: *Poller IMAP — échecs consécutifs* "
+            f"({error_count} erreurs sur `{mailbox_name}`)\n"
+            f">>> {last_error[:300]}\n"
+            f"UIDs: {uids}\n"
+            f"_Action : vérifier logs VPS, retirer flag `AgentAttempted` via IMAP si besoin._"
+        )
+        await send_slack_message(text)
+        log.info("alert.slack_crash_sent", mailbox=mailbox_name)
+    except Exception as e:
+        # Best-effort : pas grave si Slack échoue
+        log.warning("alert.slack_crash_failed", mailbox=mailbox_name, error=str(e))
+
+
+async def notify_startup(version: str) -> None:
+    """Notification au démarrage réussi de l'agent (v1.21.5).
+
+    Couvre le cas 'Charlie a redémarré après un crash' : CDAL voit le bot
+    revenir sur Slack et sait qu'il y a peut-être eu un incident.
+    """
+    try:
+        from app.delivery.slack_notifier import send_slack_message
+
+        text = (
+            f":white_check_mark: *Charlie AI démarré* — v{version}\n"
+            f"_Poller IMAP actif, 3 boîtes surveillées, ingest Cerveau2 OK._"
+        )
+        await send_slack_message(text)
+        log.info("alert.slack_startup_sent", version=version)
+    except Exception as e:
+        log.warning("alert.slack_startup_failed", error=str(e))
+
+
+async def notify_shutdown(reason: str = "stop_requested") -> None:
+    """Notification à l'arrêt propre de l'agent (v1.21.5).
+
+    Best-effort : ne lève pas. Couvre le cas 'arrêt intentionnel' vs 'crash'.
+    """
+    try:
+        from app.delivery.slack_notifier import send_slack_message
+
+        text = (
+            f":wave: *Charlie AI arrêté* — raison : `{reason}`\n"
+            f"_Si non intentionnel : vérifier le conteneur (`docker ps`) et les logs._"
+        )
+        await send_slack_message(text)
+        log.info("alert.slack_shutdown_sent", reason=reason)
+    except Exception as e:
+        log.warning("alert.slack_shutdown_failed", error=str(e))
