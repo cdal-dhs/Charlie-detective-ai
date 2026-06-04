@@ -487,4 +487,73 @@ Avant de modifier quoi que ce soit :
 
 ---
 
+## 13. 🔴 TODO DEMAIN (2026-06-05) — Sécurité anti-crash silencieux
+
+**Contexte** : le 2026-06-04, CDAL a explicitement demandé « plus jamais de crash sans être prévenu : c'est impossible et interdit ». La v1.21.5 a ajouté Slack + heartbeat startup/shutdown (niveaux 1-2), mais il manque les niveaux 3-4 (watchdog externe + uptime checker). CDAL veut **ZÉRO crash silencieux** → finir ces items avant de passer à autre chose.
+
+### Priorité 1 — Watchdog externe (cron VPS)
+
+**Pourquoi** : si Charlie crash COMPLÈTEMENT (OOM, kill -9, deadlock asyncio), aucune alerte in-app ne s'exécute. Il faut un script externe au processus qui ping `/health` et alerte Resend si down.
+
+**Comment** :
+- Créer `/usr/local/bin/detective-healthcheck.sh` sur le VPS (analogue à `/usr/local/bin/magicreator-docker-clean.sh` qui existe déjà)
+- Cron toutes les 60s : `* * * * * /usr/local/bin/detective-healthcheck.sh`
+- Logique : si 3 checks consécutifs échouent → curl POST sur Resend avec `RESEND_API_KEY` (récupéré depuis `/opt/DETECTIVE/.env.production`) vers `cdal@digitalhs.biz`
+- Endpoint à pinger : `http://127.0.0.1:8765/health` (déjà exposé par Charlie)
+- ⚠️ **Important** : la commande s'exécute depuis l'host, pas dans le conteneur. Le port 8765 est exposé via Docker sur 127.0.0.1 du host (déjà mappé, à vérifier avec `docker port detective-agent`).
+
+**État** : 0% — script à créer, cron à ajouter, Resend API à sourcer.
+
+### Priorité 2 — Uptime checker externe (Healthchecks.io)
+
+**Pourquoi** : le cron ci-dessus tourne SUR le VPS. Si le VPS lui-même crash, le cron ne s'exécute plus. Il faut un service externe qui ping Charlie depuis l'extérieur.
+
+**Comment** :
+- S'inscrire sur https://healthchecks.io (gratuit, 5 min de setup)
+- Créer un check "Charlie" avec interval=2min, grace=3min
+- Ajouter un ping automatique depuis Charlie : dans `app/main.py` après `notify_startup`, faire un `httpx.get(settings.healthchecks_ping_url)` best-effort
+- Configurer Healthchecks pour alerter par email si ping manquant
+- Optionnel : exposer `/healthz` via Traefik (déjà en place pour le cockpit, juste ajouter une route)
+
+**État** : 0% — service à créer, intégration Charlie à coder.
+
+### Priorité 3 — Cleanup auto disk + images Docker
+
+**Pourquoi** : le VPS est à 60% disque (78GB libres). Si on accumule des images Docker / logs / vieux attachments, on risque de remplir le disque dans 2-3 mois, ce qui ferait crasher Charlie (sqlite + logs).
+
+**Comment** :
+- Créer `/usr/local/bin/detective-docker-clean.sh` sur le VPS (analogue à `magicreator-docker-clean.sh`) :
+  - `docker image prune -af --filter "until=720h"` (supprime images > 30j)
+  - `docker system prune -f` (volumes orphelins)
+  - `find /opt/DETECTIVE/logs -name "*.log.*" -mtime +7 -delete` (rotation logs)
+  - `find /opt/DETECTIVE/data/attachments -mtime +30 -delete` (PJ > 30j, mais vérifier qu'il n'y a pas de DB refs)
+- Cron hebdo dimanche 4h : `0 4 * * 0 /usr/local/bin/detective-docker-clean.sh >> /var/log/detective-docker-clean.log 2>&1`
+- ⚠️ **Sauvegarde avant** : `rsync` des 3 DB sqlite + `data/attachments/` vers backup externe avant prune.
+
+**État** : 0% — script à créer, cron à ajouter, stratégie backup à définir.
+
+### Priorité 4 — Mémoire projet
+
+**Pourquoi** : CDAL a passé 14h+ sur ce projet le 2026-06-04 et demande que la fatigue ne coûte pas le contexte.
+
+**Comment** :
+- Écrire mémoire `feedback_fatigue_longue_sessione.md` : "CDAL fatigué après 14h+ → pause, ne pas démarrer nouveau chantier, finir ce qui est en cours"
+- Écrire mémoire `feedback_zéro_crash_silencieux.md` : règle absolue = "toute absence d'alerte = bug à corriger en priorité P0"
+
+**État** : 0% — fichiers à écrire dans `~/.claude/projects/.../memory/`.
+
+### Fichiers à toucher demain
+
+- `/opt/DETECTIVE/scripts/` (nouveau) → `detective-healthcheck.sh`, `detective-docker-clean.sh`
+- `/etc/cron.d/detective` (nouveau) → entrée cron
+- `app/main.py` → ajouter ping Healthchecks.io après notify_startup
+- `app/config.py` → ajouter `healthchecks_ping_url: str = ""`
+- `~/.claude/projects/.../memory/feedback_*.md` (nouveau) → 2 mémoires CDAL
+
+### Note pour le prochain agent
+
+Si tu reprends demain : lis cette section 13 EN PREMIER. Ne commence PAS de nouveau chantier tant que les 4 priorités ci-dessus ne sont pas résolues. CDAL veut un Charlie "production-grade 24/7" — les niveaux 1-2 actuels (Slack + Resend) ne suffisent pas pour un service critique.
+
+---
+
 *Document généré le 2026-06-02 pour la V1.20.10 de Detective.be Agent IA.*
