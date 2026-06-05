@@ -1,5 +1,23 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.21.7] — 2026-06-05 (audit log systématique par cycle de polling)
+
+### Contexte
+CDAL : « je veux une trace dans /audit que le poller a eu lieu même si pas d'email retiré : il nous faut du log de qualité pour moi et le client ». Jusqu'ici `/audit` ne montrait que les events **métier** (login, brouillon créé, etc.). Le poller, lui, loggait dans `agent_telemetry` (section « Cycles poller 24h » du template), pas dans `audit_logs`. Conséquence : pour Daniel ou CDAL, l'absence d'event audit = impossible de distinguer « pas de mail reçu » (silence normal) de « Charlie est down » (incident). Avec ce changement, **chaque fin de cycle de polling écrit 1 ligne dans `audit_logs`** (cycles vides inclus), avec `action=poller.cycle`, `resource_type=mailbox`, `resource_id=<nom_boîte>`, et un suffixe `ok` / `empty` pour distinguer d'un coup d'œil.
+
+### Ajouté
+- **`_log_audit()` dans `app/workers/imap_poller.py`** (juste après `_log_telemetry`) : insère une ligne dans `audit_logs` avec `action='poller.cycle'`, `resource_type='mailbox'`, `resource_id=<mailbox_name>`, `details='<cycle_result> | <details>'`, `user_agent='charlie-poller'`, `user_id=NULL`, `ip_address=NULL`, `created_at=now()`. **Best-effort** : si l'INSERT échoue (DB lock, schema manquant), on log un warning `poller.audit_log_failed` et on continue. Le poller ne doit JAMAIS crasher pour une raison d'audit.
+- **Appel à la fin de chaque cycle** (dans `_process_mailbox`, juste après l'appel `_log_telemetry` existant) : passe `cycle_result='ok'` si ≥ 1 mail traité, `cycle_result='empty'` si 0 mail. Les cycles en erreur (catch plus haut avec `raise`) ne sont volontairement pas audités ici — ils passent par un autre canal (alerte Resend + Slack via `_maybe_alert_poller_failure`).
+
+### Inchangé
+- Le poller n'écrit toujours pas dans `audit_logs` quand le cycle se termine en **erreur IMAP** (le `except Exception: raise` court-circuite avant l'audit). C'est volontaire : les erreurs sont déjà tracées via `poller.mail_error` (log structuré) + alertes Resend/Slack après 5 échecs consécutifs.
+- La section « 🔄 Cycles poller (24h) » du template `admin/audit.html` continue d'afficher la **télémétrie** (`agent_telemetry`) — c'est une vue différente, plus granulaire (chaque event est listé). La nouvelle ligne `audit_logs` apparaît dans la **table principale** en bas, avec un tri `created_at DESC` standard.
+
+### Note opérationnelle
+Bump mineur 1.21.6 → 1.21.7 documente l'ajout d'audit. Aucun changement de logique métier : on ajoute une traçabilité. Charge DB supplémentaire : 1 INSERT par cycle = 12 INSERT/heure (3 boîtes × 4 cycles/heure = 12). Négligeable. Volume `audit_logs` attendu : ~350 lignes/jour → ~12K/mois → rotation à voir dans 6 mois.
+
+---
+
 ## [1.21.6] — 2026-06-05 (visuel inbox — badge brouillon sur la colonne Boîte)
 
 ### Contexte

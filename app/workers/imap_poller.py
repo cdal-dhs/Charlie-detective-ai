@@ -179,6 +179,50 @@ def _log_telemetry(
         conn.close()
 
 
+def _log_audit(
+    db_path: Path,
+    mailbox_name: str,
+    cycle_result: str,
+    details: str,
+) -> None:
+    """Écrit un event dans audit_logs à chaque fin de cycle de polling (v1.21.7).
+
+    But : traçabilité client — Daniel peut voir dans /audit que Charlie a bien
+    tourné sur chaque boîte, même quand 0 mail n'est trouvé. Sans ce log, un
+    silence prolongé ressemble à un crash. Avec, on a la preuve quotidienne
+    que le service est actif.
+
+    `cycle_result` ∈ {ok, empty, error} — utile pour filtrer rapidement.
+    Best-effort : si l'INSERT échoue (DB lock, schema manquant), on log et
+    on continue. Le poller ne doit JAMAIS crasher pour une raison d'audit.
+    """
+    try:
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute(
+                """
+                INSERT INTO audit_logs (
+                    user_id, action, resource_type, resource_id, details,
+                    ip_address, user_agent, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                """,
+                (
+                    None,
+                    "poller.cycle",
+                    "mailbox",
+                    mailbox_name,
+                    f"{cycle_result} | {details}",
+                    None,
+                    "charlie-poller",
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as exc:
+        log.warning("poller.audit_log_failed", mailbox=mailbox_name, error=str(exc))
+
+
 def _mail_exists(db_path: Path, imap_uid: str, mailbox_name: str) -> bool:
     """Vérifie si un mail a déjà été persisté (pour éviter re-génération/re-notification)."""
     conn = sqlite3.connect(db_path)
@@ -838,17 +882,29 @@ async def _process_mailbox(mailbox: MailboxConfig) -> None:
                 breakdown=cycle_stats,
             )
             details = f"processed={sum(cycle_stats.values())} breakdown={cycle_stats}"
+            cycle_result = "ok"
             # v1.21.3 : reset compteur d'erreurs consécutives si ≥ 1 mail OK
             health.reset_errors(mailbox.name)
         else:
             log.info("poller.cycle_empty", mailbox=mailbox.name)
             details = "processed=0"
+            cycle_result = "empty"
 
         await asyncio.to_thread(
             _log_telemetry,
             settings.db_agent_state,
             "poller_cycle",
             mailbox.name,
+            details,
+        )
+        # v1.21.7 : audit log systématique à chaque fin de cycle (vides inclus)
+        # pour traçabilité client — Daniel peut vérifier dans /audit que le
+        # service tourne même quand 0 mail n'est trouvé.
+        await asyncio.to_thread(
+            _log_audit,
+            settings.db_agent_state,
+            mailbox.name,
+            cycle_result,
             details,
         )
 
