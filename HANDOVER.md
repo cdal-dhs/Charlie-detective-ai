@@ -495,14 +495,100 @@ Avant de modifier quoi que ce soit :
 
 **Pourquoi** : si Charlie crash COMPLÈTEMENT (OOM, kill -9, deadlock asyncio), aucune alerte in-app ne s'exécute. Il faut un script externe au processus qui ping `/health` et alerte Resend si down.
 
-**Comment** :
-- Créer `/usr/local/bin/detective-healthcheck.sh` sur le VPS (analogue à `/usr/local/bin/magicreator-docker-clean.sh` qui existe déjà)
-- Cron toutes les 60s : `* * * * * /usr/local/bin/detective-healthcheck.sh`
-- Logique : si 3 checks consécutifs échouent → curl POST sur Resend avec `RESEND_API_KEY` (récupéré depuis `/opt/DETECTIVE/.env.production`) vers `cdal@digitalhs.biz`
-- Endpoint à pinger : `http://127.0.0.1:8765/health` (déjà exposé par Charlie)
-- ⚠️ **Important** : la commande s'exécute depuis l'host, pas dans le conteneur. Le port 8765 est exposé via Docker sur 127.0.0.1 du host (déjà mappé, à vérifier avec `docker port detective-agent`).
+**État au 2026-06-05** : ✅ **livré**. Script `scripts/detective-healthcheck.sh` créé, livré sur le VPS via `bash scripts/deploy-to-vps.sh`. Reste à installer manuellement (one-shot SSH, ~5 min) + tester.
 
-**État** : 0% — script à créer, cron à ajouter, Resend API à sourcer.
+**Endpoint pingé** : `https://detective.digitalhs.biz/health` (HTTPS public via Traefik, port 8080 du conteneur mappé). Teste **tout le stack** : Charlie + Traefik + DNS + cert TLS.
+- ⚠️ Initialement HANDOVER mentionnait `http://127.0.0.1:8765/health`, mais ce port n'est **pas mappé sur l'host** dans `docker-compose.yml` (seul le 8080 cockpit l'est). Donc on passe par HTTPS public, qui est plus solide de toute façon (couvre aussi Traefik down).
+
+**Décisions CDAL (AskUserQuestion 2026-06-05)** :
+- **Anti-spam** : 1 alerte max par heure (cohérent avec le pattern `alert_poller_persistent_failure` côté Charlie)
+- **Pas d'auto-restart** : on alerte seulement, le restart reste manuel. Évite le risque de crashloop (Charlie qui crash toutes les 5 min, on accumule les relances)
+
+**Script `scripts/detective-healthcheck.sh`** :
+- `curl --max-time 10 -fsS $HEALTH_URL` → récupère juste le code HTTP
+- Si 200 → reset compteur à 1 dans `/var/lib/detective-healthcheck/counter`
+- Sinon → incrémente compteur
+- Si compteur ≥ 3 ET dernière alerte > 1h → POST Resend avec payload HTML
+- Fichiers d'état dans `/var/lib/detective-healthcheck/` (survit aux redéploy Docker, hors conteneur)
+- Logs dans `/var/log/detective-healthcheck.log` (rotation logrotate 7j)
+
+**Procédure d'install VPS (one-shot manuel SSH)** :
+```bash
+ssh root@69.62.110.165
+
+# 1. Script (déjà livré via deploy-to-vps.sh dans /opt/DETECTIVE/scripts/)
+install -m 755 /opt/DETECTIVE/scripts/detective-healthcheck.sh /usr/local/bin/
+
+# 2. Logrotate
+cat > /etc/logrotate.d/detective-healthcheck <<'EOF'
+/var/log/detective-healthcheck.log {
+    daily
+    rotate 7
+    compress
+    missingok
+    notifempty
+    create 0644 root root
+}
+EOF
+
+# 3. Cron
+cat > /etc/cron.d/detective-healthcheck <<'EOF'
+# Watchdog Charlie AI : ping /health toutes les minutes, alerte si 3 échecs consécutifs
+* * * * * root /usr/local/bin/detective-healthcheck.sh
+EOF
+chmod 644 /etc/cron.d/detective-healthcheck
+
+# 4. State dir
+mkdir -p /var/lib/detective-healthcheck
+chown root:root /var/lib/detective-healthcheck
+chmod 755 /var/lib/detective-healthcheck
+
+# 5. Vérif immédiate
+/usr/local/bin/detective-healthcheck.sh
+echo "exit=$?"
+cat /var/log/detective-healthcheck.log
+ls -la /var/lib/detective-healthcheck/
+```
+
+**Test manuel (validation finale)** :
+```bash
+# Sur le VPS
+docker stop detective-agent
+echo "$(date) Charlie stoppé manuellement pour test watchdog"
+
+# Attendre 4 minutes (3 checks cron à 1 min d'intervalle)
+sleep 240
+
+# Vérifier : compteur doit être ≥ 4
+cat /var/lib/detective-healthcheck/counter
+
+# Vérifier le log
+tail -5 /var/log/detective-healthcheck.log
+
+# Vérifier l'email
+# → ouvrir https://app.resend.com/emails (filtrer "Watchdog VPS") OU
+# → regarder la boîte cdal@digitalhs.biz
+
+# Relancer Charlie
+cd /opt/DETECTIVE && docker compose up -d
+
+# Attendre 60s, vérifier que le compteur repasse à 1
+sleep 60 && cat /var/lib/detective-healthcheck/counter
+```
+
+**Critère d'acceptation** :
+- ✅ `cat /var/lib/detective-healthcheck/counter` reste à `1` quand Charlie est up
+- ✅ Après `docker stop detective-agent` + 4 min, le compteur passe à `4` et un email arrive sur `cdal@digitalhs.biz`
+- ✅ Si on re-stoppe dans la même heure, **pas** de 2ᵉ email (anti-spam 1h)
+- ✅ Après `docker start detective-agent` + 60s, le compteur revient à `1`
+
+**Rollback** (si ça part en vrille) :
+```bash
+rm /etc/cron.d/detective-healthcheck /usr/local/bin/detective-healthcheck.sh /etc/logrotate.d/detective-healthcheck
+rm -rf /var/lib/detective-healthcheck
+```
+
+**Limitation connue** : le watchdog Resend peut lui-même tomber (SPOF unique). C'est pour ça qu'on ajoute le niveau 4 (Healthchecks.io externe) en §13.2 — Charlie ping Healthchecks.io depuis l'intérieur, Healthchecks.io alerte CDAL si pas de ping depuis 2 min.
 
 ### Priorité 2 — Uptime checker externe (Healthchecks.io)
 
