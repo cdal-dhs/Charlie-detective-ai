@@ -19,7 +19,17 @@ mkdir -p "$STATE_DIR"
 if [ -f "$ENV_FILE" ]; then
     set -a
     # shellcheck disable=SC1090
-    . "$ENV_FILE"
+    # Filtrer : on ne charge que les lignes KEY=VALUE non-commentées, pour éviter
+    # que bash exécute des fragments de texte dans le .env (ex: "# Belgique")
+    while IFS='=' read -r key value; do
+        # Skip lignes vides, commentaires, et lignes sans '='
+        [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]] && continue
+        [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+        # Exporter la variable (en supprimant d'éventuels guillemets autour de la valeur)
+        value="${value%\"}"; value="${value#\"}"
+        value="${value%\'}"; value="${value#\'}"
+        export "$key"="$value"
+    done < "$ENV_FILE"
     set +a
 else
     echo "$(date -Iseconds) ERREUR: $ENV_FILE introuvable" >> "$LOG"
