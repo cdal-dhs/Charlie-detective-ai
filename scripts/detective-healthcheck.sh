@@ -81,7 +81,7 @@ if [ $((NOW - LAST)) -lt "$ALERT_COOLDOWN_SECONDS" ]; then
     exit 0
 fi
 
-# Construction du payload JSON (échapper les guillemets dans le sujet/message)
+# Construction du payload JSON via Python (échappement propre garanti)
 SUBJECT="🚨 Charlie AI — Watchdog VPS : $COUNT échecs /health consécutifs"
 HTML_BODY="<html><body style='font-family:Arial,sans-serif;max-width:600px;margin:20px;'>
 <h2 style='color:#dc2626;'>🚨 Charlie AI injoignable</h2>
@@ -99,10 +99,16 @@ HTML_BODY="<html><body style='font-family:Arial,sans-serif;max-width:600px;margi
 Le compteur repart à 1 dès que Charlie répond à nouveau 200.</p>
 </body></html>"
 
-PAYLOAD=$(cat <<EOF
-{"from":"$RESEND_FROM","to":["cdal@digitalhs.biz"],"subject":"$SUBJECT","html":"$HTML_BODY"}
-EOF
-)
+PAYLOAD=$(FROM="$RESEND_FROM" SUBJECT="$SUBJECT" HTML="$HTML_BODY" python3 -c '
+import json, os
+payload = {
+    "from": os.environ["FROM"],
+    "to": ["cdal@digitalhs.biz"],
+    "subject": os.environ["SUBJECT"],
+    "html": os.environ["HTML"],
+}
+print(json.dumps(payload, ensure_ascii=False))
+')
 
 # Envoi Resend (best-effort, on log mais on ne fail pas le script)
 SEND_RESP=$(curl --max-time 15 -fsS -X POST https://api.resend.com/emails \
