@@ -592,16 +592,76 @@ rm -rf /var/lib/detective-healthcheck
 
 ### Priorité 2 — Uptime checker externe (Healthchecks.io)
 
-**Pourquoi** : le cron ci-dessus tourne SUR le VPS. Si le VPS lui-même crash, le cron ne s'exécute plus. Il faut un service externe qui ping Charlie depuis l'extérieur.
+**Pourquoi** : le cron watchdog niveau 3 tourne SUR le VPS. Si le VPS lui-même crash (panne hardware, OOM kernel, datacenter HS), le cron ne s'exécute plus → aucune alerte. Il faut un service externe qui reçoit un ping et alerte si silence.
 
-**Comment** :
-- S'inscrire sur https://healthchecks.io (gratuit, 5 min de setup)
-- Créer un check "Charlie" avec interval=2min, grace=3min
-- Ajouter un ping automatique depuis Charlie : dans `app/main.py` après `notify_startup`, faire un `httpx.get(settings.healthchecks_ping_url)` best-effort
-- Configurer Healthchecks pour alerter par email si ping manquant
-- Optionnel : exposer `/healthz` via Traefik (déjà en place pour le cockpit, juste ajouter une route)
+**État au 2026-06-05** : ✅ **code livré** (5 lignes bash dans `scripts/detective-healthcheck.sh`). Reste à faire : signup Healthchecks.io par CDAL (5 min) + ajout URL dans `/opt/DETECTIVE/.env.production` (1 ligne).
 
-**État** : 0% — service à créer, intégration Charlie à coder.
+**Décisions CDAL (AskUserQuestion 2026-06-05)** :
+- **Fréquence** : 5 min (suffisant vu qu'on a déjà le watchdog Resend 3 min en backup)
+- **Qui ping** : le cron watchdog externe, pas Charlie. Économie : 0 tâche asyncio dans Charlie, 0 faux positif possible (Charlie-up-mais-cron-down serait un scénario ultra-pathologique)
+
+**Pourquoi le cron externe et pas Charlie** :
+- Le cron continue de tourner même si Charlie est HS → couvre le cas "VPS up mais Charlie down" en gardant le ping OK pour Healthchecks.io
+- Pas de tâche asyncio additionnelle dans Charlie (économie CPU/mémoire)
+- Si Charlie ping lui-même et qu'il crash, plus aucun ping ne part. Si le cron ping, le ping continue tant que le cron tourne (= VPS up)
+- Configuration = 1 variable d'env, pas de code Python
+
+**Code livré** (`scripts/detective-healthcheck.sh`, dans le bloc "succès 200") :
+```bash
+# Ping Healthchecks.io (v1.21.6, niveau 4 anti-crash silencieux).
+# Best-effort total : si le ping échoue, on s'en fout, on ne fail pas le script.
+if [ -n "${HEALTHCHECKS_PING_URL:-}" ]; then
+    curl --max-time 5 -fsS -o /dev/null "$HEALTHCHECKS_PING_URL" 2>/dev/null || true
+fi
+```
+- Variable lue depuis `/opt/DETECTIVE/.env.production` (déjà sourcé en début de script)
+- Si vide : skip propre (le code est conçu pour gérer une URL absente)
+- Timeout 5s (Healthchecks.io répond normalement en < 200ms)
+- Best-effort total : `|| true` neutralise toute erreur
+
+**Setup Healthchecks.io (manuel CDAL, ~5 min)** :
+1. Aller sur https://healthchecks.io → Sign up (gratuit, email valide)
+2. **New check** :
+   - Name : `Charlie-detective`
+   - Period : `5 minutes`
+   - Grace : `3 minutes` (tolère 1 ping manqué avant d'alerter)
+   - Notification : Email (par défaut, à `cdal@digitalhs.biz` ou l'email du compte)
+3. Copier l'**URL ping** affichée (format : `https://hc-ping.com/<UUID>`)
+
+**Setup VPS (manuel SSH, ~1 min)** :
+```bash
+ssh root@69.62.110.165
+
+# Ajouter la variable (remplacer <UUID> par celui copié)
+cat >> /opt/DETECTIVE/.env.production <<EOF
+
+# Healthchecks.io (v1.21.6) — uptime checker externe
+HEALTHCHECKS_PING_URL=https://hc-ping.com/<UUID>
+EOF
+
+# Test immédiat
+/usr/local/bin/detective-healthcheck.sh
+# → doit envoyer le 1er ping à Healthchecks.io
+```
+
+**Test de validation (CDAL)** :
+1. Aller sur https://healthchecks.io → dashboard "Charlie-detective"
+2. Doit afficher **"Up"** (vert) dans les 30s suivant le test
+3. (Optionnel) Tuer Charlie 10 min → Healthchecks.io affiche "Down" + email "Charlie is down"
+
+**Critère d'acceptation** :
+- ✅ Healthchecks.io affiche "Up" (vert) dans les 30s suivant le 1er ping
+- ✅ Si Charlie est down mais le cron tourne → ping continue → "Up" (on distingue Charlie-down de VPS-down)
+- ✅ Si le cron ne tourne pas (VPS down) → pas de ping → "Down" après 8 min (5 + 3 grace) → email CDAL
+
+**Limitation connue** : Healthchecks.io gratuit a un retard de ~1-3 min pour l'envoi d'email en cas de downtime détecté. Acceptable pour un niveau 4 (le niveau 3 Resend sera toujours plus rapide, niveau 2 Slack aussi). On a 3 niveaux de redondance : si les 3 disent rien, c'est qu'Internet est coupé 😄.
+
+**Rollback** :
+```bash
+# VPS
+sed -i '/^HEALTHCHECKS_PING_URL/d' /opt/DETECTIVE/.env.production
+# Local : retirer le bloc bash ajouté + commit + push + pull VPS
+```
 
 ### Priorité 3 — Cleanup auto disk + images Docker
 

@@ -51,6 +51,17 @@ RESP=$(curl --max-time 10 -fsS -o /dev/null -w "%{http_code}" "$HEALTH_URL" 2>/d
 if [ "$RESP" = "200" ]; then
     # Succès : reset le compteur
     echo "1" > "$STATE_DIR/counter"
+
+    # Ping Healthchecks.io (v1.21.6, niveau 4 anti-crash silencieux).
+    # Best-effort total : si le ping échoue (Healthchecks.io down, DNS cassé),
+    # on s'en fout, on ne fail pas le script. Le but est juste de dire
+    # "le VPS est up et Charlie répond". Si Charlie est HS, le compteur
+    # d'erreurs Resend du bloc ci-dessous s'occupe déjà d'alerter.
+    # HEALTHCHECKS_PING_URL est dans $ENV_FILE (sourcé en début de script).
+    if [ -n "${HEALTHCHECKS_PING_URL:-}" ]; then
+        curl --max-time 5 -fsS -o /dev/null "$HEALTHCHECKS_PING_URL" 2>/dev/null || true
+    fi
+
     exit 0
 fi
 
