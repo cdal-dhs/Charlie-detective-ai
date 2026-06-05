@@ -4,12 +4,22 @@
 {% set effective_status = m.status or 'pending' %}
 {% set is_hot = (m.category == 'demande_client' and m.priority == 'high' and effective_status == 'pending') %}
 {% set is_danger = (m.category == 'phishing') %}
+{% set has_draft = m.ai_draft is not none and m.ai_draft|length > 0 %}
 {# NOTE CSS critique : border-l-4 sur <tr> ne s'affiche PAS dans les tables HTML (le navigateur l'ignore).
    Il faut appliquer la bordure latérale sur le PREMIER <td> de la ligne.
    Fond hot-row : bg-green-900/40 (ne pas descendre en dessous, sinon invisible sur fond sombre).
-   Voir commit V1.8.1 et docs/RUNBOOK.md#hot-row-visuel. #}
+   Voir commit V1.8.1 et docs/RUNBOOK.md#hot-row-visuel.
+   Badge brouillon (v1.21.6) : pilule émeraude + ✉️ sur la colonne Boîte quand Charlie a généré un brouillon. #}
 <tr class="border-b border-gray-800 hover:bg-gray-800/50 {% if is_hot %}bg-green-900/40{% elif is_danger %}bg-red-900/40{% endif %}">
-  <td class="px-2 py-3 whitespace-nowrap w-12 text-center text-xs font-medium text-gray-400 {% if is_hot %}border-l-4 border-l-green-500{% elif is_danger %}border-l-4 border-l-red-500{% endif %}">{{ box_short.get(m.mailbox_name, m.mailbox_name or '-') }}</td>
+  <td class="px-2 py-3 whitespace-nowrap w-12 text-center text-xs font-medium {% if has_draft %}border-l-4 border-l-emerald-400{% elif is_hot %}border-l-4 border-l-green-500{% elif is_danger %}border-l-4 border-l-red-500{% endif %}">
+    {% if has_draft %}
+      <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-semibold ring-1 ring-emerald-500/40" title="Proposition de réponse générée par Charlie">
+        {{ box_short.get(m.mailbox_name, m.mailbox_name or '-') }}<span aria-hidden="true">✉️</span>
+      </span>
+    {% else %}
+      <span class="text-gray-400">{{ box_short.get(m.mailbox_name, m.mailbox_name or '-') }}</span>
+    {% endif %}
+  </td>
   <td class="px-3 py-3 max-w-md">
     <a href="/app/conversation/{{ m.id }}" class="text-blue-400 hover:underline truncate block">{{ m.subject or '(sans sujet)' }}</a>
   </td>

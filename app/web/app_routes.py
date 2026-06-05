@@ -130,7 +130,8 @@ async def _fetch_mails(
     order = "DESC" if sort_order.lower() == "desc" else "ASC"
     cols = [
         "id", "mailbox_name", "subject", "sender", "received_at",
-        "category", "status", "priority", "processed_at", "body_preview", "attachment_count",
+        "category", "status", "priority", "processed_at", "body_preview",
+        "attachment_count", "ai_draft",
     ]
 
     # ── Requête 1 : HOT (demande_client + high + pending) ──
@@ -142,7 +143,8 @@ async def _fetch_mails(
     hot_sql = (
         "SELECT m.id, m.mailbox_name, m.subject, m.sender, m.received_at, m.category, "
         "m.status, m.priority, m.processed_at, m.body_preview, "
-        "(SELECT COUNT(*) FROM email_attachment WHERE mail_processed_id = m.id) AS attachment_count "
+        "(SELECT COUNT(*) FROM email_attachment WHERE mail_processed_id = m.id) AS attachment_count, "
+        "ai_draft "
         "FROM mail_processed m WHERE " + " AND ".join(hot_where) + " "
         f"ORDER BY {col} {order} LIMIT ?"
     )
@@ -159,7 +161,8 @@ async def _fetch_mails(
     other_sql = (
         "SELECT m.id, m.mailbox_name, m.subject, m.sender, m.received_at, m.category, "
         "m.status, m.priority, m.processed_at, m.body_preview, "
-        "(SELECT COUNT(*) FROM email_attachment WHERE mail_processed_id = m.id) AS attachment_count "
+        "(SELECT COUNT(*) FROM email_attachment WHERE mail_processed_id = m.id) AS attachment_count, "
+        "ai_draft "
         "FROM mail_processed m WHERE " + " AND ".join(other_where) + " "
         f"ORDER BY (m.status = 'pending') DESC, (m.priority = 'high') DESC, {col} {order} LIMIT ?"
     )

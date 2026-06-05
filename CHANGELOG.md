@@ -1,5 +1,26 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.21.6] — 2026-06-05 (visuel inbox — badge brouillon sur la colonne Boîte)
+
+### Contexte
+CDAL demande un signal visuel fort dans l'inbox list : **l'identifiant de boîte (D_FR / D_NL / D_PD) doit devenir très visible quand Charlie a généré un brouillon de réponse**. Aujourd'hui c'est juste du texte gris 12px sur fond noir — facile à rater. Daniel doit pouvoir scanner sa liste de mails en un coup d'œil et voir d'un coup d'œil "ce mail a une proposition de réponse prête".
+
+### Ajouté
+- **Pilule émeraude + ✉️ sur la 1ère colonne de l'inbox** quand `mail_processed.ai_draft IS NOT NULL AND length(ai_draft) > 0`. Style : `inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-semibold ring-1 ring-emerald-500/40` + `border-l-4 border-l-emerald-400` sur la cellule. Tooltip natif : `title="Proposition de réponse générée par Charlie"`. Cohérent avec le fond `bg-green-900/40` des hot-rows (les deux utilisent la palette émeraude) mais **plus compact** (juste la colonne Boîte, pas la ligne entière).
+- **`ai_draft` dans la query `_fetch_mails`** (`app/web/app_routes.py`) : ajouté aux 2 SELECT (hot + other) et à la liste `cols`. **Coût perf** : 1 colonne TEXT de plus, négligeable (≤200 lignes dans l'inbox, mode `pragma journal_mode=WAL`).
+- **Variable Jinja `has_draft`** dans `inbox_rows.html` : détecte `ai_draft is not none and |length > 0` (le `|length` évite les cas où `ai_draft=""` en base).
+
+### Inchangé
+- Le rendu sans brouillon (texte gris normal) reste exactement comme avant. Aucun mail sans brouillon ne reçoit le badge.
+- Le mode édition détaillée (`/app/conversation/{id}`) n'est pas touché : le badge est **uniquement dans la liste inbox** comme demandé.
+- Le changement de catégorie/priorité en mode list (`htmx-trigger="change"`) reste fonctionnel — la 1ère colonne n'est pas dans un `<form>`, aucun conflit.
+- Le 1er mail de Daniel (#474, mail de test classé `autre`) **n'a PAS reçu** de brouillon → il s'affiche en gris normal. Daniel a manuellement overridé en `demande_client` + `high` ; le badge apparaîtra dès que le brouillon sera régénéré (cockpit "Régénérer" ou endpoint `/api/drafts/{id}/retry`).
+
+### Note opérationnelle
+Bump mineur 1.21.5 → 1.21.6 documente l'ajout visuel. Aucun changement de logique backend. Si tu revois un badge apparaître sur un mail sans brouillon, vérifier que `ai_draft` n'est pas `""` ou `null` en base (probablement une ancienne migration). Query de vérif rapide : `SELECT id, mailbox_name, subject, length(ai_draft) FROM mail_processed WHERE ai_draft IS NOT NULL AND length(ai_draft) > 0 AND draft_generated = 0 LIMIT 10;` — devrait retourner 0 ligne en prod.
+
+---
+
 ## [1.21.5] — 2026-06-04 (zéro crash silencieux — alertes multi-canaux + heartbeat)
 
 ### Contexte
