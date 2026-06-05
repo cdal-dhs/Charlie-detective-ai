@@ -665,18 +665,84 @@ sed -i '/^HEALTHCHECKS_PING_URL/d' /opt/DETECTIVE/.env.production
 
 ### Priorité 3 — Cleanup auto disk + images Docker
 
-**Pourquoi** : le VPS est à 60% disque (78GB libres). Si on accumule des images Docker / logs / vieux attachments, on risque de remplir le disque dans 2-3 mois, ce qui ferait crasher Charlie (sqlite + logs).
+**Pourquoi** : le VPS est à 60% disque (79GB libres). Si on accumule des images Docker / build cache / vieux volumes, on risque de remplir le disque dans 2-3 mois, ce qui ferait crasher Charlie (sqlite + logs).
 
-**Comment** :
-- Créer `/usr/local/bin/detective-docker-clean.sh` sur le VPS (analogue à `magicreator-docker-clean.sh`) :
-  - `docker image prune -af --filter "until=720h"` (supprime images > 30j)
-  - `docker system prune -f` (volumes orphelins)
-  - `find /opt/DETECTIVE/logs -name "*.log.*" -mtime +7 -delete` (rotation logs)
-  - `find /opt/DETECTIVE/data/attachments -mtime +30 -delete` (PJ > 30j, mais vérifier qu'il n'y a pas de DB refs)
-- Cron hebdo dimanche 4h : `0 4 * * 0 /usr/local/bin/detective-docker-clean.sh >> /var/log/detective-docker-clean.log 2>&1`
-- ⚠️ **Sauvegarde avant** : `rsync` des 3 DB sqlite + `data/attachments/` vers backup externe avant prune.
+**État au 2026-06-05** : ✅ **livré**. Script `scripts/detective-docker-clean.sh` créé, livré sur le VPS. Reste à installer manuellement (one-shot SSH, ~3 min) + tester.
 
-**État** : 0% — script à créer, cron à ajouter, stratégie backup à définir.
+**Décisions CDAL (AskUserQuestion 2026-06-05)** :
+- **Fréquence** : hebdo dimanche 4h (faible activité BE / 11h WITA Bali)
+- **Agressivité** : `docker system prune -af` (supprime tout ce qui n'est pas utilisé : images, containers stopped, volumes orphelins, build cache, networks). Gain attendu : **64GB+ de build cache** sur le VPS actuel.
+
+**Safety list (ajout CDAL 2026-06-05)** : avant tout prune, le script vérifie qu'**aucun container de prod** n'est en status `stopped`/`exited`/`dead`/`created`. Si oui → **ABORT** du prune + alerte Slack `ABORT cleanup: X containers de prod stopped`. Préfixes surveillés : `detective-`, `cerveau2-`, `cdal2-`, `magicreator-`, `mondayupartner-`, `icoonebali-`, `photobooth`, `scrappingtool`, `n8n`, `traefik`. **Pourquoi** : si on a Charlie stoppé pour debug (comme lors du test watchdog), un prune agressif pourrait le détruire.
+
+**Note** : `cleanup_old_logs` (3j) et `cleanup_old_attachments` (30j) tournent **déjà en interne dans Charlie** (`run_attachment_cleanup` toutes les 24h, `cleanup_old_logs` au boot). Le script §13.3 ne s'occupe QUE du Docker (images, volumes, build cache) — pas des logs/PJ. Complémentaire au `disk_watcher` qui alerte par Resend à 25% de libre.
+
+**Script `scripts/detective-docker-clean.sh`** (~60 lignes) :
+1. Charge `.env.production` (filtre KEY=VALUE, ignore commentaires)
+2. **Safety check** : pour chaque préfixe prod, vérifie `docker ps -a` → si status ∈ {exited, dead, created, stopped} → ABORT + Slack
+3. Mesure `df -BG /` avant
+4. `timeout 300 docker system prune -af` (5 min max)
+5. Mesure `df -BG /` après
+6. Calcule delta → notif Slack `:recycle: Charlie AI — cleanup hebdo : +XG libérés`
+7. Log append-only `/var/log/detective-docker-clean.log` (rotation 4 semaines)
+
+**Procédure d'install VPS (one-shot manuel SSH)** :
+```bash
+ssh root@69.62.110.165
+
+# 1. Script
+install -m 755 /opt/DETECTIVE/scripts/detective-docker-clean.sh /usr/local/bin/
+
+# 2. Logrotate
+cat > /etc/logrotate.d/detective-docker-clean <<'EOF'
+/var/log/detective-docker-clean.log {
+    weekly
+    rotate 4
+    compress
+    missingok
+    notifempty
+    create 0644 root root
+}
+EOF
+
+# 3. Cron
+cat > /etc/cron.d/detective-docker-clean <<'EOF'
+# Cleanup disk Charlie AI : dimanche 4h (HANDOVER §13.3)
+0 4 * * 0 root /usr/local/bin/detective-docker-clean.sh
+EOF
+chmod 644 /etc/cron.d/detective-docker-clean
+```
+
+**Test manuel (validation finale)** :
+```bash
+# Sur le VPS, avec Charlie up
+/usr/local/bin/detective-docker-clean.sh
+echo "exit=$?"
+
+# Vérifier le log
+cat /var/log/detective-docker-clean.log
+
+# Vérifier la notif Slack (canal #detective)
+# → doit afficher ":recycle: Charlie AI — cleanup hebdo : +XG libérés"
+
+# Test safety : arrêter Charlie temporairement
+docker stop detective-agent
+/usr/local/bin/detective-docker-clean.sh
+# → doit afficher "ABORT" + alerte Slack "cleanup ABORT"
+# → NE DOIT PAS avoir fait de prune (vérifier via docker system df)
+
+# Relancer
+docker start detective-agent
+```
+
+**Critère d'acceptation** :
+- ✅ Charlie up + cleanup lancé → delta > 0GB, notif Slack, log avec timestamps
+- ✅ Charlie stopped + cleanup lancé → ABORT, notif Slack "cleanup ABORT", aucun prune effectué
+- ✅ Dimanche 4h suivant → le cron s'exécute tout seul (vérifier `grep CRON /var/log/syslog | grep docker-clean`)
+
+**Limitation connue** : si **TOUS** les containers de prod sont stopped (Charlie + Cerveau2 + autres), le script abort. C'est intentionnel (safety first), mais ça veut dire qu'en cas de "VPS qui redémarre" après un crash global, le cleanup ne tournera pas tant qu'on n'aura pas relancé manuellement. Acceptable : le disque n'augmente pas si vite que ça, et le `disk_watcher` (alerte 25%) couvre le cas extrême.
+
+**Rollback** : `rm /etc/cron.d/detective-docker-clean /usr/local/bin/detective-docker-clean.sh /etc/logrotate.d/detective-docker-clean`. ~10s.
 
 ### Priorité 4 — Mémoire projet
 
