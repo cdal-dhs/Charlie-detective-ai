@@ -1,5 +1,30 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.22.0] — 2026-06-05 (refonte qualité LLM — Charlie colle à Daniel)
+
+### Contexte
+Daniel demande d'améliorer la qualité des réponses proposées par Charlie. Constat sur 2 mails récents (#477, #478) : les brouillons Charlie étaient **trop génériques**, manquaient de **personnalisation** (noms client/mandant), ne **posaient pas de questions** pour faire avancer le dossier, donnaient peu de **méthodologie concrète**, et surtout ne poussaient **PAS vers le RDV téléphonique/visio** — qui est le levier de closing #1 de Daniel. Objectif v1.22.0 : faire produire par Charlie un brouillon que Daniel n'a qu'à cliquer "Envoyer" sans réécriture, et qui pousse naturellement vers l'échange direct.
+
+### Ajouté
+- **`app/prompts/personality_daniel.txt` — réécrit complètement** (~3× plus long, 124 lignes vs 51). Nouvelles sections : OBJECTIF, CTA RDV téléphonique/visio (closing), PERSONNALISATION (noms client + mandant), VOCABULAIRE PROFESSIONNEL (ordre de mission, agenda des opérations, réactivation dossier, etc.), STRUCTURE ATTENDUE (paragraphes thématiques aérés), ANTIPATTERNS (pas de pavé, pas de remerciement creux, annoncer la suite), PATTERNS BON/MAUVAIS (2 exemples courts calibrés sur les vrais mails #477 et #478 de Daniel).
+- **Few-shot in-context learning dynamique** : nouvelle fonction `_load_daniel_fewshot()` dans `app/pipeline/generator.py`. À chaque génération, on injecte dans le system prompt les **3-4 dernières vraies réponses validées par Daniel** (priorité aux `human_draft` = corrections explicites, fallback `status=sent`). Sélection : 30 derniers jours, body > 200 chars, tri par date desc. Le LLM voit **le vrai Daniel écrire à de vrais clients**, pas un style approximatif.
+- **`rag_top_k` 5 → 10** (`app/config.py`) : double le nombre de cas historiques Q/R injectés en contexte. Coût tokens +1K, négligeable.
+- **`cerveau2_limit` 3 → 8** (`app/config.py`) : plus de notes du second cerveau Vault dans le contexte. Coût tokens +1K, négligeable.
+- **`max_tokens` 1500 → 2000** (`app/pipeline/generator.py`) : permet les réponses Daniel-like 15-30 lignes sans troncature.
+
+### Inchangé
+- Le modèle LLM reste `kimi-k2.6:cloud` (32K context window — on a la marge).
+- Le flow de génération (RAG + vault + prompt) reste identique, juste avec plus de contexte.
+- La température 0.4 reste OK pour le peu de variabilité nécessaire.
+
+### Note opérationnelle
+**Bump mineur 1.21.9 → 1.22.0** documente une refonte qualité (semver mineur car pas de breaking change d'API). **Action immédiate** : sur les 3-5 prochains mails entrants, Daniel valide si la qualité est OK. Si une régression (trop formel, trop rigide, mauvaise structure), tweaker `personality_daniel.txt` (priorité : c'est un fichier de prompt, facile à faire évoluer). **Coût LLM** : ~+3K tokens par mail, sur 50 mails/jour ça fait +150K tokens/jour = ~$0.30/jour (kimi-k2.6:cloud à $2/M tokens output, $0.50/M input). Négligeable.
+
+### Anti-régression
+Si Daniel trouve que Charlie devient **trop formel** ou **trop rigide** après ce changement : c'est probablement l'effet "patterns BON/MAUVAIS" qui force trop le LLM. Solution : retirer la section PATTERNS COURTS du prompt, garder juste les sections +VOCABULAIRE et +CTA RDV. Itérer.
+
+---
+
 ## [1.21.9] — 2026-06-05 (fix P0 — brouillons IMAP ne se déposaient plus sur detective_belgique)
 
 ### Contexte — BUG P0 PRODUCTION

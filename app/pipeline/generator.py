@@ -48,6 +48,86 @@ def _load_soul_for_brand(brand: str) -> str:
     return text[start:end].strip()
 
 
+def _load_daniel_fewshot(max_examples: int = 4) -> str:
+    """Few-shot learning : récupère les N dernières réponses validées par Daniel.
+
+    v1.22.0 : on injecte dans le system prompt 3-4 vraies réponses que Daniel
+    a écrites (human_draft) ou approuvées (status=sent) à de vrais clients.
+    Le LLM voit le VRAI Daniel, pas un style approximatif. Sélection : 30
+    derniers jours, body > 200 chars, triés par date desc, les N plus récents.
+
+    Args:
+        max_examples: nombre max d'exemples (3-4 idéal — 1-2K tokens)
+
+    Returns:
+        Bloc formaté prêt à coller dans le system prompt, ou chaîne vide
+        si aucun exemple trouvé (première install, table vide).
+    """
+    import sqlite3
+    from datetime import datetime, timedelta, timezone
+
+    settings = get_settings()
+    db_path = settings.db_agent_state
+    if not db_path.exists():
+        return ""
+
+    try:
+        conn = sqlite3.connect(str(db_path))
+        # Filtre : 30 derniers jours, body significatif, et soit human_draft non vide
+        # soit status=sent (mail envoyé par Daniel)
+        # Priorité aux human_draft (corrections explicites = meilleur signal du style Daniel)
+        since = (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d")
+        rows = conn.execute(
+            """
+            SELECT id, mailbox_name, subject, sender, body, human_draft, status
+            FROM mail_processed
+            WHERE date(received_at) >= ?
+              AND length(coalesce(body, '')) > 200
+              AND (
+                length(coalesce(human_draft, '')) > 100
+                OR status = 'sent'
+              )
+            ORDER BY
+              CASE WHEN length(coalesce(human_draft, '')) > 100 THEN 0 ELSE 1 END,
+              received_at DESC
+            LIMIT ?
+            """,
+            (since, max_examples),
+        ).fetchall()
+        conn.close()
+    except Exception as exc:
+        log.warning("generator.fewshot_load_failed", error=str(exc))
+        return ""
+
+    if not rows:
+        return ""
+
+    blocks = ["=== EXEMPLES DE VRAIES RÉPONSES DE DANIEL (few-shot) ==="]
+    blocks.append(
+        "Ces exemples montrent comment Daniel écrit VRAIMENT à ses clients. "
+        "Imite ce style, ce ton, cette structure, ce niveau de personnalisation."
+    )
+    for i, (mid, mbox, subj, sender, body, human, status) in enumerate(rows, 1):
+        # Priorité : human_draft (correction) > rien d'autre (on n'utilise pas ai_draft
+        # pour pas que le LLM s'auto-approuve)
+        response = (human or "").strip()
+        if not response:
+            continue
+        # Tronquer body pour pas bouffer le contexte (2000 chars max)
+        body_short = (body or "")[:2000].strip()
+        response_short = response[:1500].strip()
+        kind = "CORRECTION" if human and len(human) > 100 else "ENVOI APPROUVÉ"
+        blocks.append(
+            f"\n--- EXEMPLE {i} (mail #{mid}, {kind}) ---\n"
+            f"Boîte : {mbox}\n"
+            f"Expéditeur : {sender or '?'}\n"
+            f"Sujet : {subj or '?'}\n"
+            f"--- Mail entrant (extrait) ---\n{body_short}\n"
+            f"--- Réponse écrite par Daniel ---\n{response_short}\n"
+        )
+    return "\n".join(blocks)
+
+
 def _format_rag_context(pairs: list[RetrievedPair]) -> str:
     blocks = []
     for i, p in enumerate(pairs, 1):
@@ -78,6 +158,7 @@ def _build_messages(
     vault_notes: list[VaultNote],
 ) -> list[dict]:
     soul_section = _load_soul_for_brand(mailbox.brand)
+    fewshot = _load_daniel_fewshot(max_examples=4)
     # On génère TOUJOURS en français (langue de travail de Daniel).
     # Si le mail entrant est dans une autre langue, le module translator
     # ajoutera traductions + cadre multilingue autour du brouillon.
@@ -86,6 +167,7 @@ def _build_messages(
         + f"\n\nMarque/boîte source : {mailbox.brand}"
         + f"\nLangue de réponse OBLIGATOIRE : français (la langue de travail de Daniel)"
         + (f"\n\n{soul_section}" if soul_section else "")
+        + (f"\n\n{fewshot}" if fewshot else "")
     )
     vault_section = _format_vault_context(vault_notes)
     user = (
@@ -136,7 +218,7 @@ async def generate_draft(
     draft = await complete(
         model=llm_default,
         messages=messages,
-        max_tokens=1500,
+        max_tokens=2000,  # v1.22.0 : 1500 → 2000 (réponses Daniel font 15-30 lignes)
         temperature=0.4,
     )
     raw_draft = draft.strip()

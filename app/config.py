@@ -56,7 +56,7 @@ class Settings(BaseSettings):
     embedding_model: str = "openai/text-embedding-3-small"
     embedding_api_base: str = "https://openrouter.ai/api/v1"
     embedding_api_key: str = ""  # utilise openrouter_api_key si vide
-    rag_top_k: int = 5
+    rag_top_k: int = 10  # v1.22.0 : 5 → 10 — plus de cas historiques au LLM
 
     poll_interval_seconds: int = 300
 
@@ -85,7 +85,7 @@ class Settings(BaseSettings):
 
     cerveau2_base_url: str = ""
     cerveau2_api_secret: str = ""
-    cerveau2_limit: int = 3
+    cerveau2_limit: int = 8  # v1.22.0 : 3 → 8 — plus de notes Vault au LLM
 
     dry_run: bool = False
 
