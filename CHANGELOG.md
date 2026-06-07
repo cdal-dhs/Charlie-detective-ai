@@ -1,5 +1,27 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.21.9] — 2026-06-05 (fix P0 — brouillons IMAP ne se déposaient plus sur detective_belgique)
+
+### Contexte — BUG P0 PRODUCTION
+Depuis au moins 10 jours (et donc depuis le 29/05, premier impact client visible), la boîte `detective_belgique` d'Infomaniak **refuse toutes les commandes LIST avec pattern** : `Error in IMAP command LIST: Invalid pattern (0.001 + 0.000 secs).` — y compris `LIST "" "*"`. Conséquence : `_find_drafts_folder()` retournait `None`, le brouillon n'était jamais déposé dans Drafts, et le fallback Resend prenait le relais (qui jusqu'à v1.21.8 envoyait à CDAL au lieu de Daniel). **Daniel n'a donc reçu aucun brouillon depuis 8 jours** sur la boîte `detective_belgique` (la plus active). Cause probable : restriction de sécurité Infomaniak sur cette boîte spécifique (trop de dossiers ? quota LIST dépassé ?).
+
+### Diagnostic clé
+Test direct via Docker exec sur le container Charlie : `SELECT Brouillons` retourne **OK** sur cette boîte. Donc le dossier existe bien, c'est **uniquement** la commande `LIST` qui est bloquée. Le dossier peut être sélectionné directement par son nom, sans avoir besoin de le lister d'abord.
+
+### Fix
+- **`app/delivery/imap_draft.py` — `_find_drafts_folder()`** réécrite : au lieu de faire `LIST "" "*"` puis matcher les noms, on tente directement `SELECT` sur chaque nom candidat (`Brouillons`, `Drafts`, `INBOX.Brouillons`, `INBOX.Drafts`, `Draft`, `Brouillon`, etc.). Le premier qui répond `OK` est retenu. **On revient à `SELECT INBOX` à la fin** pour ne pas perturber le poller qui s'attend à ce que la mailbox sélectionnée soit INBOX.
+- **LIST conservé en fallback ultime** : si tous les SELECT probes échouent, on tente LIST quand même, au cas où d'autres boîtes Infomaniak acceptent encore le pattern. Ça ne change rien pour ces boîtes (qui marchaient déjà).
+- **Couvre toutes les variantes** (FR/NL/EN, avec/sans INBOX préfixe) — déduplication avec `seen: set[str]` pour éviter les probes redondants.
+
+### Inchangé
+- Le reste du pipeline d'APPEND (`append_draft()`, `_verify_draft_present()`) reste identique. Seul `_find_drafts_folder` change.
+- Le fix v1.21.8 (fallback Resend → Daniel to + CDAL cc) reste valide : si pour une raison X le nouveau code échoue quand même, le fallback va à Daniel.
+
+### Note opérationnelle
+**Bump 1.21.8 → 1.21.9** documente un fix critique P0. **Action immédiate après deploy** : dans le cockpit, aller sur les mails #480 et #481 (status=pending), cliquer "Régénérer" → le brouillon devrait se déposer **directement dans la Drafts IMAP de Daniel** cette fois, plus de fallback Resend. Vérifier aussi que les brouillons du 29/05 au 05/06 (6 mails listés) ont bien atterri dans la Drafts — sinon les re-régénérer. Daniel peut aussi vérifier sa Drafts IMAP directement via webmail Infomaniak (https://mail.infomaniak.com).
+
+---
+
 ## [1.21.8] — 2026-06-05 (fix critique — fallback Resend va enfin à Daniel)
 
 ### Contexte — BUG P0 PRODUCTION

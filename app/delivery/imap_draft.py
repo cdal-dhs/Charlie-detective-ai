@@ -66,33 +66,87 @@ async def _verify_draft_present(
 
 
 async def _find_drafts_folder(client: aioimaplib.IMAP4) -> str | None:
-    """Interroge LIST pour trouver le dossier Drafts / Brouillons."""
-    list_resp = await client.list("", "*")
-    if list_resp.result != "OK":
-        log.warning("imap_draft.list_failed", response=str(list_resp.result))
-        return None
+    """Trouve le dossier Drafts / Brouillons de la boîte IMAP.
 
-    folders: list[str] = []
-    for line in list_resp.lines or []:
-        name = _parse_list_line(line)
-        if name:
-            folders.append(name)
+    v1.21.9 : la boîte ``detective_belgique`` d'Infomaniak refuse la commande
+    LIST avec pattern (``Error in IMAP command LIST: Invalid pattern``), même
+    ``LIST "" "*"``. Le fix tente directement ``SELECT`` sur chaque nom
+    candidat — Infomaniak autorise SELECT même quand LIST est bloqué.
+    On revient à SELECT INBOX à la fin pour ne pas perturber le poller.
+    """
+    candidates = list(_DRAFT_CANDIDATES) + [
+        "INBOX.Brouillons",
+        "INBOX.Drafts",
+        "Draft",
+        "Brouillon",
+    ]
+    # Dédupliquer en gardant l'ordre
+    seen: set[str] = set()
+    unique_candidates: list[str] = []
+    for c in candidates:
+        if c.lower() not in seen:
+            seen.add(c.lower())
+            unique_candidates.append(c)
 
-    # Match exact prioritaire
-    for candidate in _DRAFT_CANDIDATES:
-        for folder in folders:
-            if folder.lower() == candidate.lower():
-                log.info("imap_draft.folder_found", folder=folder, match="exact")
-                return folder
+    for candidate in unique_candidates:
+        try:
+            sel = await client.select(candidate)
+            if sel.result == "OK":
+                log.info(
+                    "imap_draft.folder_found",
+                    folder=candidate,
+                    match="select_probe",
+                )
+                # Important : revenir à INBOX pour ne pas casser le poller
+                # qui s'attend à ce que la mailbox sélectionnée soit INBOX
+                with contextlib.suppress(Exception):
+                    await client.select("INBOX")
+                return candidate
+        except Exception as exc:
+            log.debug(
+                "imap_draft.select_probe_failed",
+                folder=candidate,
+                error=str(exc),
+            )
+            continue
 
-    # Fallback : contient "draft" ou "brouillon"
-    for folder in folders:
-        lowered = folder.lower()
-        if "draft" in lowered or "brouillon" in lowered:
-            log.info("imap_draft.folder_found", folder=folder, match="contains")
-            return folder
+    # Fallback ultime : tenter LIST quand même, au cas où d'autres boîtes
+    # Infomaniak autorisent encore le pattern matching
+    try:
+        list_resp = await client.list("", "*")
+        if list_resp.result == "OK":
+            folders: list[str] = []
+            for line in list_resp.lines or []:
+                name = _parse_list_line(line)
+                if name:
+                    folders.append(name)
+            for candidate in _DRAFT_CANDIDATES:
+                for folder in folders:
+                    if folder.lower() == candidate.lower():
+                        log.info(
+                            "imap_draft.folder_found",
+                            folder=folder,
+                            match="list_exact",
+                        )
+                        return folder
+            for folder in folders:
+                lowered = folder.lower()
+                if "draft" in lowered or "brouillon" in lowered:
+                    log.info(
+                        "imap_draft.folder_found",
+                        folder=folder,
+                        match="list_contains",
+                    )
+                    return folder
+        else:
+            log.warning(
+                "imap_draft.list_failed_after_select",
+                response=str(list_resp.result),
+            )
+    except Exception as exc:
+        log.warning("imap_draft.list_failed_after_select", error=str(exc))
 
-    log.warning("imap_draft.folder_not_found", folders=folders)
+    log.warning("imap_draft.folder_not_found", candidates=unique_candidates)
     return None
 
 
