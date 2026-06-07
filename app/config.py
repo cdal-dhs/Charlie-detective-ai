@@ -47,7 +47,11 @@ class Settings(BaseSettings):
 
     resend_api_key: str = ""
     resend_from: str = "agent@digitalhs.biz"
-    draft_recipient: str = "cdal@digitalhs.biz"
+    # v1.21.7 : fallback Resend pour brouillon — Daniel en to, CDAL en cc
+    # (avant : tout allait à CDAL, Daniel ne voyait jamais le brouillon en fallback)
+    draft_recipient: str = "cdal@digitalhs.biz"  # legacy, conservé pour alertes
+    draft_recipient_to: str = "contact@detectivebelgique.be"
+    draft_recipient_cc: str = "cdal@digitalhs.biz"
 
     embedding_model: str = "openai/text-embedding-3-small"
     embedding_api_base: str = "https://openrouter.ai/api/v1"

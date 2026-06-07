@@ -1,5 +1,23 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.21.8] — 2026-06-05 (fix critique — fallback Resend va enfin à Daniel)
+
+### Contexte — BUG P0 PRODUCTION
+**Daniel n'a reçu AUCUN brouillon de Charlie depuis le 29/05/2026** (capture : sa boîte "Brouillons" est vide depuis cette date, ~8 jours de panne silencieuse côté client). Cause : le fallback Resend (utilisé quand l'APPEND IMAP échoue — « Connexion IMAP secondaire rejetée par Infomaniak ») envoyait à `cdal@digitalhs.biz` au lieu de Daniel. Conséquence : CDAL recevait l'alerte + la proposition en fallback, mais Daniel voyait rien. **Le client attend 8 jours pour rien** pendant qu'on a l'impression côté CDAL que tout va bien. C'est le pattern « zéro crash silencieux » porté sur la livraison : un échec **métier** non alerté au bon destinataire.
+
+### Fix
+- **Nouvelles variables de config** (`app/config.py`) : `draft_recipient_to` (Daniel par défaut `contact@detectivebelgique.be`) et `draft_recipient_cc` (CDAL par défaut `cdal@digitalhs.biz`). L'ancienne `draft_recipient=cdal@digitalhs.biz` est conservée pour les alertes système (Resend `alert_imap_draft_failure`).
+- **`app/delivery/resend_notifier.py`** : `payload` Resend utilise maintenant `to=[settings.draft_recipient_to]` + `cc=[settings.draft_recipient_cc]`. Log `resend.sent` mentionne les 2 destinataires.
+- **`.env.example` + `.env.production`** sur VPS : ajout des 2 nouvelles variables avec valeurs par défaut Daniel/CDAL.
+
+### À investiguer en parallèle (cause primaire)
+Le fallback ne devrait **jamais** se déclencher. Le vrai problème = « connexion IMAP secondaire rejetée par Infomaniak » dans le message d'alerte. Charlie ouvre 2 connexions IMAP simultanées (polling + APPEND Drafts), Infomaniak rejette la 2e. Fix à creuser : sérialiser les opérations IMAP, ou réutiliser la connexion du poller pour l'APPEND. **Hors-scope de ce hotfix** (à traiter proprement en v1.22.0 pour éviter une régression de stabilité du poller). En attendant : Daniel reçoit le brouillon en fallback Resend dans sa boîte, donc plus de panne visible client.
+
+### Note opérationnelle
+Bump 1.21.7 → 1.21.8 documente un fix critique. **Action immédiate** : aller dans la Drafts de Daniel sur les 3 boîtes (Infomaniak webmail) et rejouer manuellement les 6-8 brouillons manqués depuis le 29/05 (Charlie les a en base, ils sont régénérables via `POST /api/drafts/{id}/retry` du cockpit, ou via le bouton « Régénérer » sur la conversation). Liste à extraire : `SELECT id, mailbox_name, subject FROM mail_processed WHERE draft_generated=1 AND created_at >= '2026-05-29' AND status IN ('agent_attempted')` — devrait lister ~6-10 mails.
+
+---
+
 ## [1.21.7] — 2026-06-05 (audit log systématique par cycle de polling)
 
 ### Contexte

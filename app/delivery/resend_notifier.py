@@ -99,9 +99,13 @@ async def notify_draft(
         return
 
     base_url = settings.public_base_url.rstrip("/") if settings.public_base_url else ""
+    # v1.21.7 : Daniel en to (le client final), CDAL en cc (traçabilité intégrateur)
+    # avant v1.21.7 : tout allait à CDAL → Daniel ne voyait jamais le brouillon
+    # en fallback IMAP, et attendait 8 jours pour rien. Bug critique corrigé.
     payload = {
         "from": settings.resend_from,
-        "to": [settings.draft_recipient],
+        "to": [settings.draft_recipient_to],
+        "cc": [settings.draft_recipient_cc],
         "subject": f"PROPOSITION REPONSE DETECTIVE - {mail_id}",
         "html": _format_html(incoming, mailbox, gen, mail_id, base_url),
         "headers": {
@@ -116,4 +120,9 @@ async def notify_draft(
             json=payload,
         )
         r.raise_for_status()
-    log.info("resend.sent", recipient=settings.draft_recipient, mailbox=mailbox.name)
+    log.info(
+        "resend.sent",
+        to=settings.draft_recipient_to,
+        cc=settings.draft_recipient_cc,
+        mailbox=mailbox.name,
+    )
