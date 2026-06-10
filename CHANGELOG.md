@@ -1,5 +1,37 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.22.2] — 2026-06-10 (livraison IMAP des brouillons backfillés)
+
+### Contexte — Suites du hotfix v1.22.1
+
+Le backfill v1.22.1 a régénéré **76 brouillons** (mail #504 + 27 du run `--limit 50` + 48 du run `--apply` complet) pour des mails historiques reclassifiés `demande_client`. **Mais** le poller IMAP ne re-livre pas les brouillons existants — sa condition `if category == "demande_client" and is_new` (imap_poller.py:1298) ne se déclenche que pour les nouveaux mails vus pour la première fois. Conséquence : **76 brouillons en base, 0 dans les Drafts IMAP de Daniel**.
+
+### Ajouté
+- **`scripts/deliver_pending_drafts.py`** — script one-shot qui :
+  1. Ajoute la colonne `delivered_at` (idempotent via `PRAGMA table_info`).
+  2. Lit `mail_processed WHERE category='demande_client' AND draft_generated=1 AND delivered_at IS NULL`.
+  3. Pour chaque mail, appelle `append_draft()` pour déposer en IMAP Drafts de la boîte source (flag `\Draft`, sujet `DEMANDE D'Approbation - Reponse Demande Client : ...`).
+  4. Marque `delivered_at` pour idempotence (pas de redépot).
+- **Flags** : `--apply` (défaut dry-run), `--limit N`, `--only-id 504`.
+- **Logs structurés** : `deliver.start`, `deliver.candidates`, `deliver.ok`, `deliver.failed`, `deliver.done`.
+
+### Procédure d'activation post-deploy
+```bash
+# 1. Deployer la nouvelle image
+bash scripts/deploy-to-vps.sh
+
+# 2. Dry-run pour validation
+docker exec detective-app python -m scripts.deliver_pending_drafts --limit 10
+
+# 3. Apply (livraison réelle)
+docker exec detective-app python -m scripts.deliver_pending_drafts --apply
+```
+
+### Anti-régression
+- Marquage `delivered_at` empêche le redépot lors de runs multiples.
+- Un brouillon déjà délivré (présence dans `delivered_at`) n'est jamais re-traité.
+- Si `append_draft` échoue, le mail reste `delivered_at IS NULL` et sera retenté au prochain run.
+
 ## [1.22.1] — 2026-06-10 (durcissement classifier — ZÉRO client raté)
 
 ### Contexte — BUG P0 MÉTIER
