@@ -88,6 +88,16 @@ def _find_mailbox(name: str) -> object | None:
     return None
 
 
+def _sanitize_subject(subject: str) -> str:
+    """Nettoie les caractères interdits dans les headers MIME (\\n, \\r).
+
+    v1.22.2 : les invitations Google Calendar et certaines convocations
+    contiennent des \\r\\n dans le sujet — interdit par RFC 5322. On
+    remplace par espace pour préserver la lisibilité.
+    """
+    return subject.replace("\r", " ").replace("\n", " ").strip()
+
+
 async def _mark_delivered(db_path: Path, mail_id: int) -> None:
     now = datetime.now(timezone.utc).isoformat()
     async with aiosqlite.connect(db_path) as db:
@@ -138,7 +148,7 @@ async def main(apply: bool, limit: int | None, only_id: int | None) -> None:
 
         incoming = IncomingMail(
             sender=mail["sender"] or "",
-            subject=mail["subject"] or "",
+            subject=_sanitize_subject(mail["subject"] or ""),
             body="",  # Le brouillon ne dépend pas du body — déjà tout dans ai_draft
             received_at=mail["received_at"] or "",
             message_id=mail.get("imap_uid") or "",  # fallback sur imap_uid
