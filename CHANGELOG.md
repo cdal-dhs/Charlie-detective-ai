@@ -15,6 +15,17 @@ Le backfill v1.22.1 a régénéré **76 brouillons** (mail #504 + 27 du run `--l
 - **Flags** : `--apply` (défaut dry-run), `--limit N`, `--only-id 504`.
 - **Logs structurés** : `deliver.start`, `deliver.candidates`, `deliver.ok`, `deliver.failed`, `deliver.done`.
 
+### Fixé
+- **CRLF dans les sujets** (v1.22.2 hotfix) : les invitations Google Calendar et convocations A.G. ont des `\r\n` dans le sujet (`Updated invitation: ... @ Wed 3 Jun 2026 5pm - 5:45pm\r\n (WITA) ...`), interdit par RFC 5322. `_sanitize_subject()` remplace CRLF/CR/LF par espace avant de construire le header MIME. **14 mails re-livrés** (LUC.BUCHEL/Nationale Loterij, upfdpb/UPDPB x4, arshan@qrosh.be NL, cdal@digitalhs.biz x3 invitations).
+- **`raw_draft` n'existe pas** en table `mail_processed` (schéma fixé avant v1.22.0). Le SELECT se base sur `ai_draft` uniquement.
+- **`message_id` n'existe pas non plus** en table. Fallback sur `imap_uid` pour `IncomingMail.message_id`.
+
+### Bilan déploiement
+- **Run 1** : 152 candidats, 138 livrés, 14 échecs (CRLF sujet).
+- **Run 2** (post-fix sanitize) : 14 candidats, 14 livrés, 0 échec.
+- **Total livré** : **153/154** (1 mail filtré en amont = brouillon vide + sujet vide, correctement ignoré).
+- **Daniel a maintenant 153 brouillons en attente d'approbation** dans ses 3 boîtes `Drafts` (detective_belgique, detective_belgium, dpdh_investigations).
+
 ### Procédure d'activation post-deploy
 ```bash
 # 1. Deployer la nouvelle image
@@ -31,6 +42,7 @@ docker exec detective-app python -m scripts.deliver_pending_drafts --apply
 - Marquage `delivered_at` empêche le redépot lors de runs multiples.
 - Un brouillon déjà délivré (présence dans `delivered_at`) n'est jamais re-traité.
 - Si `append_draft` échoue, le mail reste `delivered_at IS NULL` et sera retenté au prochain run.
+- Sujet sanitizé systématiquement — protection contre CRLF/CR/LF dans tous les cas.
 
 ## [1.22.1] — 2026-06-10 (durcissement classifier — ZÉRO client raté)
 
