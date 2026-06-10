@@ -62,7 +62,7 @@ async def _fetch_pending(
         db.row_factory = aiosqlite.Row
         sql = """
             SELECT id, imap_uid, mailbox_name, subject, sender, received_at,
-                   ai_draft, raw_draft, message_id
+                   ai_draft, message_id
             FROM mail_processed
             WHERE category = 'demande_client'
               AND draft_generated = 1
@@ -145,7 +145,7 @@ async def main(apply: bool, limit: int | None, only_id: int | None) -> None:
         )
         gen = GenerationResult(
             draft=mail["ai_draft"],
-            raw_draft=mail.get("raw_draft") or "",
+            raw_draft=mail["ai_draft"],  # non utilisé par append_draft
             language="fr",  # non utilisé par append_draft
             rag_pairs=[],
             model_used="",  # non utilisé par append_draft
