@@ -1,5 +1,36 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.22.1] — 2026-06-10 (durcissement classifier — ZÉRO client raté)
+
+### Contexte — BUG P0 MÉTIER
+
+Daniel a signalé le 2026-06-10 qu'un mail client (id #504, zabougafz@gmail.com) était mal catégorisé : `Re: demande d'un détective pour une personne` avec body `c'est combien le tarif exacte svp` était classé `facture` au lieu de `demande_client`. Conséquence : **0 brouillon généré**, Daniel n'a pas eu de proposition pour ce client. C'est symptomatique d'un biais du LLM classifier qui se laisse abuser par :
+- Un `Re:` (suggère une réponse passée, pas une nouvelle demande)
+- Une citation d'un devis/devis dans le corps (suggère une facture)
+
+**Décision CDAL (2026-06-10)** : **RÈGLE D'OR ABSOLUE** = on ne rate AUCUN `demande_client`. Faux positifs acceptables (Daniel les rejette à la lecture), faux négatifs intolérables (on perd un client). C'est non-négociable pour le business.
+
+### Ajouté
+- **`app/pipeline/classifier.py::classify()`** — post-traitement `_enforce_recall_over_precision()` qui force `demande_client` quand le LLM hésite (entre `autre`/`facture`/`rappel`/`urgent` → `demande_client`). L'heuristique `_looks_like_human_question()` détecte les indices humains forts : questions tarif/devis, salutations multilingues (FR/NL/EN), vocabulaire enquête (filature/surveillance/infidélité), sender non-service. **N'override JAMAIS** depuis `phishing`/`spam`/`newsletter` (sécurité).
+- **Nouveau module de tests** `tests/test_classifier_hardening.py` — 19 tests couvrent : cas #504 (replay), cas Breyne NL, sender service, newsletter, 2FA Infomaniak, body trop court, override depuis chaque catégorie source, intégration classify() avec LLM mocké. **19/19 verts**.
+- **`scripts/backfill_reclassify.py`** — script one-shot qui re-classe les ~150 mails du backlog (catégorie `autre`/`facture`/`rappel`/`urgent` avec `draft_generated=0`). Flags : `--apply` (défaut dry-run), `--limit N`, `--only-id 504`. Pour chaque mail reclassifié en `demande_client` : update `category`, `status='pending'`, `priority='high'`, regénère le brouillon via `generate_draft()`. Log `backfill.demande_client_found` pour traçabilité.
+- **`app/prompts/classifier_prompt.txt`** — règle d'or remontée en haut du prompt (v1.22.1) + 2 few-shots ajoutés : cas #504 (replay explicite) + cas NL "Vraagje over offerte".
+
+### Inchangé
+- Le flow poller→classifier→generator reste identique, seul le classifier gagne un post-traitement.
+- Le prompt v1.22.0 (personnalité Daniel) n'est pas touché.
+- La température du classifier reste 0.0 (déterministe), le coût par appel reste ~15 tokens.
+
+### Anti-régression
+- Le test `test_recall_override_newsletter_kept` et `test_recall_override_phishing_kept` ancrent le comportement : **on ne remonte JAMAIS** depuis `newsletter` ou `phishing`. Le risque d'over-correction est contenu.
+- Si Daniel trouve trop de **faux positifs** (des mails classés `demande_client` à tort) : ajuster la liste `_HUMAN_QUESTION_SIGNALS` dans `app/pipeline/classifier.py` (réduire les matches ambigus) ou durcir la garde "1 hit OU 2 hints" en "1 hit ET 1 hint" (plus strict).
+
+### Note opérationnelle
+- **Bump 1.22.0 → 1.22.1** (patch) documente un fix critique P0.
+- **Action immédiate après deploy** : `python -m scripts.backfill_reclassify --only-id 504 --apply` (traite le mail qui a déclenché le hotfix). Puis `python -m scripts.backfill_reclassify --limit 50 --apply` pour traiter 50 mails prioritaires. Le reste peut tourner en background.
+- **Action manuelle #504** : le brouillon généré par backfill atterrit dans `mail_processed.ai_draft`. Pour qu'il arrive dans la Drafts IMAP de Daniel, ouvrir le mail dans le cockpit → bouton "Régénérer" → l'endpoint `POST /api/drafts/{id}/generate` fait l'APPEND IMAP.
+- **Déploiement** : `bash scripts/deploy-to-vps.sh` (pre-flight + build local + push image + healthcheck).
+
 ## [1.22.0] — 2026-06-05 (refonte qualité LLM — Charlie colle à Daniel)
 
 ### Contexte
