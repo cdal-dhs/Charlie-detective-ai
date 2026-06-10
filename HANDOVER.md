@@ -1,7 +1,7 @@
 # HANDOVER — Detective.be Agent IA (Charlie)
 
 > Document de transfert pour Claude Opus 4.7 ou tout agent ultérieur.  
-> Dernière mise à jour : **2026-06-04** · Version courante : **V1.21.5** · Déployé sur : `detective.digitalhs.biz`
+> Dernière mise à jour : **2026-06-10** · Version courante : **V1.22.0** · Déployé sur : `detective.digitalhs.biz`
 
 ---
 
@@ -43,7 +43,7 @@
 
 | Fichier | Rôle critique | À savoir |
 |---|---|---|
-| `app/_version.py` | **Source unique de vérité** version | `VERSION = "1.21.2"`. Tolérance zéro sur la désynchronisation. |
+| `app/_version.py` | **Source unique de vérité** version | `VERSION = "1.22.0"`. Tolérance zéro sur la désynchronisation. |
 | `app/charlie.py` | **Cœur intelligent Charlie AI** | Pipeline `ask_charlie()` : extraction entités → SQL programmatique (bypass LLM pour comptages + statuts) + vault Cerveau2 (fallback direct GET pour entités non indexées) + archives + corrections + mémoire → nuage de liaison familial → **résumé de dossier narratif LLM** (v1.19.1) → garde anti-vide + garde anti-"pas trouvé" |
 | `app/charlie_memory.py` | **Mémoire persistante** | Table `charlie_memory` (feedback good/bad, corrections, auto-save). |
 | `app/cerveau_client.py` | **Client HTTP Cerveau2** | `query_vault()`, `get_vault_note()` (fallback direct par chemin), `feed_correspondance()`, `feed_document()`. Bearer Token statique. |
@@ -361,7 +361,7 @@ Le poller IMAP ne traite que les mails reçus depuis cette date. Les archives hi
 | 15 | **kimi-k2.6:cloud est un reasoning model** — réponse dans `reasoning_content` pas dans `content` → fallback systématique vers glm-5.1 | ✅ Corrigé V1.21.1 | `app/llm/router.py` | Extraction : si `content` vide, fallback sur `reasoning_content`. |
 | 16 | **Traces de raisonnement kimi-k2.6 polluent les brouillons** — "L'utilisateur demande...", "The user wants...", "Refonte :", "Version plus X :", "C'est mieux.", etc. | ✅ Corrigé V1.21.2 | `app/llm/router.py` | 30+ patterns regex dans `_clean_reasoning()` filtrent les artefacts. EN + FR + listes + guillemets + auto-critique post-mail. |
 | 17 | **Poller IMAP crash en boucle sur la boîte `detective_belgique`** depuis ~26h (3 bugs cumulés) — 0 brouillon généré, 13 retries sur certains UIDs | ✅ Corrigé V1.21.3 | `app/workers/imap_poller.py` + `app/alerts.py` + `app/healthcheck.py` | Bug 1 : `_decode_header` crash sur charset `unknown-8bit` (LookupError). Bug 2 : `_persist` crash sur `Header` objects (sqlite3.ProgrammingError). Bug 3 : retry éternel (flag `AgentProcessed` posé qu'en cas de succès → crash = rejoué toutes les 5 min indéfiniment). Fix : 5 patches + try/except englobant + nouveau flag `AgentAttempted` (libère la queue après crash). 19 tests de résilience. **Visibilité** : compteur `consecutive_errors` + alerte Resend à `cdal@digitalhs.biz` si ≥5 crashes/boîte (anti-spam 1h/boîte). |
-| 18 | **Filtre date hardcodé incohérent** — code dit `datetime(2026, 5, 20)`, `.env.example` dit `PROCESS_SINCE_DATE=2026-05-01`, Daniel veut 1er juin strict | ✅ Corrigé V1.21.4 | `app/workers/imap_poller.py` + `.env.example` | Date passée à `datetime(2026, 6, 1)`. Log `poller.date_skipped` reason=`before_2026-06-01`. `.env.example` aligné à `2026-06-01`. |
+| 18 | **Filtre date hardcodé incohérent** — code dit `datetime(2026, 5, 20)`, `.env.example` dit `PROCESS_SINCE_DATE=2026-05-01`, Daniel veut 1er juin strict | ✅ Corrigé V1.21.4 + ✅ ré-aligné 2026-06-10 | `app/workers/imap_poller.py` + `.env.example` + `.env.production` | Date passée à `datetime(2026, 6, 1)`. Log `poller.date_skipped` reason=`before_2026-06-01`. `.env.example` et `.env.production` alignés à `2026-06-01`. **Note 2026-06-10** : le `.env.production` du VPS était revenu à `2026-05-01` (régression silencieuse), ré-aligné en SSH one-shot sans bump version. Le code poller était resté à `2026-06-01` (donc mismatch config↔code avant fix). |
 
 ### Point de vigilance #1 — Provider litellm pour Ollama Cloud (CRITIQUE v1.21.1)
 `ollama_chat/<model>` force litellm vers `localhost:11434` (Ollama **local**). Le provider correct pour Ollama **Cloud** est `openai/<model>` avec `api_base=https://ollama.com/v1`.
@@ -392,8 +392,29 @@ Quand on envoie une phrase complète à Cerveau2 (`"retrouve le dossier avec té
 ### Point de vigilance #8 — Faux négatifs du LLM de synthèse Cerveau2
 Le LLM de synthèse Cerveau2 peut écrire "je ne trouve pas" alors que le document est dans le `context`. C'est un biais du modèle, pas un bug du retrieval. **Solution** : vérifier si le numéro/nom recherché est présent dans `vault_answer` (la chaîne brute retournée par Cerveau2) malgré les patterns négatifs — voir `_bad_vault` et la logique de faux négatif dans `app/charlie.py`.
 
-### Point de vigilance #9 — `pairs_vec` table missing sur `boite2.sqlite` (NOUVEAU v1.21.2)
-Le RAG retrieval échoue (rag=0) sur la boîte `detective_belgium` car la table `pairs_vec` n'existe pas dans `boite2.sqlite`. Conséquence : mails de cette boîte → brouillon moins bon (pas de cas historiques similaires). À investiguer hors-scope. Cause probable : ancien `boite2.sqlite` créé avant l'activation de sqlite-vec, jamais réindexé.
+### Point de vigilance #9 — Bootstrap RAG cassé depuis le 2026-05-28 (INVESTIGUÉ 2026-06-10)
+
+**Pire que ce que la v1.21.2 ne le pensait** : le RAG est cassé sur les **3 boîtes** (pas seulement `boite2`).
+
+**État au 2026-06-10** :
+- `boite1.sqlite` : table `pairs` existe mais **0 rows** (était censé en avoir 2042)
+- `boite2.sqlite` : table `pairs` **n'existe pas**
+- `boite3.sqlite` : table `pairs` **n'existe pas**
+
+**Cause racine identifiée** (logs `bootstrap_now.log` du 2026-05-28) :
+Le bootstrap a crashé avec `litellm.BadRequestError: LLM Provider NOT provided. ... You passed model=intfloat/multilingual-e5-large`. Le script utilisait encore l'ancien embedder local `e5-large` alors que la v1.18.0 (CHANGELOG 2026-05-28) avait basculé vers `openai/text-embedding-3-small` via OpenRouter. Le bootstrap n'a **jamais été ré-exécuté** après la bascule.
+
+**Note** : `app/pipeline/rag.py` est OK aujourd'hui (utilise bien OpenRouter). Le bug est dans le fait qu'on a **bascule l'embedder sans re-bootstraper**. La purge de 7781 vieux mails (v1.18.1, le même jour) a aussi contribué à vider `boite1` même si la table avait été créée.
+
+**Conséquence** : tous les brouillons générés depuis le 2026-05-28 ont RAG=0 → moins bons. La v1.22.0 (refonte qualité LLM) compense en partie avec personnalité/few-shot/cerveau2, mais le RAG historique est HS.
+
+**Fix (à planifier)** :
+```bash
+ssh root@69.62.110.165
+cd /opt/DETECTIVE
+docker compose exec detective python -m scripts.bootstrap_embeddings
+```
+**Hors-scope aujourd'hui** (2026-06-10) — décision CDAL. À traiter avant la v2c (feedback loop) pour que les corrections Daniel soient comparées à des brouillons avec RAG actif. Vérifier aussi les catégories de `boite2` (10 catégories dont `PRISE_CONTACT:182` majoritaire) et `boite3` (12 catégories dont `INVESTIGATION_ENTREPRISE:399`) avant de relancer — la table `category` est déjà remplie donc le matching Q/R devrait fonctionner.
 
 ### Point de vigilance #10 — Tables `mail_processed` `app_settings` peuvent être stale
 Si tu modifies `app/config.py` (défauts `llm_model_*`), il faut aussi **purger la table `app_settings` en prod** (clé `llm_model_default`, `llm_model_classifier`, `llm_model_fallback`) — sinon les valeurs runtime en DB écrasent tes défauts. Procédure :
@@ -487,15 +508,23 @@ Avant de modifier quoi que ce soit :
 
 ---
 
-## 13. 🔴 TODO DEMAIN (2026-06-05) — Sécurité anti-crash silencieux
+## 13. ✅ Sécurité anti-crash silencieux — INSTALLÉ EN PROD (état au 2026-06-10)
 
-**Contexte** : le 2026-06-04, CDAL a explicitement demandé « plus jamais de crash sans être prévenu : c'est impossible et interdit ». La v1.21.5 a ajouté Slack + heartbeat startup/shutdown (niveaux 1-2), mais il manque les niveaux 3-4 (watchdog externe + uptime checker). CDAL veut **ZÉRO crash silencieux** → finir ces items avant de passer à autre chose.
+**Contexte** : le 2026-06-04, CDAL a explicitement demandé « plus jamais de crash sans être prévenu : c'est impossible et interdit ». La v1.21.5 a ajouté Slack + heartbeat startup/shutdown (niveaux 1-2). Les niveaux 3-4 ont été installés manuellement le 2026-06-05 puis vérifiés opérationnels au 2026-06-10.
 
-### Priorité 1 — Watchdog externe (cron VPS)
+**Statut des 4 niveaux (vérifié en SSH 2026-06-10)** :
+1. ✅ **Niveau 1 — Slack in-app** (`notify_startup` / `notify_shutdown` v1.21.5) : actif
+2. ✅ **Niveau 2 — Resend in-app** (`alert_poller_persistent_failure` v1.21.3, anti-spam 1h/boîte) : actif
+3. ✅ **Niveau 3 — Cron watchdog externe** : `/etc/cron.d/detective-healthcheck` (toutes les 1 min) + script dans `/usr/local/bin/detective-healthcheck.sh` + state dir `/var/lib/detective-healthcheck/` (counter=1, last_alert=Jun 5). Alerte Resend si 3 échecs consécutifs.
+4. ✅ **Niveau 4 — Uptime checker Healthchecks.io** : `HEALTHCHECKS_PING_URL=https://hc-ping.com/1d6f6a30-...` dans `.env.production`. Ping envoyé par le cron watchdog (pas par Charlie, design voulu — le cron continue même si Charlie est HS).
+
+**Bonus** : `docker-clean` cron hebdo dim 4h (`/etc/cron.d/detective-docker-clean`) installé, gain attendu 64GB+ de build cache.
+
+### Priorité 1 — Watchdog externe (cron VPS) ✅ INSTALLÉ
 
 **Pourquoi** : si Charlie crash COMPLÈTEMENT (OOM, kill -9, deadlock asyncio), aucune alerte in-app ne s'exécute. Il faut un script externe au processus qui ping `/health` et alerte Resend si down.
 
-**État au 2026-06-05** : ✅ **livré**. Script `scripts/detective-healthcheck.sh` créé, livré sur le VPS via `bash scripts/deploy-to-vps.sh`. Reste à installer manuellement (one-shot SSH, ~5 min) + tester.
+**État au 2026-06-10** : ✅ **installé et opérationnel**. Script présent dans `/opt/DETECTIVE/scripts/detective-healthcheck.sh` (5617 bytes) ET dans `/usr/local/bin/` (installé via `install -m 755`). Cron `/etc/cron.d/detective-healthcheck` actif (`* * * * *`). State dir `/var/lib/detective-healthcheck/` créé (survit aux redéplois Docker, hors conteneur). `counter=1` (Charlie OK) mis à jour Jun 10 06:02. Logrotate `/etc/logrotate.d/detective-healthcheck` configuré (7j). Log `/var/log/detective-healthcheck.log` reste à 0 octets = **comportement correct** (le log n'est rempli QUE sur échec). `last_alert=1780622461` (Jun 5 01:21) = 1ère alerte test au moment de l'install.
 
 **Endpoint pingé** : `https://detective.digitalhs.biz/health` (HTTPS public via Traefik, port 8080 du conteneur mappé). Teste **tout le stack** : Charlie + Traefik + DNS + cert TLS.
 - ⚠️ Initialement HANDOVER mentionnait `http://127.0.0.1:8765/health`, mais ce port n'est **pas mappé sur l'host** dans `docker-compose.yml` (seul le 8080 cockpit l'est). Donc on passe par HTTPS public, qui est plus solide de toute façon (couvre aussi Traefik down).
@@ -594,7 +623,7 @@ rm -rf /var/lib/detective-healthcheck
 
 **Pourquoi** : le cron watchdog niveau 3 tourne SUR le VPS. Si le VPS lui-même crash (panne hardware, OOM kernel, datacenter HS), le cron ne s'exécute plus → aucune alerte. Il faut un service externe qui reçoit un ping et alerte si silence.
 
-**État au 2026-06-05** : ✅ **code livré** (5 lignes bash dans `scripts/detective-healthcheck.sh`). Reste à faire : signup Healthchecks.io par CDAL (5 min) + ajout URL dans `/opt/DETECTIVE/.env.production` (1 ligne).
+**État au 2026-06-10** : ✅ **installé et opérationnel**. `HEALTHCHECKS_PING_URL=https://hc-ping.com/1d6f6a30-126f-4f71-a622-b3a5fecdc50c` dans `/opt/DETECTIVE/.env.production`. Le bloc bash dans `detective-healthcheck.sh` (ligne "succès 200") est actif et ping Healthchecks.io à chaque check minute. Pas de ping dans `app/main.py` — c'est le design voulu (le cron externe continue de tourner même si Charlie est HS, ce qui distingue "Charlie down" de "VPS down" sur le dashboard Healthchecks.io).
 
 **Décisions CDAL (AskUserQuestion 2026-06-05)** :
 - **Fréquence** : 5 min (suffisant vu qu'on a déjà le watchdog Resend 3 min en backup)
@@ -667,7 +696,7 @@ sed -i '/^HEALTHCHECKS_PING_URL/d' /opt/DETECTIVE/.env.production
 
 **Pourquoi** : le VPS est à 60% disque (79GB libres). Si on accumule des images Docker / build cache / vieux volumes, on risque de remplir le disque dans 2-3 mois, ce qui ferait crasher Charlie (sqlite + logs).
 
-**État au 2026-06-05** : ✅ **livré**. Script `scripts/detective-docker-clean.sh` créé, livré sur le VPS. Reste à installer manuellement (one-shot SSH, ~3 min) + tester.
+**État au 2026-06-10** : ✅ **installé et opérationnel**. Script `scripts/detective-docker-clean.sh` présent dans `/opt/DETECTIVE/scripts/` ET dans `/usr/local/bin/`. Cron `/etc/cron.d/detective-docker-clean` (`0 4 * * 0` = dimanche 4h). Logrotate configuré (4 sem). Log `/var/log/detective-docker-clean.log` = 2377 bytes (Jun 7 04:00) = 1ère exécution dim Jun 7. Safety list opérationnelle (ABORT si container prod stopped).
 
 **Décisions CDAL (AskUserQuestion 2026-06-05)** :
 - **Fréquence** : hebdo dimanche 4h (faible activité BE / 11h WITA Bali)
@@ -744,27 +773,32 @@ docker start detective-agent
 
 **Rollback** : `rm /etc/cron.d/detective-docker-clean /usr/local/bin/detective-docker-clean.sh /etc/logrotate.d/detective-docker-clean`. ~10s.
 
-### Priorité 4 — Mémoire projet
+### Priorité 4 — Mémoire projet ✅ ÉCRITE 2026-06-05
 
 **Pourquoi** : CDAL a passé 14h+ sur ce projet le 2026-06-04 et demande que la fatigue ne coûte pas le contexte.
 
-**Comment** :
-- Écrire mémoire `feedback_fatigue_longue_sessione.md` : "CDAL fatigué après 14h+ → pause, ne pas démarrer nouveau chantier, finir ce qui est en cours"
-- Écrire mémoire `feedback_zéro_crash_silencieux.md` : règle absolue = "toute absence d'alerte = bug à corriger en priorité P0"
+**État au 2026-06-10** : ✅ **livré** (créé 2026-06-05, vérifié opérationnelles). Deux fichiers dans `~/.claude/projects/.../memory/` :
+- `feedback_fatigue-longue-session.md` — règle "14h+ = pause + finir en cours, PAS nouveau chantier"
+- `feedback_zéro_crash_silencieux.md` — règle absolue "tout crash sans alerte = bug P0", référence aux 4 niveaux de défense
 
-**État** : 0% — fichiers à écrire dans `~/.claude/projects/.../memory/`.
+Les deux sont indexées dans `MEMORY.md` (lignes 11-12). Capturent l'incident du 2026-06-04 (poller IMAP cassé 26h sans alerte) comme **cas d'école**.
 
-### Fichiers à toucher demain
+### 🔴 NOUVEAU — Bug RAG à corriger avant V2c (point de vigilance #9)
 
-- `/opt/DETECTIVE/scripts/` (nouveau) → `detective-healthcheck.sh`, `detective-docker-clean.sh`
-- `/etc/cron.d/detective` (nouveau) → entrée cron
-- `app/main.py` → ajouter ping Healthchecks.io après notify_startup
-- `app/config.py` → ajouter `healthchecks_ping_url: str = ""`
-- `~/.claude/projects/.../memory/feedback_*.md` (nouveau) → 2 mémoires CDAL
+Découvert le 2026-06-10 lors de l'audit conformité VPS. Le RAG est cassé sur les 3 boîtes depuis le 2026-05-28 (bootstrap a crashé après la bascule embedder local → OpenRouter v1.18.0). Détail complet au point de vigilance #9.
+
+**Fix one-shot à planifier** :
+```bash
+ssh root@69.62.110.165
+cd /opt/DETECTIVE
+docker compose exec detective python -m scripts.bootstrap_embeddings
+```
+
+**À coordonner avec CDAL** (cf. HANDOVER §9 #11 — les tentatives passées de réindexation ont échoué sur le VPS : volume mount, extension sqlite3 vec0). À traiter avant V2c (feedback loop qualité) — sinon on rate le RAG dans le diff brouillon-vs-Daniel.
 
 ### Note pour le prochain agent
 
-Si tu reprends demain : lis cette section 13 EN PREMIER. Ne commence PAS de nouveau chantier tant que les 4 priorités ci-dessus ne sont pas résolues. CDAL veut un Charlie "production-grade 24/7" — les niveaux 1-2 actuels (Slack + Resend) ne suffisent pas pour un service critique.
+État au 2026-06-10 : les 4 niveaux anti-crash silencieux sont **opérationnels en prod** (vérifié en SSH). Le seul chantier ouvert dans §13 est le bug RAG (point #9), à traiter avant V2c. Pour le reste, voir HANDOVER §12 (checklist reprise) et §14 ci-dessous pour les items urgents de la session du 2026-06-10.
 
 ---
 
