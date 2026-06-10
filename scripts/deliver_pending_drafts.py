@@ -62,7 +62,7 @@ async def _fetch_pending(
         db.row_factory = aiosqlite.Row
         sql = """
             SELECT id, imap_uid, mailbox_name, subject, sender, received_at,
-                   ai_draft, message_id
+                   ai_draft
             FROM mail_processed
             WHERE category = 'demande_client'
               AND draft_generated = 1
@@ -141,7 +141,7 @@ async def main(apply: bool, limit: int | None, only_id: int | None) -> None:
             subject=mail["subject"] or "",
             body="",  # Le brouillon ne dépend pas du body — déjà tout dans ai_draft
             received_at=mail["received_at"] or "",
-            message_id=mail["message_id"] or "",
+            message_id=mail.get("imap_uid") or "",  # fallback sur imap_uid
         )
         gen = GenerationResult(
             draft=mail["ai_draft"],
