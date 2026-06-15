@@ -144,7 +144,7 @@ def _load_daniel_fewshot(max_examples: int = 4) -> str:
         "Ces exemples montrent comment Daniel écrit VRAIMENT à ses clients. "
         "Imite ce style, ce ton, cette structure, ce niveau de personnalisation."
     )
-    for i, (mid, mbox, subj, sender, body, human, status) in enumerate(rows, 1):
+    for i, (mid, mbox, subj, sender, body, human, status, _received_at) in enumerate(rows, 1):
         # Priorité : human_draft (correction) > rien d'autre (on n'utilise pas ai_draft
         # pour pas que le LLM s'auto-approuve)
         response = (human or "").strip()
