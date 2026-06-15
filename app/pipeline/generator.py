@@ -56,6 +56,12 @@ def _load_daniel_fewshot(max_examples: int = 4) -> str:
     Le LLM voit le VRAI Daniel, pas un style approximatif. Sélection : 30
     derniers jours, body > 200 chars, triés par date desc, les N plus récents.
 
+    v1.22.4 : le filtre temporel est FAIT EN PYTHON (regex RFC 2822), pas en
+    SQL avec `date(received_at) >= ?`. La colonne `received_at` est stockée
+    en format `Sat, 13 Jun 2026 05:41:38 +0000` (RFC 2822) — la fonction
+    SQLite `date()` ne sait pas la parser et retournait toujours 0 ligne
+    (bug latent : le few-shot n'a JAMAIS fonctionné depuis v1.22.0).
+
     Args:
         max_examples: nombre max d'exemples (3-4 idéal — 1-2K tokens)
 
@@ -63,6 +69,7 @@ def _load_daniel_fewshot(max_examples: int = 4) -> str:
         Bloc formaté prêt à coller dans le system prompt, ou chaîne vide
         si aucun exemple trouvé (première install, table vide).
     """
+    import re
     import sqlite3
     from datetime import datetime, timedelta, timezone
 
@@ -71,18 +78,40 @@ def _load_daniel_fewshot(max_examples: int = 4) -> str:
     if not db_path.exists():
         return ""
 
+    _RFC2822 = re.compile(
+        r"[A-Za-z]{3},\s+(\d+)\s+(\w+)\s+(\d{4})\s+(\d{2}):(\d{2}):(\d{2})"
+    )
+    _MONTHS = {
+        "Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6,
+        "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12,
+    }
+
+    def _parse_received_at(text):
+        if not text:
+            return None
+        m = _RFC2822.match(text)
+        if not m:
+            return None
+        day, mon_s, year, hh, mm, ss = m.groups()
+        try:
+            return datetime(
+                int(year), _MONTHS[mon_s], int(day),
+                int(hh), int(mm), int(ss),
+                tzinfo=timezone.utc,
+            )
+        except (KeyError, ValueError):
+            return None
+
     try:
         conn = sqlite3.connect(str(db_path))
-        # Filtre : 30 derniers jours, body significatif, et soit human_draft non vide
-        # soit status=sent (mail envoyé par Daniel)
-        # Priorité aux human_draft (corrections explicites = meilleur signal du style Daniel)
-        since = (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d")
-        rows = conn.execute(
+        # Filtre SQL : body significatif + soit human_draft, soit status=sent.
+        # Le tri met les corrections (human_draft) en tête, puis reçus desc.
+        # On prend large (200) puis on filtre la fenêtre 30j en Python.
+        candidates = conn.execute(
             """
-            SELECT id, mailbox_name, subject, sender, body, human_draft, status
+            SELECT id, mailbox_name, subject, sender, body, human_draft, status, received_at
             FROM mail_processed
-            WHERE date(received_at) >= ?
-              AND length(coalesce(body, '')) > 200
+            WHERE length(coalesce(body, '')) > 200
               AND (
                 length(coalesce(human_draft, '')) > 100
                 OR status = 'sent'
@@ -90,14 +119,22 @@ def _load_daniel_fewshot(max_examples: int = 4) -> str:
             ORDER BY
               CASE WHEN length(coalesce(human_draft, '')) > 100 THEN 0 ELSE 1 END,
               received_at DESC
-            LIMIT ?
-            """,
-            (since, max_examples),
+            LIMIT 200
+            """
         ).fetchall()
         conn.close()
     except Exception as exc:
         log.warning("generator.fewshot_load_failed", error=str(exc))
         return ""
+
+    since = datetime.now(timezone.utc) - timedelta(days=30)
+    rows = []
+    for row in candidates:
+        received_dt = _parse_received_at(row[7])
+        if received_dt and received_dt >= since:
+            rows.append(row)
+        if len(rows) >= max_examples:
+            break
 
     if not rows:
         return ""

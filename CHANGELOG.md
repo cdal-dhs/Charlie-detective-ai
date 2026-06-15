@@ -1,5 +1,26 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.22.4] — 2026-06-15 (fix few-shot loading — le LLM voit ENFIN le VRAI Daniel)
+
+### Contexte — BUG LATENT CRITIQUE
+
+Suite au feed du `human_draft` de Daniel pour le mail #561 (Soldermann — correction 1990 chars, capturée 2026-06-15T07:10 UTC), le test du loader `_load_daniel_fewshot()` retourne **0 candidat** alors que 2 mails correspondent aux critères (mail #561 + mail #83 du 2026-05-22). Root cause : le filtre SQL `WHERE date(received_at) >= ?` ne parse PAS le format RFC 2822 — la colonne est stockée en `Sat, 13 Jun 2026 05:41:38 +0000`, format que la fonction SQLite `date()` ne sait pas interpréter. **Conséquence** : depuis la v1.22.0 (livraison du few-shot learning), le system prompt a TOUJOURS été injecté avec un bloc few-shot VIDE. Le LLM n'a JAMAIS vu le vrai style Daniel. Les brouillons générés étaient du "Daniel simulé" basé uniquement sur `personality_daniel.txt`, jamais sur les corrections validées.
+
+### Fixé
+- **`app/pipeline/generator.py::_load_daniel_fewshot()` — v1.22.4** : le filtre temporel est maintenant fait EN PYTHON (regex RFC 2822) après récupération d'un panel de 200 candidats en SQL. Pattern : on prend large côté SQL (`body>200 AND (hd>100 OR status=sent)`), on trie par human_draft DESC puis received_at DESC, on parse la date avec `_RFC2822 = re.compile(r'[A-Za-z]{3},\s+(\d+)\s+(\w+)\s+(\d{4})\s+(\d{2}):(\d{2}):(\d{2})')`, on garde les N plus récents dans la fenêtre 30 jours. Pattern réutilisé de `scripts/cleanup_old_drafts.py` (même parsing).
+- **Re-test live sur VPS** (data réelle) : 2 candidats récupérés au lieu de 0.
+  - **#561** (Soldermann, 2026-06-13) : `human_draft` 1990 chars — la correction Daniel CORRECTEMENT chargée.
+  - **#83** (Wastiau, 2026-05-22) : `human_draft` 997 chars.
+- **Effet immédiat** : la prochaine génération de brouillon (nouveau mail `demande_client` ou retry manuel via `POST /api/drafts/{id}/retry`) injectera dans le system prompt ces 2 vrais exemples signés Daniel. Charlie imitera le ton (formel, structuré par paragraphes, mention "On vous téléphonera...", "Bien cordialement, Daniel Hurchon"), la structure (intro + estimation × N scénarios + infos pour convention + paiement), et le niveau de détail (prix HTVA, mention "kilométrage à calculer", "provision 60 %").
+
+### Bilan déploiement
+- Test live avant deploy : `Candidates from SQL: 2 / Top 5 (after Python date filter): #561 + #83`. Le fix est validé.
+
+### Anti-régression
+- Pattern RFC 2822 parsing mutualisé — `_parse_received_at()` interne à `_load_daniel_fewshot()` (pas encore extrait en helper partagé, à factoriser si d'autres modules en ont besoin).
+- Si un nouveau mail ne se parse pas, il est simplement ignoré (pas de crash), warn log `generator.fewshot_load_failed` reste en filet de sécurité.
+- Le panel SQL reste borné à 200 lignes → pas de risque OOM si la table grossit à 10K+.
+
 ## [1.22.2] — 2026-06-10 (livraison IMAP des brouillons backfillés)
 
 ### Contexte — Suites du hotfix v1.22.1
