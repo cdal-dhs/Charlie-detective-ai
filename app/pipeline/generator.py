@@ -9,6 +9,7 @@ from app.config import MailboxConfig, get_settings
 from app.llm.router import complete
 from app.pipeline.case_classifier import classify_case
 from app.pipeline.language import Language
+from app.pipeline.qualification_builder import build_qualification_draft
 from app.pipeline.rag import RetrievedPair, retrieve
 from app.settings_store import get_llm_models
 
@@ -116,7 +117,7 @@ def _load_daniel_fewshot(max_examples: int = 4) -> str:
     """
     import re
     import sqlite3
-    from datetime import datetime, timedelta, timezone
+    from datetime import UTC, datetime, timedelta
 
     settings = get_settings()
     db_path = settings.db_agent_state
@@ -154,7 +155,7 @@ def _load_daniel_fewshot(max_examples: int = 4) -> str:
                 int(hh),
                 int(mm),
                 int(ss),
-                tzinfo=timezone.utc,
+                tzinfo=UTC,
             )
         except (KeyError, ValueError):
             return None
@@ -184,7 +185,7 @@ def _load_daniel_fewshot(max_examples: int = 4) -> str:
         log.warning("generator.fewshot_load_failed", error=str(exc))
         return ""
 
-    since = datetime.now(timezone.utc) - timedelta(days=30)
+    since = datetime.now(UTC) - timedelta(days=30)
     rows = []
     for row in candidates:
         received_dt = _parse_received_at(row[7])
@@ -201,7 +202,7 @@ def _load_daniel_fewshot(max_examples: int = 4) -> str:
         "Ces exemples montrent comment Daniel écrit VRAIMENT à ses clients. "
         "Imite ce style, ce ton, cette structure, ce niveau de personnalisation."
     )
-    for i, (mid, mbox, subj, sender, body, human, status, _received_at) in enumerate(rows, 1):
+    for i, (mid, mbox, subj, sender, body, human, _status, _received_at) in enumerate(rows, 1):
         # Priorité : human_draft (correction) > rien d'autre (on n'utilise pas ai_draft
         # pour pas que le LLM s'auto-approuve)
         response = (human or "").strip()
@@ -263,24 +264,29 @@ def _build_messages(
     system = (
         _load_personality()
         + f"\n\nMarque/boîte source : {mailbox.brand}"
-        + f"\nLangue de réponse OBLIGATOIRE : français (la langue de travail de Daniel)"
+        + "\nLangue de réponse OBLIGATOIRE : français (la langue de travail de Daniel)"
         + (f"\n\n{soul_section}" if soul_section else "")
         + (f"\n\n{fewshot}" if fewshot else "")
         + (f"\n\n{qualification}" if qualification else "")
     )
     vault_section = _format_vault_context(vault_notes)
+    # La qualification est placée dans le user prompt pour être la consigne
+    # la plus récente et la plus forte, juste avant la génération.
     user = (
         f"{_format_rag_context(pairs)}\n"
         + (f"\n{vault_section}\n\n" if vault_section else "")
-        + f"--- NOUVEAU MAIL À TRAITER ---\n"
+        + "--- DIRECTIVE QUALIFICATION (à appliquer impérativement) ---\n"
+        + qualification
+        + "\n\n--- NOUVEAU MAIL À TRAITER ---\n"
         f"De : {sender}\n"
         f"Sujet : {incoming_subject}\n"
         f"Langue du mail entrant : {language}\n"
         f"Corps :\n{incoming_body}\n\n"
         f"Génère UN brouillon de réponse EN FRANÇAIS, signé au nom de {mailbox.brand}, "
-        f"dans le style de Daniel illustré par les cas ci-dessus. "
-        f"Applique impérativement le PROCESS de qualification ci-dessus pour poser les bonnes questions. "
-        f"Renvoie UNIQUEMENT le corps du message, sans préambule, sans 'Sujet:', sans markdown."
+        f"dans le style de Daniel. "
+        "Tu es en mode COLLECTE D'INFORMATIONS : liste impérativement les "
+        "questions manquantes sous forme numérotée AVANT tout rendez-vous. "
+        "Renvoie UNIQUEMENT le corps du message, sans préambule, sans 'Sujet:', sans markdown."
     )
     return [
         {"role": "system", "content": system},
@@ -323,27 +329,43 @@ async def generate_draft(
         confidence=case_confidence,
     )
 
-    messages = _build_messages(
-        incoming_subject,
-        incoming_body,
-        sender,
-        mailbox,
-        language,
-        pairs,
-        vault_notes,
-        case_type=case_type,
-        case_confidence=case_confidence,
-        case_reason=case_reason,
-    )
     llm_default, _llm_fallback = get_llm_models()
-    draft = await complete(
-        model=llm_default,
-        messages=messages,
-        max_tokens=2500,  # v1.22.7 : 2000 → 2500 (qualification = réponse plus longue)
-        temperature=0.4,
-    )
-    raw_draft = draft.strip()
-    log.info("generator.draft", length=len(raw_draft), preview=raw_draft[:200])
+    draft_categories = {
+        c.strip().lower() for c in settings.draft_categories.split(",") if c.strip()
+    }
+    if category.lower() in draft_categories:
+        # Brouillon qualifiant déterministe : les LLM ne suivent pas de façon
+        # fiable une consigne de liste numérotée, on construit donc le squelette
+        # par code et on garde la main sur les questions/tarifs.
+        raw_draft = build_qualification_draft(
+            incoming_subject, incoming_body, sender, mailbox, case_type
+        )
+        log.info(
+            "generator.qualification_draft",
+            case=case_type,
+            length=len(raw_draft),
+        )
+    else:
+        messages = _build_messages(
+            incoming_subject,
+            incoming_body,
+            sender,
+            mailbox,
+            language,
+            pairs,
+            vault_notes,
+            case_type=case_type,
+            case_confidence=case_confidence,
+            case_reason=case_reason,
+        )
+        draft = await complete(
+            model=llm_default,
+            messages=messages,
+            max_tokens=2500,
+            temperature=0.4,
+        )
+        raw_draft = draft.strip()
+        log.info("generator.draft", length=len(raw_draft), preview=raw_draft[:200])
 
     # --- Enrichissement multilingue pour aide à la lecture Daniel ---
     # Si la langue détectée ≠ FR, on ajoute en-tête (mail original) + traductions.

@@ -1,5 +1,30 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.22.8] — 2026-06-16 (fix qualification déterministe — bug brouillon #582)
+
+### Contexte
+Le brouillon #582 généré en production par la v1.22.7 a obtenu une note de **0/10** : aucune salutation, aucune question obligatoire (nom, prénom, GSM, adresse…), ton robotique, tarifs et relais Daniel absents. Les tests en local avec `gemma4:31b`, `kimi-k2.6:cloud` et `glm-5.1:cloud` ont montré qu'aucun modèle disponible ne suit de façon fiable une consigne « liste impérativement les questions manquantes sous forme numérotée ».
+
+### Fixé
+- **`app/pipeline/qualification_builder.py`** : nouveau builder déterministe qui construit le brouillon qualifiant par code :
+  - Salutation personnalisée avec extraction du prénom du signataire depuis la fin du mail.
+  - Reformulation du besoin contextualisée (ex. "surveillance concernant l'agissement d'un collaborateur").
+  - 6 questions de base obligatoires + 3 questions spécifiques au cas détecté.
+  - Bloc tarifaire configurable (ouverture de dossier, rapport, heures jour/nuit).
+  - Rappel systématique de la règle des 2 détectives pour filatures/surveillance mobile.
+  - Relais Daniel pour finalisation du devis et appel de clôture.
+  - Signature `Daniel Hurchon / {marque} / GSM 0471/31.81.20 / contact@detectivebelgique.be`.
+- **`app/pipeline/generator.py`** : branche `demande_client`/`prise_contact` (`DRAFT_CATEGORIES`) sur `build_qualification_draft()` au lieu du LLM brut. Le flux LLM few-shot est conservé pour les autres catégories.
+- **`app/pipeline/case_classifier.py`** : corrections ruff (prompt JSON multiligne + fallback keyword formaté).
+- **`app/pipeline/qualification_builder.py` + `app/pipeline/generator.py`** : corrections ruff (E501, F541, I001, UP017).
+
+### Supprimé
+- Scripts temporaires de debug : `scripts/test_draft_local.py`, `scripts/test_draft_deterministic.py`, `scripts/test_draft_simple.py`.
+
+### Tests
+- **82/82 tests verts** avec `venv/bin/python -m pytest -q`.
+- Test local `scripts/test_draft_local.py` (avant suppression) : brouillon correct de 9 questions pour une demande de filature, salutation "Bonjour Christophe,".
+
 ## [1.22.7] — 2026-06-16 (qualification prospect dans les brouillons)
 
 ### Contexte

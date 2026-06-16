@@ -1,7 +1,7 @@
 # HANDOVER — Detective.be Agent IA (Charlie)
 
 > Document de transfert pour tout agent (Claude Sonnet/Opus 4.X, GPT, etc.).
-> **Dernière mise à jour** : 2026-06-16 · **Version courante** : v1.22.7 · **Déployé sur** : `detective.digitalhs.biz`
+> **Dernière mise à jour** : 2026-06-16 · **Version courante** : v1.22.8 · **Déployé sur** : `detective.digitalhs.biz`
 
 ---
 
@@ -38,7 +38,7 @@
 
 ---
 
-## 2. Architecture actuelle (v1.22.7)
+## 2. Architecture actuelle (v1.22.8)
 
 ```
 [3 boîtes Infomaniak IMAP] ──polling 5min──► [Worker asyncio Python]
@@ -63,7 +63,7 @@
 
 | Fichier | Rôle critique | À savoir |
 |---|---|---|
-| `app/_version.py` | **Source unique de vérité** version | `VERSION = "1.22.4"`. Tolérance zéro. Ne JAMAIS utiliser `importlib.metadata`. |
+| `app/_version.py` | **Source unique de vérité** version | `VERSION = "1.22.8"`. Tolérance zéro. Ne JAMAIS utiliser `importlib.metadata`. |
 | `app/charlie.py` | **Cœur intelligent Charlie AI** | `ask_charlie()` : extraction entités → SQL programmatique (bypass LLM) + vault Cerveau2 (fallback direct GET) + archives + corrections + mémoire → nuage de liaison familial → **résumé de dossier narratif LLM** (v1.19.1) → garde anti-vide + garde anti-"pas trouvé" |
 | `app/charlie_memory.py` | **Mémoire persistante** | Table `charlie_memory` (feedback good/bad, corrections, auto-save) |
 | `app/cerveau_client.py` | **Client HTTP Cerveau2** | `query_vault()`, `get_vault_note()` (fallback direct), `feed_correspondance()`, `feed_document()`. Bearer Token statique. **Dégradation silencieuse** (retourne `[]` si Cerveau2 down) |
@@ -71,7 +71,7 @@
 | `app/llm/router.py` | **Wrapper LiteLLM** | `complete()` avec fallback automatique + extraction `reasoning_content` (kimi-k2.6 reasoning) + post-traitement `_clean_reasoning()` (30+ patterns pour traces raisonnement) |
 | `app/pipeline/translator.py` | **Aide lecture multilingue (v1.21.0)** | `translate_to_fr()` + `translate_from_fr()` avec try/except, troncature 12K. Utilisé si langue mail ≠ FR |
 | `app/pipeline/draft_renderer.py` | **Rendu brouillon enrichi (v1.21.0)** | Compose 4 blocs : email d'origine + traduction FR + proposition FR + traduction langue source |
-| `app/pipeline/generator.py` | **Génération brouillon** | Appelle `translate_to_fr` + `translate_from_fr` en parallèle. **`_load_daniel_fewshot()` (v1.22.4)** : récupère 200 candidats SQL, parse date RFC 2822 en Python, garde top 4 dans fenêtre 30j — **CRITIQUE** : c'est ce qui permet au LLM d'imiter le vrai style Daniel |
+| `app/pipeline/generator.py` | **Génération brouillon** | Pour `demande_client`/`prise_contact` : branche `app/pipeline/qualification_builder.py` (brouillon déterministe, v1.22.8). Pour les autres catégories : flux LLM few-shot + Cerveau2. Appelle `translate_to_fr` + `translate_from_fr` en parallèle. **`_load_daniel_fewshot()` (v1.22.4)** : récupère 200 candidats SQL, parse date RFC 2822 en Python, garde top 4 dans fenêtre 30j |
 | `app/pipeline/classifier.py` | **Classification LLM** (v1.22.1 hardened) | 8 catégories avec few-shots. Prompt durci pour ne plus rater aucun `demande_client` |
 | `app/pipeline/language.py` | **Détection langue** | `Language = str` (toutes BCP-47), `language_label()` pour affichage humain |
 | `app/web/api.py` | **Endpoints HTMX + Charlie** | `charlie_ask()`, `charlie_feedback()`, `draft_generate()`, **`POST /api/drafts/{id}/retry`** (régénération manuelle) |
@@ -394,7 +394,7 @@ Le poller IMAP ne traite que les mails reçus depuis cette date. Les archives hi
 
 ---
 
-## 9. Bugs résolus et points de vigilance (état au 2026-06-16, v1.22.7)
+## 9. Bugs résolus et points de vigilance (état au 2026-06-16, v1.22.8)
 
 ### ✅ Bugs résolus récents (v1.22.0 → v1.22.5)
 
@@ -403,7 +403,7 @@ Le poller IMAP ne traite que les mails reçus depuis cette date. Les archives hi
 | 1 | **Le LLM n'a JAMAIS vu le vrai Daniel depuis v1.22.0** — bug latent : `_load_daniel_fewshot()` utilisait `date(received_at) >= ?` en SQL, mais `received_at` est stocké en RFC 2822 (`Sat, 13 Jun 2026 05:41:38 +0000`), fonction SQLite `date()` ne parse pas → 0 candidat retourné | ✅ **Corrigé v1.22.4** | `app/pipeline/generator.py` | Le filtre temporel est FAIT EN PYTHON (regex RFC 2822) après récupération d'un panel de 200 candidats SQL. Pattern mutualisé de `scripts/cleanup_old_drafts.py`. Test live : 2 corrections Daniel injectées (mail #561 Soldermann 1990 chars + mail #83 Wastiau 997 chars) → 6122 chars dans le system prompt au lieu de 0. Le LLM imite enfin le format Daniel (intro "Monsieur X,", estimations HTVA × scénarios, mention "On vous téléphonera...", "Bien cordialement, Daniel Hurchon"). |
 | 13 | **Tests rouges + robustesse mémoire Charlie** — `query_vault` retourne un tuple `(notes, answer)` mais les tests mockaient une liste ; `charlie_memory` plantait avec `no such table` si la DB n'était pas initialisée ; `_is_vault_relevant` référençait `_VAULT_KEYWORDS` indéfini ; `_extract_dossier_id` ne capturait pas "affaire XYZ123" | ✅ **Corrigé v1.22.5** | `app/charlie_memory.py` + `app/charlie.py` + `tests/test_cerveau_client.py` + `tests/test_charlie_vault.py` + `tests/test_cerveau_feed.py` | `init_memory_table()` appelée dans toutes les fonctions publiques de `charlie_memory.py` avec dégradation silencieuse sur `OperationalError`. `_VAULT_KEYWORDS` défini. Pattern `affaire` ajouté. **75/75 tests verts**. |
 | 14 | **Bouton Copier cassé + traçabilité actions Daniel** — le bouton Copier sur `/conversation` ne copiait pas (Alpine.js inline peu fiable) ; CDAL suspectait des demandes clients `detective_belgium` approuvées automatiquement | ✅ **Corrigé v1.22.6** | `app/web/templates/app/conversation.html` + `app/web/admin.py` + `app/web/templates/admin/audit.html` | Listener vanilla JS délégué pour le copier. Section "Dernières actions de Daniel" dans `/admin/audit` montre les `draft_approve`/`draft_reject`/`status_update` de `user_id=2`. Investigation VPS a confirmé : les mails arrivent `pending`/`high`, Daniel les approuve via le cockpit. |
-| 15 | **Qualification prospect insuffisante dans les brouillons** — les réponses de Charlie ne posaient pas assez de questions métier pour permettre à Daniel de faire un appel de clôture/devis solide | ✅ **Corrigé v1.22.7** | `app/prompts/prospect_qualification.md` + `app/pipeline/case_classifier.py` + `app/pipeline/generator.py` + `app/workers/imap_poller.py` + `app/config.py` | Directive de qualification intégrée au system prompt. Détection automatique du cas de figure (5 cas). Tarifs configurables. Brouillons générés aussi pour `prise_contact`. Modèle qualifier configurable, défaut `openai/gemma4:31b`. |
+| 15 | **Qualification prospect insuffisante dans les brouillons** — les réponses de Charlie ne posaient pas assez de questions métier pour permettre à Daniel de faire un appel de clôture/devis solide. **Test prod v1.22.7 (#582) = 0/10** : pas de salutation, pas de questions, ton robotique. Root cause : les LLM disponibles (`gemma4:31b`, `kimi-k2.6:cloud`, `glm-5.1:cloud`) ne suivent pas une consigne de liste numérotée. | ✅ **Corrigé v1.22.8** | `app/pipeline/qualification_builder.py` + `app/pipeline/generator.py` + `app/pipeline/case_classifier.py` | Passage à un **brouillon qualifiant déterministe** : questions de base + questions par cas + tarifs + règle des 2 détectives + relais Daniel construits par code. Détection du cas par LLM dédié (`LLM_MODEL_QUALIFIER`, défaut `openai/gemma4:31b`). Extraction du prénom du signataire pour personnaliser la salutation. Brouillons générés aussi pour `prise_contact`. **Tests locaux verts**. |
 | 2 | **76 mails `demande_client` manqués** par classifier v1.21.5 (trop conservateur sur les cas ambigus) | ✅ **Corrigé v1.22.1** | `app/pipeline/classifier.py` + `scripts/backfill_demande_client.py` | Prompt classifier durci. Backfill script one-shot re-classifie + génère brouillons pour les 76 mails historiques ratés. |
 | 3 | **153 brouillons en DB mais 0 dans Drafts IMAP** — poller ne re-livre pas les brouillons existants (`is_new` condition) | ✅ **Corrigé v1.22.2** | `scripts/deliver_pending_drafts.py` + colonne `delivered_at` | Script one-shot livre les brouillons existants en IMAP Drafts. Bilan : 153/154 livrés. 14 échecs dus à CRLF dans sujets (Google Calendar invitations) → corrigé via `_sanitize_subject()`. |
 | 4 | **127 vieux brouillons accumulés dans Drafts IMAP** (avant 2026-06-02) | ✅ **Corrigé v1.22.3** | `scripts/cleanup_old_drafts.py` | Script one-shot avec dry-run par défaut, SELECT probe (v1.21.9 fix), SEARCH SUBJECT, store +FLAGS \Deleted + EXPUNGE. Deux passes : 80 supprimés (cutoff 2026-01-02) + 47 supprimés (cutoff 2026-06-02). |

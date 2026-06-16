@@ -28,21 +28,20 @@ CASE_TYPES = (
 
 
 _CASE_PROMPT = """Tu es un assistant de qualification pour un détective privé belge.
-Analyse le mail entrant ci-dessous et détermine le cas de figure principal parmi :
+Analyse le mail entrant et choisis UN SEUL cas parmi cette liste exacte :
 
-1. incapacite_travail : ouvrier en arrêt maladie suspecté de travail au noir.
-2. infidelite_filature : surveillance / filature pour suspicion d'infidélité ou adultère.
-3. recherche_personne : recherche d'une personne disparue ou demande d'adresse d'un tiers.
-4. securite_passé_violences : vérification du passé d'un individu, antécédents violents.
-5. contre_espionnage_micros : détection de micros/caméras
-   ou installation de surveillance à domicile.
-6. non_determine : aucun des cas précédents n'est clair.
+- incapacite_travail
+- infidelite_filature
+- recherche_personne
+- securite_passé_violences
+- contre_espionnage_micros
+- non_determine
 
-Réponds UNIQUEMENT en JSON valide, sans markdown, sans commentaire :
+Réponds UNIQUEMENT avec ce JSON exact, sans aucun autre texte :
 {{
-  "case_type": "...",
-  "confidence": "high|medium|low",
-  "reason": "une phrase courte justifiant le choix"
+  "case_type": "infidelite_filature",
+  "confidence": "high",
+  "reason": "le client demande une filature"
 }}
 
 Mail entrant :
@@ -82,11 +81,45 @@ def _extract_case_type_from_json(text: str) -> tuple[str, str, str]:
         # Fallback : recherche textuelle
         lowered = text.lower()
         candidates = {
-            "incapacite_travail": ["incapacité", "arrêt maladie", "travail au noir", "ouvrier"],
-            "infidelite_filature": ["infidélité", "adultère", "filature", "surveillance", "couple"],
-            "recherche_personne": ["disparu", "adresse", "retrouver", "localiser", "personne"],
-            "securite_passé_violences": ["violence", "passé", "antécédent", "sécurité"],
-            "contre_espionnage_micros": ["micro", "caméra", "espion", "contre-espionnage"],
+            "incapacite_travail": [
+                "incapacité",
+                "arrêt maladie",
+                "travail au noir",
+                "ouvrier",
+                "incapacite",
+            ],
+            "infidelite_filature": [
+                "infidélité",
+                "adultère",
+                "filature",
+                "surveillance",
+                "couple",
+                "mari",
+                "femme",
+                "conj",
+            ],
+            "recherche_personne": [
+                "disparu",
+                "adresse",
+                "retrouver",
+                "localiser",
+                "personne",
+                "recherche",
+            ],
+            "securite_passé_violences": [
+                "violence",
+                "passé",
+                "antécédent",
+                "sécurité",
+                "agression",
+            ],
+            "contre_espionnage_micros": [
+                "micro",
+                "caméra",
+                "espion",
+                "contre-espionnage",
+                "installation",
+            ],
         }
         scores = {case: sum(1 for kw in kws if kw in lowered) for case, kws in candidates.items()}
         best = max(scores, key=scores.get) if max(scores.values()) > 0 else "non_determine"
