@@ -22,10 +22,12 @@ L'agent surveille 3 boîtes Infomaniak (3 marques : Detective Belgique FR, Detec
   Classification LLM   → 8 catégories avec few-shots
   Priorité intelligente → demande client chaude = HIGH
   Extraction pièces jointes → stockage local + ingestion Cerveau2 (100%, zéro tolérance)
-  Si demande_client :
+  Si demande_client / prise_contact :
     Détection langue (toutes BCP-47)
-    RAG sur paires Q/R historiques (sqlite-vec + text-embedding-3-small)
-    Génération brouillon (kimi-k2.6:cloud + few-shot style Daniel + personnalité)
+    Classification fine du cas métier (incapacité, filature, recherche personne, récupération dette, etc.)
+    Brouillon qualifiant déterministe (v1.22.7+) : questions structurées + tarifs + règles métier codées
+    RAG sur paires Q/R historiques (sqlite-vec + text-embedding-3-small) pour les autres catégories
+    Génération LLM few-shot style Daniel + personnalité
   Chat AI Charlie (cockpit + Slack) :
     Recherche SQL + archives historiques (boite1/2/3) + Cerveau2 vault + mémoire
     Modèle chat : openai/kimi-k2.6:cloud (Ollama Pro Cloud, reasoning model)
@@ -43,6 +45,7 @@ L'agent surveille 3 boîtes Infomaniak (3 marques : Detective Belgique FR, Detec
   - Chat AI Charlie (SQL + Cerveau2 vault + mémoire courte)
   - Dashboard admin (stats, settings LLM, audit logs, télémétrie)
   - Endpoint POST /api/drafts/{id}/retry (régénération manuelle brouillon, v1.21.0)
+  - Simulateur de brouillon super-admin `/admin/draft-simulator` (v1.22.9+) : tester les brouillons sans envoyer de vrai email
 [Cerveau2 vault FastAPI]          → cerveau2-det.digitalhs.biz
   - Ingestion continue emails + pièces jointes (zéro tolérance sur le skip)
   - Recherche globale insensible aux accents, sans troncation
@@ -152,7 +155,7 @@ docker compose up -d --build      # si requirements.txt ou Dockerfile modifiés
 | Service prod | **Docker + Docker Compose + Traefik** (VPS Hostinger KVM8) |
 | Logs | `structlog` (JSON structuré, rotation 7j) |
 | Config | `pydantic-settings` depuis `.env` |
-| Version | Source unique `app/_version.py` (`VERSION = "1.22.4"`) — `pyproject.toml` figé en 1.9.5 (volontaire) |
+| Version | Source unique `app/_version.py` (`VERSION = "1.22.13"`) — `pyproject.toml` figé en 1.9.5 (volontaire) |
 
 **Ne PAS introduire** sans discussion : Kubernetes, Swarm, Celery, Redis, Postgres, ORM lourd, framework JS front (React/Vue/Angular). Le périmètre Docker actuel (1 service Compose + Traefik externe) est figé.
 
