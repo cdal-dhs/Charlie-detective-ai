@@ -1,5 +1,20 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.22.10] — 2026-06-16 (polish brouillon déterministe)
+
+### Contexte
+Premier test du simulateur en prod (v1.22.9). CDAL demande 3 ajustements de wording pour que le brouillon sonne davantage comme écrit par Daniel.
+
+### Changé
+- **`app/pipeline/qualification_builder.py`** :
+  - Intro questions : "Afin de préparer votre dossier dans les meilleures conditions, et pouvoir vous donner une estimation de devis fiable, pourriez-vous me transmettre les éléments suivants :"
+  - Relais final : "Dès réception de ces éléments, je reprendrai contact avec vous pour finaliser le devis et convenir d'un échange téléphonique sur ce nouveau dossier."
+- **`tests/test_qualification_builder.py`** : assertions mises à jour.
+- **`app/_version.py`** : bump `1.22.9` → `1.22.10`.
+
+### Tests
+- **91/91 tests verts** avec `venv/bin/python -m pytest -q`.
+
 ## [1.22.9] — 2026-06-16 (Simulateur de brouillon super-admin)
 
 ### Contexte

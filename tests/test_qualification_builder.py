@@ -53,7 +53,9 @@ def test_build_draft_contains_base_questions(mailbox: MailboxConfig) -> None:
     assert "9." in draft
     assert "Ouverture de dossier : 200 € HTVA." in draft
     assert " deux détectives" in draft
-    assert "Daniel reprendra contact" in draft
+    assert "je reprendrai contact" in draft
+    assert "échange téléphonique" in draft
+    assert "estimation de devis fiable" in draft
     assert "Daniel Hurchon" in draft
 
 

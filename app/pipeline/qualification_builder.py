@@ -236,8 +236,9 @@ def build_qualification_draft(
         need,
         "",
         (
-            "Afin de préparer votre dossier dans les meilleures conditions, "
-            "pourriez-vous me transmettre les éléments suivants :"
+            "Afin de préparer votre dossier dans les meilleures conditions, et pouvoir "
+            "vous donner une estimation de devis fiable, pourriez-vous me transmettre "
+            "les éléments suivants :"
         ),
     ]
     for i, q in enumerate(questions, 1):
@@ -255,8 +256,8 @@ def build_qualification_draft(
             "Pour toute filature ou surveillance mobile, nous déployons systématiquement "
             "deux détectives afin d'assurer l'efficacité et la discrétion.",
             "",
-            "Dès réception de ces éléments, Daniel reprendra contact avec vous "
-            "pour finaliser le devis et convenir d'un appel de clôture.",
+            "Dès réception de ces éléments, je reprendrai contact avec vous "
+            "pour finaliser le devis et convenir d'un échange téléphonique sur ce nouveau dossier.",
             "",
             "Bien à vous,",
             "",
