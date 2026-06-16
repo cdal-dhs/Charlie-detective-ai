@@ -1,5 +1,25 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.22.13] — 2026-06-16 (brouillon dette : ne pas redemander ce qu'on a déjà)
+
+### Contexte
+CDAL corrige : si le prospect a déjà transmis nom, email, GSM, etc., Charlie ne doit pas les redemander — il doit les lister comme reçus et ne demander que ce qui manque.
+
+### Changé
+- **`app/pipeline/qualification_builder.py`** :
+  - Ajout de `_extract_client_info(body, sender)` avec regex sur labels classiques (Nom, Prénom, Téléphone/GSM, Email, Adresse, Heure de contact, Profil).
+  - Ajout de `_format_received_info()` qui capitalise nom/prénom et formate la section "Voici les éléments que nous avons bien reçus de votre part :".
+  - `_build_dette_draft()` :
+    - Affiche les informations client déjà connues.
+    - Sépare clairement "Concernant la créance", "Concernant la personne concernée" et "De votre côté, pour finaliser le dossier" (adresse manquante).
+    - Ne redemande jamais le GSM, l'email ou le nom/prénom s'ils sont déjà présents.
+    - Closing corrigé : "Bien à vous," + prénom sur sa propre ligne.
+- **`tests/test_qualification_builder_dette.py`** : assertions mises à jour pour valider la section "déjà reçus", l'absence de redemande et le closing.
+- **`app/_version.py`** : bump `1.22.12` → `1.22.13`.
+
+### Tests
+- **94/94 tests verts** avec `venv/bin/python -m pytest -q`.
+
 ## [1.22.12] — 2026-06-16 (fix brouillon dette)
 
 ### Contexte

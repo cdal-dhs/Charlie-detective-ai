@@ -12,6 +12,32 @@ import re
 
 from app.config import MailboxConfig, get_settings
 
+# Labels d'info client fréquents dans les formulaires web.
+# Le séparateur accepte ':', '=', '-' ou '?' (ex. "Votre profil ? Particulier").
+_INFO_STOP = r"(?=\n|nom|prénom|téléphone|email|gsm|adresse|profil|heure|$)"
+_INFO_STOP_NO_HEURE = r"(?=\n|nom|prénom|téléphone|email|gsm|adresse|profil|$)"
+_INFO_SEP = r"\s*[:\-=?]\s*"
+_INFO_FIELD_SPLIT = re.compile(
+    r"\s*(?:/|\n|Nom|Prénom|Téléphone|Email|GSM|Adresse|Profil|Heure)"
+)
+_CLIENT_INFO_LABELS = {
+    "nom": re.compile(rf"nom{_INFO_SEP}(.+?){_INFO_STOP}", re.IGNORECASE | re.DOTALL),
+    "prenom": re.compile(rf"pr[ée]nom{_INFO_SEP}(.+?){_INFO_STOP}", re.IGNORECASE | re.DOTALL),
+    "telephone": re.compile(
+        rf"(?:t[ée]l[ée]phone|gsm|portable){_INFO_SEP}([\d\s./+\-]{{6,}})", re.IGNORECASE
+    ),
+    "email": re.compile(rf"(?:e[-\s]?mail|courriel){_INFO_SEP}([^\s]+@[^\s]+)", re.IGNORECASE),
+    "adresse": re.compile(rf"adresse{_INFO_SEP}(.+?){_INFO_STOP}", re.IGNORECASE | re.DOTALL),
+    "heure_contact": re.compile(
+        rf"(?:heure\s*de\s*contact|horaire|créneau){_INFO_SEP}(.+?){_INFO_STOP_NO_HEURE}",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    "profil": re.compile(
+        rf"(?:profil|type|statut){_INFO_SEP}(.+?){_INFO_STOP_NO_HEURE}",
+        re.IGNORECASE | re.DOTALL,
+    ),
+}
+
 # Sign-off courants en fin de mail ; la ligne suivante est souvent le nom du signataire.
 _SIGN_OFFS = (
     "bien cordialement",
@@ -234,6 +260,35 @@ def _rephrase_need(subject: str, body: str, case: str) -> str:
     return "Je comprends que vous souhaitez nos services pour une mission d'enquête."
 
 
+def _extract_client_info(body: str, sender: str) -> dict[str, str | None]:
+    """Extrait les informations client déjà fournies dans le body ou le sender."""
+    info: dict[str, str | None] = {}
+    for key, pattern in _CLIENT_INFO_LABELS.items():
+        match = pattern.search(body)
+        if match:
+            value = match.group(1).strip()
+            # Nettoie les séparateurs type " / " ou "," en fin de champ.
+            value = _INFO_FIELD_SPLIT.split(value)[0].strip()
+            value = value.lstrip(":-").strip()
+            value = value.rstrip(";,.-:")
+            info[key] = value or None
+        else:
+            info[key] = None
+
+    # L'email expéditeur est une source fiable si le body n'en contient pas.
+    if not info.get("email") and "@" in sender:
+        email_match = re.search(r"[^\s<]+@[^\s>]+", sender)
+        if email_match:
+            info["email"] = email_match.group(0).strip("<>")
+
+    # Normalise l'heure de contact (ajoute "h" si c'est juste un chiffre).
+    heure = info.get("heure_contact")
+    if heure and re.fullmatch(r"\d{1,2}", heure.strip()):
+        info["heure_contact"] = f"{heure.strip()}h"
+
+    return info
+
+
 def build_qualification_draft(
     subject: str,
     body: str,
@@ -243,7 +298,8 @@ def build_qualification_draft(
 ) -> str:
     """Génère un brouillon qualifiant structuré et déterministe."""
     settings = get_settings()
-    first_name = _extract_first_name(body)
+    client_info = _extract_client_info(body, sender)
+    first_name = client_info.get("prenom") or _extract_first_name(body)
     need = _rephrase_need(subject, body, case)
     greeting = f"Bonjour {first_name}," if first_name else "Bonjour,"
 
@@ -252,7 +308,7 @@ def build_qualification_draft(
     # standard avec les questions de base + spécifiques.
     if case == "recuperation_dette":
         questions = _CASE_QUESTIONS.get(case, [])
-        lines = _build_dette_draft(greeting, first_name, questions, mailbox)
+        lines = _build_dette_draft(greeting, first_name, questions, mailbox, client_info)
     else:
         questions = _BASE_QUESTIONS + _CASE_QUESTIONS.get(case, [])
         lines = [
@@ -296,32 +352,86 @@ def build_qualification_draft(
     return "\n".join(lines)
 
 
+def _format_received_info(client_info: dict[str, str | None]) -> list[str]:
+    """Formate les informations client déjà connues pour le brouillon."""
+
+    def _capitalize_name(value: str | None) -> str | None:
+        if not value:
+            return None
+        return " ".join(part.capitalize() for part in value.strip().split())
+
+    lines: list[str] = []
+    nom = _capitalize_name(client_info.get("nom"))
+    prenom = _capitalize_name(client_info.get("prenom"))
+    if prenom or nom:
+        full = " ".join(part for part in [prenom, nom] if part)
+        lines.append(f"- Vos nom et prénom : {full}")
+    if client_info.get("adresse"):
+        lines.append(f"- Votre adresse : {client_info['adresse']}")
+    if client_info.get("telephone"):
+        lines.append(f"- Votre GSM : {client_info['telephone']}")
+    if client_info.get("email"):
+        lines.append(f"- Votre email : {client_info['email']}")
+    if client_info.get("heure_contact"):
+        lines.append(f"- Heure de contact souhaitée : {client_info['heure_contact']}")
+    if client_info.get("profil"):
+        lines.append(f"- Profil : {client_info['profil']}")
+    return lines
+
+
 def _build_dette_draft(
     greeting: str,
     first_name: str | None,
     questions: list[str],
     mailbox: MailboxConfig,
+    client_info: dict[str, str | None],
 ) -> list[str]:
     """Brouillon spécifique pour récupération de dette, sur le modèle de Daniel."""
-    closing_name = f"{first_name}," if first_name else ","
-    return [
+    received = _format_received_info(client_info)
+
+    lines = [
         greeting,
         "",
         "Nous accusons bonne réception de votre demande concernant une personne de votre "
         "entourage qui vous doit une somme importante d'argent.",
         "",
+    ]
+
+    if received:
+        lines.extend([
+            "Voici les éléments que nous avons bien reçus de votre part :",
+            "",
+            *received,
+            "",
+        ])
+
+    lines.extend([
         "Afin de pouvoir évaluer la situation et vous proposer une stratégie adaptée, "
-        "pourriez-vous nous préciser si vous disposez d'une reconnaissance de dette signée "
-        "ou de tout autre document prouvant cette créance (contrat, convention, échanges de "
-        "courriels, messages, preuves de virements bancaires, etc.) ?",
+        "pourriez-vous nous communiquer :",
         "",
-        "Pourriez-vous également nous confirmer vos nom, prénom, adresse complète et GSM "
-        "de contact direct, afin que nous puissions vous recontacter dans les meilleurs délais ?",
+        "Concernant la créance :",
+        f"- {questions[0]};",
         "",
-        "Nous vous invitons également à nous communiquer les informations dont vous disposez "
-        "actuellement concernant la personne concernée, notamment :",
-        "",
-    ] + [f"- {q};" for q in questions[1:]] + [
+        "Concernant la personne concernée :",
+    ])
+    for q in questions[1:]:
+        lines.append(f"- {q};")
+
+    missing_client: list[str] = []
+    if not client_info.get("adresse"):
+        missing_client.append(
+            "- Votre adresse complète "
+            "(afin de pouvoir vous recontacter par courrier si nécessaire);"
+        )
+
+    if missing_client:
+        lines.extend([
+            "",
+            "De votre côté, pour finaliser le dossier :",
+        ])
+        lines.extend(missing_client)
+
+    lines.extend([
         "",
         "Sur base de ces éléments, nous pourrons analyser votre dossier et vous proposer "
         "une stratégie d'intervention adaptée, dans le respect du cadre légal applicable aux "
@@ -329,10 +439,20 @@ def _build_dette_draft(
         "",
         "Nous restons à votre disposition pour toute information complémentaire.",
         "",
-        "Bien à vous" + closing_name,
+        "Bien à vous,",
+    ])
+
+    if first_name:
+        lines.extend([
+            "",
+            first_name,
+        ])
+
+    lines.extend([
         "",
         "Daniel Hurchon",
         f"{mailbox.brand}",
         "GSM 0471/31.81.20",
         "contact@detectivebelgique.be",
-    ]
+    ])
+    return lines
