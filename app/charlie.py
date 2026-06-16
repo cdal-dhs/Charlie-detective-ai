@@ -625,6 +625,7 @@ _DOSSIER_NAME_RE = re.compile(
 _HASH_DOSSIER_RE = re.compile(r"#([A-Z][A-Z0-9]{2,})")
 _CODE_RE = re.compile(r"\b([A-Z]{3,6})\b")
 _YEAR_RE = re.compile(r"\b(20\d{2})\b")
+_AFFAIRE_RE = re.compile(r"[Aa]ffaire\s*:?\s*([A-Za-z0-9_-]+)")
 
 
 def _extract_dossier_id(question: str) -> str | None:
@@ -639,11 +640,15 @@ def _extract_dossier_id(question: str) -> str | None:
         # Exclure les mots communs qui ne sont pas des noms de dossier
         if name.lower() not in ("client", "general", "generale", "monsieur", "madame", "mademoiselle", "monsieur", "madame", "cliente"):
             return name
-    # Pattern 3 : hashtag #ADF
+    # Pattern 3 : "affaire XYZ123" (synonyme métier)
+    m = _AFFAIRE_RE.search(question)
+    if m:
+        return m.group(1)
+    # Pattern 4 : hashtag #ADF
     m = _HASH_DOSSIER_RE.search(question)
     if m:
         return m.group(1)
-    # Pattern 4 : codes ALL-CAPS isolés (ex: ADF, DPDH)
+    # Pattern 5 : codes ALL-CAPS isolés (ex: ADF, DPDH)
     for m in _CODE_RE.finditer(question):
         code = m.group(1)
         if code not in ("SQL", "OK", "HTTP", "API", "URL", "HTML", "XML", "JSON", "HTTPS", "SMTP", "IMAP", "PDF", "CSV", "JPEG", "PNG"):
@@ -2280,6 +2285,14 @@ def _needs_summary(question: str) -> bool:
 def _is_count_query(sql: str) -> bool:
     """Détecte les requêtes COUNT(*) — inutile d'interroger le vault pour un simple comptage."""
     return "count(" in sql.lower()
+
+
+_VAULT_KEYWORDS = (
+    "dossier", "affaire", "client", "personne", "entite", "societe", "lieu",
+    "adresse", "telephone", "contact", "facture", "devis", "historique",
+    "archive", "detail", "info", "synthese", "resume", "lien", "relation",
+    "conjoint", "famille", "proche", "employeur", "entreprise",
+)
 
 
 def _is_vault_relevant(question: str, sql: str) -> bool:

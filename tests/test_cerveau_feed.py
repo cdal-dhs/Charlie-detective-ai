@@ -73,7 +73,7 @@ def mock_msg():
     m.get.side_effect = lambda k, default="": {
         "From": "client@example.com",
         "Subject": "Dossier ADF",
-        "Date": "Mon, 15 May 2026 10:30:00 +0200",
+        "Date": "Mon, 15 Jun 2026 10:30:00 +0200",
         "Message-ID": "<abc123@example.com>",
     }.get(k, default)
     m.is_multipart.return_value = False

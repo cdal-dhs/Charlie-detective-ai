@@ -1,5 +1,27 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.22.5] — 2026-06-16 (fix robustesse mémoire + tests Cerveau2)
+
+### Contexte
+Suite à la relecture du projet, **16 tests étaient rouges** et 2 bugs de robustesse ont été identifiés :
+- `query_vault` retourne un tuple `(notes, answer)` depuis plusieurs versions, mais les tests mockaient encore une liste unique.
+- `charlie_memory.query_memory` / `query_corrections` / `save_memory` / `save_feedback` / `get_good_memories` plantaient avec `OperationalError: no such table` si la base n'était pas initialisée (cas test `db_path=/dev/null` ou démarrage partiel).
+- `_is_vault_relevant` référençait `_VAULT_KEYWORDS` non défini → `NameError` si appelée.
+- `_extract_dossier_id` ne capturait pas "affaire XYZ123".
+
+### Fixé
+- **`app/charlie_memory.py`** : toutes les fonctions publiques (`query_memory`, `query_corrections`, `save_memory`, `save_feedback`, `get_good_memories`) appellent désormais `init_memory_table()` en début de traitement, avec capture `sqlite3.OperationalError` et dégradation silencieuse (`return []` ou `-1`) si la base est inaccessible. Cela évite les crashs en cas de DB partiellement initialisée.
+- **`app/charlie.py`** :
+  - Définition de `_VAULT_KEYWORDS` (mots-clés métier normalisés) pour que `_is_vault_relevant()` fonctionne si elle est appelée.
+  - Ajout du pattern `_AFFAIRE_RE` dans `_extract_dossier_id()` pour capturer "affaire XYZ123".
+- **`tests/test_cerveau_client.py`** : adaptation au tuple `(notes, answer)` retourné par `query_vault` ; `test_ok_response_returns_notes` passe `context_only=False` pour tester la réponse LLM.
+- **`tests/test_charlie_vault.py`** : adaptation des mocks au tuple ; correction de `test_ask_charlie_calls_vault_when_no_sql` qui utilisait "Bonjour" (intercepté par `_general_response`) ; renommage de `test_ask_charlie_no_vault_for_pure_sql` en `test_ask_charlie_vault_called_even_for_count_sql` car le vault est maintenant systématiquement requêté.
+- **`tests/test_cerveau_feed.py`** : date du mock passée au 15 juin 2026 pour ne plus être skipée par le filtre `process_since_date=2026-06-01`.
+
+### Bilan tests
+- **75/75 tests verts** avec `venv/bin/python -m pytest -q`.
+- Note : la commande `pytest` globale est liée à Python 3.9 sur ce Mac ; il faut utiliser le venv Python 3.14.
+
 ## [1.22.4] — 2026-06-15 (fix few-shot loading — le LLM voit ENFIN le VRAI Daniel)
 
 ### Contexte — BUG LATENT CRITIQUE

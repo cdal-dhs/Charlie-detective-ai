@@ -13,22 +13,25 @@ SECRET = "test-secret"
 
 @pytest.mark.asyncio
 async def test_no_base_url_returns_empty():
-    notes = await query_vault("test", base_url="", api_secret=SECRET)
+    notes, answer = await query_vault("test", base_url="", api_secret=SECRET)
     assert notes == []
+    assert answer is None
 
 
 @pytest.mark.asyncio
 async def test_no_secret_returns_empty():
-    notes = await query_vault("test", base_url=BASE, api_secret="")
+    notes, answer = await query_vault("test", base_url=BASE, api_secret="")
     assert notes == []
+    assert answer is None
 
 
 @pytest.mark.asyncio
 async def test_network_error_returns_empty():
     with respx.mock:
         respx.post(f"{BASE}/query").mock(side_effect=httpx.ConnectError("down"))
-        notes = await query_vault("test", base_url=BASE, api_secret=SECRET)
+        notes, answer = await query_vault("test", base_url=BASE, api_secret=SECRET)
     assert notes == []
+    assert answer is None
 
 
 @pytest.mark.asyncio
@@ -37,7 +40,7 @@ async def test_http_500_returns_empty():
         respx.post(f"{BASE}/query").mock(
             return_value=httpx.Response(500, text="Internal Server Error")
         )
-        notes = await query_vault("test", base_url=BASE, api_secret=SECRET)
+        notes, answer = await query_vault("test", base_url=BASE, api_secret=SECRET)
     assert notes == []
 
 
@@ -58,10 +61,13 @@ async def test_ok_response_returns_notes():
     }
     with respx.mock:
         respx.post(f"{BASE}/query").mock(return_value=httpx.Response(200, json=payload))
-        notes = await query_vault("surveillance Liège", base_url=BASE, api_secret=SECRET)
+        notes, answer = await query_vault(
+            "surveillance Liège", base_url=BASE, api_secret=SECRET, context_only=False
+        )
     assert len(notes) == 2
     assert notes[0].path == "02_dossiers/import_detectivebelgique/foo.md"
     assert notes[0].content == "Corps A"
+    assert answer == "Voici ce que j'ai trouvé…"
 
 
 @pytest.mark.asyncio
@@ -76,8 +82,9 @@ async def test_context_only_returns_notes():
     }
     with respx.mock:
         respx.post(f"{BASE}/query").mock(return_value=httpx.Response(200, json=payload))
-        notes = await query_vault("test", base_url=BASE, api_secret=SECRET)
+        notes, answer = await query_vault("test", base_url=BASE, api_secret=SECRET)
     assert len(notes) == 1
+    assert answer is None
 
 
 @pytest.mark.asyncio
@@ -91,8 +98,9 @@ async def test_zone_rouge_returns_empty():
     }
     with respx.mock:
         respx.post(f"{BASE}/query").mock(return_value=httpx.Response(200, json=payload))
-        notes = await query_vault("test", base_url=BASE, api_secret=SECRET)
+        notes, answer = await query_vault("test", base_url=BASE, api_secret=SECRET)
     assert notes == []
+    assert answer is None
 
 
 @pytest.mark.asyncio
@@ -100,8 +108,9 @@ async def test_empty_context_returns_empty_list():
     payload = {"status": "ok", "question": "rien", "total_found": 0, "context": [], "answer": None}
     with respx.mock:
         respx.post(f"{BASE}/query").mock(return_value=httpx.Response(200, json=payload))
-        notes = await query_vault("rien", base_url=BASE, api_secret=SECRET)
+        notes, answer = await query_vault("rien", base_url=BASE, api_secret=SECRET)
     assert notes == []
+    assert answer is None
 
 
 # ── paramètres de la requête ─────────────────────────────────────────────────
@@ -113,8 +122,10 @@ async def test_auth_header_sent():
         route = respx.post(f"{BASE}/query").mock(
             return_value=httpx.Response(200, json={"status": "ok", "context": [], "total_found": 0})
         )
-        await query_vault("test", base_url=BASE, api_secret=SECRET)
+        notes, answer = await query_vault("test", base_url=BASE, api_secret=SECRET)
     assert route.called
+    assert notes == []
+    assert answer is None
     req = route.calls[0].request
     assert req.headers["Authorization"] == f"Bearer {SECRET}"
 
@@ -125,11 +136,13 @@ async def test_limit_and_dossier_sent():
         route = respx.post(f"{BASE}/query").mock(
             return_value=httpx.Response(200, json={"status": "ok", "context": [], "total_found": 0})
         )
-        await query_vault(
+        notes, answer = await query_vault(
             "test", base_url=BASE, api_secret=SECRET, dossier_id="2024-001_test", limit=5
         )
     import json
 
+    assert notes == []
+    assert answer is None
     body = json.loads(route.calls[0].request.content)
     assert body["limit"] == 5
     assert body["dossier_id"] == "2024-001_test"

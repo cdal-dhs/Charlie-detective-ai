@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import sqlite3
+
 import aiosqlite
 import structlog
 
@@ -88,6 +90,11 @@ async def save_feedback(
     dossier_id: str | None = None,
 ) -> int:
     """Enregistre un feedback (good/bad) sur une réponse de Charlie."""
+    try:
+        await init_memory_table(db_path)
+    except sqlite3.OperationalError as e:
+        log.warning("charlie_memory.feedback_init_failed", db_path=str(db_path), error=str(e))
+        return -1
     tags = ",".join(re.findall(r"[A-Z][A-Z0-9]{2,}", question)) or None
 
     async with aiosqlite.connect(db_path) as db:
@@ -116,6 +123,11 @@ async def get_good_memories(
     limit: int = 3,
 ) -> list[MemoryEntry]:
     """Retourne les souvenirs validés (feedback=good) les plus pertinents."""
+    try:
+        await init_memory_table(db_path)
+    except sqlite3.OperationalError as e:
+        log.warning("charlie_memory.query_init_failed", db_path=str(db_path), error=str(e))
+        return []
     q_norm = _normalize(question)
     words = [w for w in q_norm.split() if len(w) > 3]
 
@@ -151,6 +163,11 @@ async def save_memory(
     category: str | None = None,
 ) -> int:
     """Sauvegarde un souvenir dans la mémoire de Charlie."""
+    try:
+        await init_memory_table(db_path)
+    except sqlite3.OperationalError as e:
+        log.warning("charlie_memory.save_init_failed", db_path=str(db_path), error=str(e))
+        return -1
     # Extraire des tags automatiques (mots en majuscules, références)
     tags = ",".join(re.findall(r"[A-Z][A-Z0-9]{2,}", question)) or None
 
@@ -187,6 +204,11 @@ async def query_memory(
     retournées avec leur corrected_response pour écraser les fausses
     informations du vault.
     """
+    try:
+        await init_memory_table(db_path)
+    except sqlite3.OperationalError as e:
+        log.warning("charlie_memory.query_init_failed", db_path=str(db_path), error=str(e))
+        return []
     q_norm = _normalize(question)
     words = [w for w in q_norm.split() if len(w) > 3]
 
@@ -259,6 +281,11 @@ async def query_corrections(
     limit: int = 5,
 ) -> list[MemoryEntry]:
     """Retourne UNIQUEMENT les corrections utilisateur (feedback='bad')."""
+    try:
+        await init_memory_table(db_path)
+    except sqlite3.OperationalError as e:
+        log.warning("charlie_memory.query_init_failed", db_path=str(db_path), error=str(e))
+        return []
     async with aiosqlite.connect(db_path) as db:
         params: list = []
         where = "feedback = 'bad'"

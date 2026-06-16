@@ -1,14 +1,14 @@
 # HANDOVER — Detective.be Agent IA (Charlie)
 
 > Document de transfert pour tout agent (Claude Sonnet/Opus 4.X, GPT, etc.).
-> **Dernière mise à jour** : 2026-06-15 · **Version courante** : v1.22.4 · **Déployé sur** : `detective.digitalhs.biz`
+> **Dernière mise à jour** : 2026-06-16 · **Version courante** : v1.22.5 · **Déployé sur** : `detective.digitalhs.biz`
 
 ---
 
 ## TABLE DES MATIÈRES (TL;DR)
 
 1. [Qui, quoi, pourquoi](#1-qui-quoi-pourquoi)
-2. [Architecture actuelle v1.22.4](#2-architecture-actuelle-v1224)
+2. [Architecture actuelle v1.22.5](#2-architecture-actuelle-v1225)
 3. [Le pipeline Charlie AI](#3-le-pipeline-charlie-ai)
 4. [Stack technique détaillée](#4-stack-technique-détaillée)
 5. [Cerveau2-Det — second cerveau](#5-cerveau2-det--second-cerveau)
@@ -38,7 +38,7 @@
 
 ---
 
-## 2. Architecture actuelle (v1.22.4)
+## 2. Architecture actuelle (v1.22.5)
 
 ```
 [3 boîtes Infomaniak IMAP] ──polling 5min──► [Worker asyncio Python]
@@ -84,7 +84,7 @@
 
 ---
 
-## 3. Le pipeline Charlie AI (état v1.22.4)
+## 3. Le pipeline Charlie AI (état v1.22.5)
 
 Le fichier `app/charlie.py` contient `ask_charlie()`. Flow exact :
 
@@ -169,7 +169,7 @@ if not response and rows:
 
 ---
 
-## 4. Stack technique détaillée (v1.22.4)
+## 4. Stack technique détaillée (v1.22.5)
 
 | Couche | Outil | Version / Détail |
 |---|---|---|
@@ -394,13 +394,14 @@ Le poller IMAP ne traite que les mails reçus depuis cette date. Les archives hi
 
 ---
 
-## 9. Bugs résolus et points de vigilance (état au 2026-06-15, v1.22.4)
+## 9. Bugs résolus et points de vigilance (état au 2026-06-16, v1.22.5)
 
-### ✅ Bugs résolus récents (v1.22.0 → v1.22.4)
+### ✅ Bugs résolus récents (v1.22.0 → v1.22.5)
 
 | # | Problème | Statut | Fichier | Notes |
 |---|---|---|---|---|
 | 1 | **Le LLM n'a JAMAIS vu le vrai Daniel depuis v1.22.0** — bug latent : `_load_daniel_fewshot()` utilisait `date(received_at) >= ?` en SQL, mais `received_at` est stocké en RFC 2822 (`Sat, 13 Jun 2026 05:41:38 +0000`), fonction SQLite `date()` ne parse pas → 0 candidat retourné | ✅ **Corrigé v1.22.4** | `app/pipeline/generator.py` | Le filtre temporel est FAIT EN PYTHON (regex RFC 2822) après récupération d'un panel de 200 candidats SQL. Pattern mutualisé de `scripts/cleanup_old_drafts.py`. Test live : 2 corrections Daniel injectées (mail #561 Soldermann 1990 chars + mail #83 Wastiau 997 chars) → 6122 chars dans le system prompt au lieu de 0. Le LLM imite enfin le format Daniel (intro "Monsieur X,", estimations HTVA × scénarios, mention "On vous téléphonera...", "Bien cordialement, Daniel Hurchon"). |
+| 13 | **Tests rouges + robustesse mémoire Charlie** — `query_vault` retourne un tuple `(notes, answer)` mais les tests mockaient une liste ; `charlie_memory` plantait avec `no such table` si la DB n'était pas initialisée ; `_is_vault_relevant` référençait `_VAULT_KEYWORDS` indéfini ; `_extract_dossier_id` ne capturait pas "affaire XYZ123" | ✅ **Corrigé v1.22.5** | `app/charlie_memory.py` + `app/charlie.py` + `tests/test_cerveau_client.py` + `tests/test_charlie_vault.py` + `tests/test_cerveau_feed.py` | `init_memory_table()` appelée dans toutes les fonctions publiques de `charlie_memory.py` avec dégradation silencieuse sur `OperationalError`. `_VAULT_KEYWORDS` défini. Pattern `affaire` ajouté. **75/75 tests verts**. |
 | 2 | **76 mails `demande_client` manqués** par classifier v1.21.5 (trop conservateur sur les cas ambigus) | ✅ **Corrigé v1.22.1** | `app/pipeline/classifier.py` + `scripts/backfill_demande_client.py` | Prompt classifier durci. Backfill script one-shot re-classifie + génère brouillons pour les 76 mails historiques ratés. |
 | 3 | **153 brouillons en DB mais 0 dans Drafts IMAP** — poller ne re-livre pas les brouillons existants (`is_new` condition) | ✅ **Corrigé v1.22.2** | `scripts/deliver_pending_drafts.py` + colonne `delivered_at` | Script one-shot livre les brouillons existants en IMAP Drafts. Bilan : 153/154 livrés. 14 échecs dus à CRLF dans sujets (Google Calendar invitations) → corrigé via `_sanitize_subject()`. |
 | 4 | **127 vieux brouillons accumulés dans Drafts IMAP** (avant 2026-06-02) | ✅ **Corrigé v1.22.3** | `scripts/cleanup_old_drafts.py` | Script one-shot avec dry-run par défaut, SELECT probe (v1.21.9 fix), SEARCH SUBJECT, store +FLAGS \Deleted + EXPUNGE. Deux passes : 80 supprimés (cutoff 2026-01-02) + 47 supprimés (cutoff 2026-06-02). |
@@ -413,7 +414,7 @@ Le poller IMAP ne traite que les mails reçus depuis cette date. Les archives hi
 | 11 | **Poller IMAP crash en boucle** sur boîte `detective_belgique` (3 bugs cumulés) | ✅ **Corrigé v1.21.3** | `app/workers/imap_poller.py` + `app/alerts.py` | Bug 1 : `_decode_header` crash sur charset `unknown-8bit`. Bug 2 : `_persist` crash sur `Header` objects. Bug 3 : retry éternel. Fix : try/except englobant + nouveau flag `AgentAttempted`. 19 tests de résilience. Alerte Resend si ≥5 crashes/boîte (anti-spam 1h/boîte). |
 | 12 | **Filtre date hardcodé incohérent** — code dit `2026-06-01`, .env disait `2026-05-01` (régression silencieuse) | ✅ **Corrigé v1.21.4** | `app/workers/imap_poller.py` + `.env.example` + `.env.production` | Tous alignés à `2026-06-01`. |
 
-### 🔴 Points de vigilance ouverts (état au 2026-06-15)
+### 🔴 Points de vigilance ouverts (état au 2026-06-16)
 
 #### Point de vigilance #1 — RAG cassé depuis 2026-05-28 (CRITIQUE)
 **Pire que prévu** : le RAG est cassé sur les **3 boîtes** (pas seulement `boite2`).
@@ -699,11 +700,11 @@ fi
 
 ## Note pour le prochain agent
 
-État au **2026-06-15** : v1.22.4 déployée en prod, vérifiée opérationnelle. Tous les chantiers v1.22.x (backfill 76 mails, deliver 153 brouillons, cleanup 127 vieux drafts, fix few-shot learning) sont terminés. Le seul chantier ouvert significatif est le **bug RAG (point de vigilance #1)** — à traiter avant V2c (feedback loop qualité Daniel). Pour le reste, voir HANDOVER §12 (checklist reprise) et §13 (4 niveaux anti-crash silencieux opérationnels).
+État au **2026-06-16** : v1.22.5 en cours de validation. Hotfix de robustesse mémoire + tests Cerveau2 corrigés (75/75 tests verts). Les chantiers v1.22.x (backfill 76 mails, deliver 153 brouillons, cleanup 127 vieux drafts, fix few-shot learning) sont terminés. Le seul chantier ouvert significatif reste le **bug RAG (point de vigilance #1)** — à traiter avant V2c (feedback loop qualité Daniel). Pour le reste, voir HANDOVER §12 (checklist reprise) et §13 (4 niveaux anti-crash silencieux opérationnels).
 
 **Philosophie CDAL** : MVP simple d'abord, V2 quand qualité prouvée. Pas d'over-engineering. ROI client : "solde 24/7" sans surdimensionner. Communique court en français, écrit parfois avec des fautes de frappe rapides — décoder l'intention.
 
 ---
 
-*Document mis à jour le 2026-06-15 pour la v1.22.4 de Detective.be Agent IA.*
+*Document mis à jour le 2026-06-16 pour la v1.22.5 de Detective.be Agent IA.*
 

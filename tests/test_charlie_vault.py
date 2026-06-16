@@ -55,17 +55,20 @@ async def test_ask_charlie_calls_vault_when_no_sql():
         ),
         patch(
             "app.charlie.query_vault",
-            new=AsyncMock(return_value=[VaultNote(path="notes/test.md", content="Contenu test")]),
+            new=AsyncMock(return_value=([VaultNote(path="notes/test.md", content="Contenu test")], None)),
         ),
     ):
-        result = await ask_charlie("Bonjour", db_path=Path("/dev/null"))
+        result = await ask_charlie(
+            "Que sais-tu sur la personne Dupont ?", db_path=Path("/dev/null")
+        )
 
     assert len(result.vault_notes) == 1
     assert result.vault_notes[0].path == "notes/test.md"
 
 
 @pytest.mark.asyncio
-async def test_ask_charlie_no_vault_for_pure_sql():
+async def test_ask_charlie_vault_called_even_for_count_sql():
+    """Même les comptages SQL déclenchent une recherche factuelle Cerveau2."""
     mock_settings = MagicMock()
     mock_settings.llm_model_default = "test-model"
     mock_settings.cerveau2_base_url = "http://test"
@@ -82,13 +85,13 @@ async def test_ask_charlie_no_vault_for_pure_sql():
         ),
         patch("app.charlie.run_sql", new=AsyncMock(return_value=[{"id": 1}])),
         patch(
-            "app.charlie.query_vault", new=AsyncMock(return_value=[])
+            "app.charlie.query_vault", new=AsyncMock(return_value=([], None))
         ) as mock_vault,
     ):
         result = await ask_charlie("Combien de mails aujourd'hui?", db_path=Path("/dev/null"))
 
     assert result.vault_notes == []
-    mock_vault.assert_not_called()
+    mock_vault.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -109,7 +112,7 @@ async def test_ask_charlie_passes_dossier_id_to_vault():
         ),
         patch("app.charlie.run_sql", new=AsyncMock(return_value=[{"id": 1}])),
         patch(
-            "app.charlie.query_vault", new=AsyncMock(return_value=[])
+            "app.charlie.query_vault", new=AsyncMock(return_value=([], None))
         ) as mock_vault,
     ):
         result = await ask_charlie(
