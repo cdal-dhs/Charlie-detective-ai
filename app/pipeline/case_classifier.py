@@ -64,7 +64,10 @@ def _case_to_label(case_type: str) -> str:
     return labels.get(case_type, case_type)
 
 
-def _extract_case_type_from_json(text: str) -> tuple[str, str, str]:
+def _extract_case_type_from_json(
+    text: str,
+    search_text: str = "",
+) -> tuple[str, str, str]:
     """Extrait le JSON de la réponse LLM, même si entouré de markdown."""
     text = text.strip()
     if text.startswith("```"):
@@ -78,8 +81,9 @@ def _extract_case_type_from_json(text: str) -> tuple[str, str, str]:
             case_type = "non_determine"
         return case_type, confidence, reason
     except json.JSONDecodeError:
-        # Fallback : recherche textuelle
-        lowered = text.lower()
+        # Fallback : recherche textuelle sur le mail original (pas sur la réponse LLM).
+        log.info("case_classifier.json_fallback", raw_preview=text[:200])
+        lowered = (search_text or text).lower()
         candidates = {
             "incapacite_travail": [
                 "incapacité",
@@ -121,7 +125,10 @@ def _extract_case_type_from_json(text: str) -> tuple[str, str, str]:
                 "installation",
             ],
         }
-        scores = {case: sum(1 for kw in kws if kw in lowered) for case, kws in candidates.items()}
+        scores = {
+            case: sum(1 for kw in kws if re.search(r"\b" + re.escape(kw) + r"\b", lowered))
+            for case, kws in candidates.items()
+        }
         best = max(scores, key=scores.get) if max(scores.values()) > 0 else "non_determine"
         return best, "low", "fallback par keyword"
 
@@ -151,7 +158,9 @@ async def classify_case(
             max_tokens=300,
             temperature=0.1,
         )
-        case_type, confidence, reason = _extract_case_type_from_json(raw)
+        case_type, confidence, reason = _extract_case_type_from_json(
+            raw, search_text=f"{subject} {body}"
+        )
     except Exception as exc:
         log.warning("case_classifier.failed", error=str(exc))
         return "non_determine", "low", ""

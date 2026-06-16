@@ -15,15 +15,19 @@ Le brouillon #582 généré en production par la v1.22.7 a obtenu une note de **
   - Relais Daniel pour finalisation du devis et appel de clôture.
   - Signature `Daniel Hurchon / {marque} / GSM 0471/31.81.20 / contact@detectivebelgique.be`.
 - **`app/pipeline/generator.py`** : branche `demande_client`/`prise_contact` (`DRAFT_CATEGORIES`) sur `build_qualification_draft()` au lieu du LLM brut. Le flux LLM few-shot est conservé pour les autres catégories.
-- **`app/pipeline/case_classifier.py`** : corrections ruff (prompt JSON multiligne + fallback keyword formaté).
+- **`app/pipeline/case_classifier.py`** : corrections ruff (prompt JSON multiligne + fallback keyword formaté). **Fix v1.22.8a** : le fallback keyword utilise maintenant les mots entiers (`\b...\b`) et s'applique au mail original (sujet + body), pas à la réponse LLM — corrige les faux positifs `incapacite_travail` dus au mot "travail" dans "lieu de travail".
 - **`app/pipeline/qualification_builder.py` + `app/pipeline/generator.py`** : corrections ruff (E501, F541, I001, UP017).
+
+### Ajouté (testability sans envoyer d'email)
+- **`scripts/test_draft_qualification.py`** : script de test local qui appelle `generate_draft()` directement sans IMAP. RAG et Cerveau2 sont mockés, le classifier est appelé en vrai. 5 cas prédéfinis + possibilité de passer `--subject` / `--body`.
+- **`tests/test_qualification_builder.py`** : tests unitaires du builder déterministe (extraction prénom, questions par cas, tarifs, signature).
 
 ### Supprimé
 - Scripts temporaires de debug : `scripts/test_draft_local.py`, `scripts/test_draft_deterministic.py`, `scripts/test_draft_simple.py`.
 
 ### Tests
-- **82/82 tests verts** avec `venv/bin/python -m pytest -q`.
-- Test local `scripts/test_draft_local.py` (avant suppression) : brouillon correct de 9 questions pour une demande de filature, salutation "Bonjour Christophe,".
+- **88/88 tests verts** avec `venv/bin/python -m pytest -q`.
+- Test local `scripts/test_draft_qualification.py --case filature_collaborateur` : brouillon correct de 9 questions, cas `infidelite_filature`, salutation "Bonjour Christophe,".
 
 ## [1.22.7] — 2026-06-16 (qualification prospect dans les brouillons)
 
