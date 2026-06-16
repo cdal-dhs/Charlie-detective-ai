@@ -1,5 +1,27 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.22.9] — 2026-06-16 (Simulateur de brouillon super-admin)
+
+### Contexte
+CDAL veut pouvoir tester les brouillons directement depuis le cockpit, sans envoyer de vrai email, pour itérer sur la qualité et éduquer Charlie.
+
+### Ajouté
+- **`app/web/admin.py`** :
+  - `GET /admin/draft-simulator` : page super-admin avec formulaire (boîte source, catégorie, sujet, corps).
+  - `POST /admin/api/draft-simulator/run` : génère le brouillon en appelant `generate_draft()` directement. RAG et Cerveau2 sont mockés pour un test rapide. Le classifier de cas est appelé en vrai. Log d'audit `draft_simulator_run`.
+- **`app/web/templates/admin/draft_simulator.html`** : interface HTMX avec textarea, sélecteur de boîte/catégorie, spinner et affichage du brouillon généré.
+- **`app/web/templates/base.html`** : entrée de menu "🧪 Simulateur brouillon" réservée super-admin.
+- **`tests/test_admin_draft_simulator.py`** : 3 tests (page admin OK, génération OK, rejet anonyme).
+
+### Changé
+- **`tests/test_case_classifier.py`** : refactor ruff clean (lignes longues, variables non utilisées).
+- **`app/web/admin.py`** : corrections E501 sur des chaînes HTML préexistantes.
+- **`app/_version.py`** : bump `1.22.8` → `1.22.9`.
+
+### Tests
+- **91/91 tests verts** avec `venv/bin/python -m pytest -q`.
+- Test local cockpit simulé non effectué (nécessite `.env` complet + DB initialisée).
+
 ## [1.22.8] — 2026-06-16 (fix qualification déterministe — bug brouillon #582)
 
 ### Contexte

@@ -1,7 +1,7 @@
 # HANDOVER — Detective.be Agent IA (Charlie)
 
 > Document de transfert pour tout agent (Claude Sonnet/Opus 4.X, GPT, etc.).
-> **Dernière mise à jour** : 2026-06-16 · **Version courante** : v1.22.8 · **Déployé sur** : `detective.digitalhs.biz`
+> **Dernière mise à jour** : 2026-06-16 · **Version courante** : v1.22.9 · **Déployé sur** : `detective.digitalhs.biz`
 
 ---
 
@@ -38,7 +38,7 @@
 
 ---
 
-## 2. Architecture actuelle (v1.22.8)
+## 2. Architecture actuelle (v1.22.9)
 
 ```
 [3 boîtes Infomaniak IMAP] ──polling 5min──► [Worker asyncio Python]
@@ -63,7 +63,7 @@
 
 | Fichier | Rôle critique | À savoir |
 |---|---|---|
-| `app/_version.py` | **Source unique de vérité** version | `VERSION = "1.22.8"`. Tolérance zéro. Ne JAMAIS utiliser `importlib.metadata`. |
+| `app/_version.py` | **Source unique de vérité** version | `VERSION = "1.22.9"`. Tolérance zéro. Ne JAMAIS utiliser `importlib.metadata`. |
 | `app/charlie.py` | **Cœur intelligent Charlie AI** | `ask_charlie()` : extraction entités → SQL programmatique (bypass LLM) + vault Cerveau2 (fallback direct GET) + archives + corrections + mémoire → nuage de liaison familial → **résumé de dossier narratif LLM** (v1.19.1) → garde anti-vide + garde anti-"pas trouvé" |
 | `app/charlie_memory.py` | **Mémoire persistante** | Table `charlie_memory` (feedback good/bad, corrections, auto-save) |
 | `app/cerveau_client.py` | **Client HTTP Cerveau2** | `query_vault()`, `get_vault_note()` (fallback direct), `feed_correspondance()`, `feed_document()`. Bearer Token statique. **Dégradation silencieuse** (retourne `[]` si Cerveau2 down) |
@@ -72,6 +72,8 @@
 | `app/pipeline/translator.py` | **Aide lecture multilingue (v1.21.0)** | `translate_to_fr()` + `translate_from_fr()` avec try/except, troncature 12K. Utilisé si langue mail ≠ FR |
 | `app/pipeline/draft_renderer.py` | **Rendu brouillon enrichi (v1.21.0)** | Compose 4 blocs : email d'origine + traduction FR + proposition FR + traduction langue source |
 | `app/pipeline/generator.py` | **Génération brouillon** | Pour `demande_client`/`prise_contact` : branche `app/pipeline/qualification_builder.py` (brouillon déterministe, v1.22.8). Pour les autres catégories : flux LLM few-shot + Cerveau2. Appelle `translate_to_fr` + `translate_from_fr` en parallèle. **`_load_daniel_fewshot()` (v1.22.4)** : récupère 200 candidats SQL, parse date RFC 2822 en Python, garde top 4 dans fenêtre 30j |
+| `app/web/admin.py` | **Simulateur brouillon** (v1.22.9) | `GET /admin/draft-simulator` + `POST /admin/api/draft-simulator/run` : permet à CDAL de coller sujet/corps d'un email simulé et de voir le brouillon généré sans envoyer de vrai mail. RAG/Cerveau2 mockés, classifier LLM réel. |
+| `app/web/templates/admin/draft_simulator.html` | **UI Simulateur brouillon** | Formulaire HTMX super-admin : boîte, catégorie, sujet, corps, affichage du résultat. |
 | `app/pipeline/classifier.py` | **Classification LLM** (v1.22.1 hardened) | 8 catégories avec few-shots. Prompt durci pour ne plus rater aucun `demande_client` |
 | `app/pipeline/language.py` | **Détection langue** | `Language = str` (toutes BCP-47), `language_label()` pour affichage humain |
 | `app/web/api.py` | **Endpoints HTMX + Charlie** | `charlie_ask()`, `charlie_feedback()`, `draft_generate()`, **`POST /api/drafts/{id}/retry`** (régénération manuelle) |

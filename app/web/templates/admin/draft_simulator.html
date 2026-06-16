@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+
+{% block title %}Simulateur de brouillon — Admin{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <h1 class="text-2xl font-bold">Simulateur de brouillon</h1>
+    <p class="text-gray-400 text-sm">Collez un objet et un corps d'email pour voir comment Charlie répond, sans envoyer de vrai mail.</p>
+</div>
+
+<div class="bg-gray-900 border border-gray-800 rounded-lg p-4 mb-6">
+    <form
+        hx-post="/admin/api/draft-simulator/run"
+        hx-target="#simulator-result"
+        hx-swap="innerHTML"
+        hx-indicator="#simulator-spinner"
+    >
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <div>
+                <label class="block text-xs font-medium text-gray-400 mb-1">Boîte source</label>
+                <select name="mailbox_id" class="w-full bg-gray-950 border border-gray-700 rounded px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none">
+                    {% for mb in mailboxes %}
+                    <option value="{{ mb.id }}">{{ mb.name }} ({{ mb.brand }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-400 mb-1">Catégorie déclenchante</label>
+                <select name="category" class="w-full bg-gray-950 border border-gray-700 rounded px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none">
+                    <option value="demande_client" {% if default_category == 'demande_client' %}selected{% endif %}>demande_client</option>
+                    <option value="prise_contact">prise_contact</option>
+                    <option value="autre">autre (flux LLM few-shot)</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="mb-4">
+            <label class="block text-xs font-medium text-gray-400 mb-1">Objet de l'email</label>
+            <input
+                type="text"
+                name="subject"
+                value="Demande de filature - collaborateur"
+                class="w-full bg-gray-950 border border-gray-700 rounded px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+                required
+            >
+        </div>
+
+        <div class="mb-4">
+            <label class="block text-xs font-medium text-gray-400 mb-1">Corps de l'email</label>
+            <textarea
+                name="body"
+                rows="12"
+                class="w-full bg-gray-950 border border-gray-700 rounded px-3 py-2 text-sm font-mono focus:border-indigo-500 focus:outline-none"
+                required
+            >Bonjour,
+
+Je souhaiterais mettre en place une filature concernant l'un de mes collaborateurs à la sortie de son lieu de travail.
+
+Il semble repartir avec du matériel / de la marchandise chaque jour et j'ai besoin de preuves concrètes pour étayer ces faits.
+
+Ma société, MYCOMPANY_TEST, est située à Louvain-la-Neuve.
+
+Pourriez-vous m'indiquer si vous pouvez m'accompagner dans cette démarche et quelles seraient vos modalités d'intervention ?
+
+Cordialement,
+Christophe Dupont
+Directeur des opérations</textarea>
+        </div>
+
+        <div class="flex items-center gap-3">
+            <button
+                type="submit"
+                class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-sm font-medium"
+            >
+                Générer le brouillon
+            </button>
+            <span id="simulator-spinner" class="htmx-indicator text-sm text-gray-400">
+                ⏳ Génération en cours...
+            </span>
+        </div>
+    </form>
+</div>
+
+<div id="simulator-result" class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+    <p class="text-gray-500 text-sm">Le brouillon généré apparaîtra ici.</p>
+</div>
+
+<style>
+.htmx-indicator { display: none; }
+.htmx-request .htmx-indicator, .htmx-request.htmx-indicator { display: inline; }
+</style>
+{% endblock %}

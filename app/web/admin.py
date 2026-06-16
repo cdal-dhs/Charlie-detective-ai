@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+import html
+from datetime import datetime
 from pathlib import Path
+from unittest.mock import patch
 
 import aiosqlite
 import structlog
@@ -8,14 +12,13 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-import asyncio
-from datetime import datetime
-
 from app.cerveau_client import feed_document, get_backup_status
-from app.config import get_settings
+from app.config import MailboxConfig, get_settings
 from app.delivery.slack_notifier import send_slack_message
 from app.healthcheck import health
 from app.pipeline.document_extract import extract_text_bytes, is_supported
+from app.pipeline.generator import generate_draft
+from app.pipeline.language import detect_language
 from app.web.deps import get_db, require_admin
 from app.web.utils import FernetManager, audit_log
 
@@ -421,7 +424,8 @@ async def documents_upload(
     filename = str(file.filename)
     if not is_supported(filename):
         return HTMLResponse(
-            '<div class="p-3 bg-yellow-900/40 border border-yellow-800 rounded text-yellow-300 text-sm">'
+            '<div class="p-3 bg-yellow-900/40 border border-yellow-800 rounded '
+            'text-yellow-300 text-sm">'
             f"Format non supporté : {filename}. "
             "Extensions acceptées : txt, md, csv, json, xml, html, pdf, docx, jpg, png, tiff."
             "</div>"
@@ -436,7 +440,8 @@ async def documents_upload(
         text = extract_text_bytes(content, filename)
         if not text or not text.strip():
             return HTMLResponse(
-                '<div class="p-3 bg-yellow-900/40 border border-yellow-800 rounded text-yellow-300 text-sm">'
+                '<div class="p-3 bg-yellow-900/40 border border-yellow-800 rounded '
+                'text-yellow-300 text-sm">'
                 f"Fichier vide ou texte non extractible : {filename}."
                 "</div>"
             )
@@ -453,7 +458,8 @@ async def documents_upload(
 
     # Persist local tracking
     await db.execute(
-        "INSERT INTO document_scanned (doc_id, dossier_id, marque, titre, format, type, date, size_bytes) "
+        "INSERT INTO document_scanned "
+        "(doc_id, dossier_id, marque, titre, format, type, date, size_bytes) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(doc_id) DO UPDATE SET created_at=datetime('now')",
         (
@@ -621,4 +627,105 @@ async def audit_page(
             "today_mails": today_mails,
             "daniel_actions": daniel_actions,
         },
+    )
+
+
+@router.get("/draft-simulator")
+async def draft_simulator_page(
+    request: Request,
+    user: dict = Depends(require_admin),  # noqa: B008
+):
+    """Page super-admin pour simuler un email entrant et voir le brouillon généré."""
+    settings = get_settings()
+    mailboxes = [
+        {"id": i + 1, "name": mb.name, "brand": mb.brand, "default_lang": mb.default_lang}
+        for i, mb in enumerate(settings.mailboxes())
+    ]
+    return templates.TemplateResponse(
+        request,
+        "admin/draft_simulator.html",
+        {
+            "user": user,
+            "mailboxes": mailboxes,
+            "default_category": "demande_client",
+        },
+    )
+
+
+@router.post("/api/draft-simulator/run")
+async def draft_simulator_run(
+    request: Request,
+    db: aiosqlite.Connection = Depends(get_db),  # noqa: B008
+    user: dict = Depends(require_admin),  # noqa: B008
+):
+    """Génère un brouillon à partir d'un sujet + corps simulés."""
+    form = await request.form()
+    box_id = int(str(form.get("mailbox_id", "1")))
+    category = str(form.get("category", "demande_client")).strip() or "demande_client"
+    subject = str(form.get("subject", "")).strip()
+    body = str(form.get("body", "")).strip()
+
+    settings = get_settings()
+    mailboxes = settings.mailboxes()
+    if box_id < 1 or box_id > len(mailboxes):
+        return HTMLResponse(
+            '<div class="p-3 bg-red-900/40 border border-red-800 rounded text-red-300 text-sm">'
+            "Boîte invalide."
+            "</div>",
+            status_code=400,
+        )
+
+    mailbox: MailboxConfig = mailboxes[box_id - 1]
+    language = detect_language(body or subject)
+
+    # RAG et Cerveau2 sont mockés pour un test rapide et déterministe.
+    try:
+        with (
+            patch("app.pipeline.generator.retrieve", return_value=[]),
+            patch("app.pipeline.generator.query_vault", return_value=([], "")),
+        ):
+            result = await generate_draft(
+                incoming_subject=subject,
+                incoming_body=body,
+                sender="simulator@detective.local",
+                mailbox=mailbox,
+                language=language,
+                category=category,
+            )
+    except Exception as exc:
+        log.exception("admin.draft_simulator.error", error=str(exc))
+        return HTMLResponse(
+            '<div class="p-3 bg-red-900/40 border border-red-800 rounded text-red-300 text-sm">'
+            f"Erreur lors de la génération : {html.escape(str(exc))}"
+            "</div>",
+            status_code=500,
+        )
+
+    ip = request.client.host if request.client else None
+    await audit_log(
+        db,
+        user["id"],
+        "draft_simulator_run",
+        "simulator",
+        None,
+        (
+            f"mailbox={mailbox.name} category={category} "
+            f"case={getattr(result, 'case_type', 'n/a')} lang={language}"
+        ),
+        ip,
+        request.headers.get("user-agent"),
+    )
+
+    draft_html = html.escape(result.draft).replace("\n", "<br>")
+    return HTMLResponse(
+        f'<div class="space-y-3">'
+        f'<div class="flex flex-wrap gap-2 text-xs text-gray-400">'
+        f'<span class="px-2 py-1 bg-gray-800 rounded">Boîte : {html.escape(mailbox.name)}</span>'
+        f'<span class="px-2 py-1 bg-gray-800 rounded">Catégorie : {html.escape(category)}</span>'
+        f'<span class="px-2 py-1 bg-gray-800 rounded">Langue : {html.escape(language)}</span>'
+        f'<span class="px-2 py-1 bg-gray-800 rounded">Longueur : {len(result.draft)}</span>'
+        f'</div>'
+        f'<div class="bg-gray-950 border border-gray-800 rounded p-4 text-sm text-gray-200 '
+        f'font-mono whitespace-pre-wrap">{draft_html}</div>'
+        f'</div>'
     )
