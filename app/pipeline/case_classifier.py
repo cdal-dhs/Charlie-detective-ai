@@ -21,6 +21,7 @@ CASE_TYPES = (
     "incapacite_travail",
     "infidelite_filature",
     "recherche_personne",
+    "recuperation_dette",
     "securite_passé_violences",
     "contre_espionnage_micros",
     "non_determine",
@@ -33,6 +34,7 @@ Analyse le mail entrant et choisis UN SEUL cas parmi cette liste exacte :
 - incapacite_travail
 - infidelite_filature
 - recherche_personne
+- recuperation_dette
 - securite_passé_violences
 - contre_espionnage_micros
 - non_determine
@@ -57,6 +59,7 @@ def _case_to_label(case_type: str) -> str:
         "incapacite_travail": "Ouvrier en incapacité de travail",
         "infidelite_filature": "Surveillance / infidélité",
         "recherche_personne": "Recherche de personne / adresse",
+        "recuperation_dette": "Récupération de dette / créance",
         "securite_passé_violences": "Passé de violences / sécurité",
         "contre_espionnage_micros": "Détection micros-caméras / installation",
         "non_determine": "Cas non déterminé",
@@ -109,6 +112,16 @@ def _extract_case_type_from_json(
                 "localiser",
                 "personne",
                 "recherche",
+            ],
+            "recuperation_dette": [
+                "dette",
+                "argent",
+                "doit",
+                "créance",
+                "recouvrement",
+                "reconnaissance de dette",
+                "doit de l'argent",
+                "somme d'argent",
             ],
             "securite_passé_violences": [
                 "violence",

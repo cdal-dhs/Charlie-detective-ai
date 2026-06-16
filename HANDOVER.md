@@ -1,7 +1,7 @@
 # HANDOVER — Detective.be Agent IA (Charlie)
 
 > Document de transfert pour tout agent (Claude Sonnet/Opus 4.X, GPT, etc.).
-> **Dernière mise à jour** : 2026-06-16 · **Version courante** : v1.22.10 · **Déployé sur** : `detective.digitalhs.biz`
+> **Dernière mise à jour** : 2026-06-16 · **Version courante** : v1.22.11 · **Déployé sur** : `detective.digitalhs.biz`
 
 ---
 
@@ -38,7 +38,7 @@
 
 ---
 
-## 2. Architecture actuelle (v1.22.10)
+## 2. Architecture actuelle (v1.22.11)
 
 ```
 [3 boîtes Infomaniak IMAP] ──polling 5min──► [Worker asyncio Python]
@@ -63,7 +63,7 @@
 
 | Fichier | Rôle critique | À savoir |
 |---|---|---|
-| `app/_version.py` | **Source unique de vérité** version | `VERSION = "1.22.10"`. Tolérance zéro. Ne JAMAIS utiliser `importlib.metadata`. |
+| `app/_version.py` | **Source unique de vérité** version | `VERSION = "1.22.11"`. Tolérance zéro. Ne JAMAIS utiliser `importlib.metadata`. |
 | `app/charlie.py` | **Cœur intelligent Charlie AI** | `ask_charlie()` : extraction entités → SQL programmatique (bypass LLM) + vault Cerveau2 (fallback direct GET) + archives + corrections + mémoire → nuage de liaison familial → **résumé de dossier narratif LLM** (v1.19.1) → garde anti-vide + garde anti-"pas trouvé" |
 | `app/charlie_memory.py` | **Mémoire persistante** | Table `charlie_memory` (feedback good/bad, corrections, auto-save) |
 | `app/cerveau_client.py` | **Client HTTP Cerveau2** | `query_vault()`, `get_vault_note()` (fallback direct), `feed_correspondance()`, `feed_document()`. Bearer Token statique. **Dégradation silencieuse** (retourne `[]` si Cerveau2 down) |

@@ -1,5 +1,25 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.22.11] — 2026-06-16 (cas récupération de dette)
+
+### Contexte
+CDAL partage une vraie demande client de récupération de dette et la réponse idéale de Daniel. Besoin : ajouter un nouveau cas de figure `recuperation_dette` avec un brouillon adapté.
+
+### Ajouté
+- **`app/pipeline/case_classifier.py`** :
+  - Nouveau cas `recuperation_dette` dans `CASE_TYPES`, le prompt JSON, `_case_to_label()` et le fallback keyword (`dette`, `argent`, `doit`, `créance`, `recouvrement`, `reconnaissance de dette`, etc.).
+- **`app/pipeline/qualification_builder.py`** :
+  - `_CASE_QUESTIONS["recuperation_dette"]` : 6 questions sur documents, identité, adresse, contacts, employeur, biens.
+  - `_CASE_LABELS["recuperation_dette"]` : "une récupération de dette ou de créance".
+  - `_rephrase_need()` : intro "Nous accusons bonne réception de votre demande concernant une personne de votre entourage qui vous doit une somme importante d'argent."
+  - `_build_dette_draft()` : structure proche du modèle Daniel (intro, question document, liste à puces, closing légal, "Bien à vous").
+- **`tests/test_case_classifier_dette.py`** : 2 tests fallback.
+- **`tests/test_qualification_builder_dette.py`** : 1 test structure.
+- **`app/_version.py`** : bump `1.22.10` → `1.22.11`.
+
+### Tests
+- **94/94 tests verts** avec `venv/bin/python -m pytest -q`.
+
 ## [1.22.10] — 2026-06-16 (polish brouillon déterministe)
 
 ### Contexte

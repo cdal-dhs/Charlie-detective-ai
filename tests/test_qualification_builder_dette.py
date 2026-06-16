@@ -1,0 +1,50 @@
+"""Tests du brouillon spécifique récupération de dette."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from app.config import MailboxConfig
+from app.pipeline.qualification_builder import build_qualification_draft
+
+
+@pytest.fixture
+def mailbox() -> MailboxConfig:
+    return MailboxConfig(
+        name="detective_belgique",
+        user="test@detectivebelgique.be",
+        app_password="x",
+        brand="Detective Belgique",
+        default_lang="fr",
+        db_path=Path("./data/boite1.sqlite"),
+    )
+
+
+def test_dette_draft_structure(mailbox: MailboxConfig) -> None:
+    draft = build_qualification_draft(
+        subject=(
+            "Enquête sur un membre de mon entourage qui me doit une grosse somme d'argent"
+        ),
+        body=(
+            "Nom: kangudia\n"
+            "Prénom: Eunice\n"
+            "Téléphone: 0474163904\n"
+            "Heure de contact: 10\n"
+            "Votre profil ?: Particulier"
+        ),
+        sender="eunice@example.com",
+        mailbox=mailbox,
+        case="recuperation_dette",
+    )
+    assert "Nous accusons bonne réception" in draft
+    assert "reconnaissance de dette" in draft
+    assert "Identité complète" in draft
+    assert "Dernière adresse connue" in draft
+    assert "Numéros de téléphone" in draft
+    assert "Employeur ou activité professionnelle" in draft
+    assert "Biens éventuels" in draft
+    assert "stratégie d'intervention adaptée" in draft
+    assert "Daniel Hurchon" in draft
+    assert "Bien à vous" in draft

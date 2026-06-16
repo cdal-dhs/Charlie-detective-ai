@@ -161,6 +161,18 @@ _CASE_QUESTIONS: dict[str, list[str]] = {
         "Date de naissance exacte ou estimation de l'âge",
         "Région ou pays de recherche (Belgique, France, Luxembourg)",
     ],
+    "recuperation_dette": [
+        (
+            "Avez-vous une reconnaissance de dette signée ou tout document prouvant "
+            "la créance (contrat, convention, échanges de courriels/messages, "
+            "preuves de virements) ?"
+        ),
+        "Identité complète de la personne concernée (nom, prénom, date de naissance si connue)",
+        "Dernière adresse connue de la personne",
+        "Numéros de téléphone et adresse e-mail de la personne",
+        "Employeur ou activité professionnelle de la personne",
+        "Biens éventuels de la personne (véhicules, société, biens immobiliers, etc.)",
+    ],
     "securite_passé_violences": [
         "Anciens employeurs ou villes de résidence passées de la cible",
         "Adresse professionnelle éventuelle de la cible",
@@ -175,6 +187,7 @@ _CASE_LABELS = {
     "incapacite_travail": "une vérification d'incapacité de travail",
     "infidelite_filature": "une filature / surveillance",
     "recherche_personne": "une recherche de personne ou d'adresse",
+    "recuperation_dette": "une récupération de dette ou de créance",
     "securite_passé_violences": "une recherche sur le passé d'une personne",
     "contre_espionnage_micros": "une détection de micros ou installation de caméras",
     "non_determine": "une mission d'enquête",
@@ -206,6 +219,11 @@ def _rephrase_need(subject: str, body: str, case: str) -> str:
         return "Je comprends que vous souhaitez vérifier une situation d'incapacité de travail."
     if case == "recherche_personne":
         return "Je comprends que vous souhaitez localiser une personne ou obtenir une adresse."
+    if case == "recuperation_dette":
+        return (
+            "Nous accusons bonne réception de votre demande concernant une personne de "
+            "votre entourage qui vous doit une somme importante d'argent."
+        )
     if case == "securite_passé_violences":
         return "Je comprends que vous souhaitez obtenir des éléments sur le passé d'une personne."
     if case == "contre_espionnage_micros":
@@ -230,41 +248,88 @@ def build_qualification_draft(
     questions = _BASE_QUESTIONS + _CASE_QUESTIONS.get(case, [])
 
     greeting = f"Bonjour {first_name}," if first_name else "Bonjour,"
-    lines = [
+
+    # Pour le cas dette, on reproduit la structure de Daniel (intro, question doc, liste
+    # d'infos sur la cible, closing spécifique). Les autres cas conservent le template
+    # standard.
+    if case == "recuperation_dette":
+        lines = _build_dette_draft(greeting, first_name, questions, mailbox)
+    else:
+        lines = [
+            greeting,
+            "",
+            need,
+            "",
+            (
+                "Afin de préparer votre dossier dans les meilleures conditions, et pouvoir "
+                "vous donner une estimation de devis fiable, pourriez-vous me transmettre "
+                "les éléments suivants :"
+            ),
+        ]
+        for i, q in enumerate(questions, 1):
+            lines.append(f"{i}. {q}.")
+
+        lines.extend(
+            [
+                "",
+                "Sur le plan tarifaire :",
+                f"- Ouverture de dossier : {settings.dossier_opening_fee} € HTVA.",
+                f"- Rapport final : {settings.report_fee} € HTVA.",
+                f"- Heure de détective : {settings.hourly_rate_day} €/h HTVA "
+                f"({settings.hourly_rate_night_weekend} €/h nuit/week-end).",
+                "",
+                "Pour toute filature ou surveillance mobile, nous déployons systématiquement "
+                "deux détectives afin d'assurer l'efficacité et la discrétion.",
+                "",
+                "Dès réception de ces éléments, je reprendrai contact avec vous "
+                "pour finaliser le devis et convenir d'un échange téléphonique "
+                "sur ce nouveau dossier.",
+                "",
+                "Bien à vous,",
+                "",
+                "Daniel Hurchon",
+                f"{mailbox.brand}",
+                "GSM 0471/31.81.20",
+                "contact@detectivebelgique.be",
+            ]
+        )
+    return "\n".join(lines)
+
+
+def _build_dette_draft(
+    greeting: str,
+    first_name: str | None,
+    questions: list[str],
+    mailbox: MailboxConfig,
+) -> list[str]:
+    """Brouillon spécifique pour récupération de dette, sur le modèle de Daniel."""
+    closing_name = f"{first_name}," if first_name else ","
+    return [
         greeting,
         "",
-        need,
+        "Nous accusons bonne réception de votre demande concernant une personne de votre "
+        "entourage qui vous doit une somme importante d'argent.",
         "",
-        (
-            "Afin de préparer votre dossier dans les meilleures conditions, et pouvoir "
-            "vous donner une estimation de devis fiable, pourriez-vous me transmettre "
-            "les éléments suivants :"
-        ),
+        "Afin de pouvoir évaluer la situation et vous proposer une stratégie adaptée, "
+        "pourriez-vous nous préciser si vous disposez d'une reconnaissance de dette signée "
+        "ou de tout autre document prouvant cette créance (contrat, convention, échanges de "
+        "courriels, messages, preuves de virements bancaires, etc.) ?",
+        "",
+        "Nous vous invitons également à nous communiquer les informations dont vous disposez "
+        "actuellement concernant la personne concernée, notamment :",
+        "",
+    ] + [f"- {q};" for q in questions[1:]] + [
+        "",
+        "Sur base de ces éléments, nous pourrons analyser votre dossier et vous proposer "
+        "une stratégie d'intervention adaptée, dans le respect du cadre légal applicable aux "
+        "activités de détective privé en Belgique.",
+        "",
+        "Nous restons à votre disposition pour toute information complémentaire.",
+        "",
+        "Bien à vous" + closing_name,
+        "",
+        "Daniel Hurchon",
+        f"{mailbox.brand}",
+        "GSM 0471/31.81.20",
+        "contact@detectivebelgique.be",
     ]
-    for i, q in enumerate(questions, 1):
-        lines.append(f"{i}. {q}.")
-
-    lines.extend(
-        [
-            "",
-            "Sur le plan tarifaire :",
-            f"- Ouverture de dossier : {settings.dossier_opening_fee} € HTVA.",
-            f"- Rapport final : {settings.report_fee} € HTVA.",
-            f"- Heure de détective : {settings.hourly_rate_day} €/h HTVA "
-            f"({settings.hourly_rate_night_weekend} €/h nuit/week-end).",
-            "",
-            "Pour toute filature ou surveillance mobile, nous déployons systématiquement "
-            "deux détectives afin d'assurer l'efficacité et la discrétion.",
-            "",
-            "Dès réception de ces éléments, je reprendrai contact avec vous "
-            "pour finaliser le devis et convenir d'un échange téléphonique sur ce nouveau dossier.",
-            "",
-            "Bien à vous,",
-            "",
-            "Daniel Hurchon",
-            f"{mailbox.brand}",
-            "GSM 0471/31.81.20",
-            "contact@detectivebelgique.be",
-        ]
-    )
-    return "\n".join(lines)
