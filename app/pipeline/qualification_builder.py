@@ -245,16 +245,16 @@ def build_qualification_draft(
     settings = get_settings()
     first_name = _extract_first_name(body)
     need = _rephrase_need(subject, body, case)
-    questions = _BASE_QUESTIONS + _CASE_QUESTIONS.get(case, [])
-
     greeting = f"Bonjour {first_name}," if first_name else "Bonjour,"
 
     # Pour le cas dette, on reproduit la structure de Daniel (intro, question doc, liste
     # d'infos sur la cible, closing spécifique). Les autres cas conservent le template
-    # standard.
+    # standard avec les questions de base + spécifiques.
     if case == "recuperation_dette":
+        questions = _CASE_QUESTIONS.get(case, [])
         lines = _build_dette_draft(greeting, first_name, questions, mailbox)
     else:
+        questions = _BASE_QUESTIONS + _CASE_QUESTIONS.get(case, [])
         lines = [
             greeting,
             "",
@@ -314,6 +314,9 @@ def _build_dette_draft(
         "pourriez-vous nous préciser si vous disposez d'une reconnaissance de dette signée "
         "ou de tout autre document prouvant cette créance (contrat, convention, échanges de "
         "courriels, messages, preuves de virements bancaires, etc.) ?",
+        "",
+        "Pourriez-vous également nous confirmer vos nom, prénom, adresse complète et GSM "
+        "de contact direct, afin que nous puissions vous recontacter dans les meilleurs délais ?",
         "",
         "Nous vous invitons également à nous communiquer les informations dont vous disposez "
         "actuellement concernant la personne concernée, notamment :",

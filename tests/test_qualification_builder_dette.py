@@ -40,6 +40,7 @@ def test_dette_draft_structure(mailbox: MailboxConfig) -> None:
     )
     assert "Nous accusons bonne réception" in draft
     assert "reconnaissance de dette" in draft
+    assert "adresse complète et GSM" in draft
     assert "Identité complète" in draft
     assert "Dernière adresse connue" in draft
     assert "Numéros de téléphone" in draft
@@ -48,3 +49,9 @@ def test_dette_draft_structure(mailbox: MailboxConfig) -> None:
     assert "stratégie d'intervention adaptée" in draft
     assert "Daniel Hurchon" in draft
     assert "Bien à vous" in draft
+    # On ne doit PAS avoir les questions génériques des autres cas.
+    assert "Votre adresse complète (ou société" not in draft
+    assert "Votre GSM de contact direct" not in draft
+    assert "Nom, prénom et adresse de départ connue" not in draft
+    assert "Photo récente" not in draft
+    assert "Véhicule de la personne concernée" not in draft

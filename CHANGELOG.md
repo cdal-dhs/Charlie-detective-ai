@@ -1,5 +1,21 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.22.12] — 2026-06-16 (fix brouillon dette)
+
+### Contexte
+Déploiement de v1.22.11 puis test local du cas `recuperation_dette` : le brouillon mélangeait les questions de base génériques avec les questions spécifiques dette, produisant une liste incohérente et des doublons.
+
+### Fixé
+- **`app/pipeline/qualification_builder.py`** :
+  - Isolation des questions dette : `recuperation_dette` utilise uniquement `_CASE_QUESTIONS["recuperation_dette"]`.
+  - Ajout explicite d'une demande de coordonnées client (nom, prénom, adresse, GSM) dans `_build_dette_draft()`.
+  - Suppression du doublon "reconnaissance de dette" en ne listant que `questions[1:]` (la première question est traitée dans l'intro).
+- **`tests/test_qualification_builder_dette.py`** : assertions renforcées pour vérifier l'absence des questions génériques et la présence des questions dette.
+- **`app/_version.py`** : bump `1.22.11` → `1.22.12`.
+
+### Tests
+- **94/94 tests verts** avec `venv/bin/python -m pytest -q`.
+
 ## [1.22.11] — 2026-06-16 (cas récupération de dette)
 
 ### Contexte
