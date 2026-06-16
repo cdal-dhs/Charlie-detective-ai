@@ -3,11 +3,11 @@
 Fournit un fallback DB → .env pour les paramètres "hot" que le superadmin
 peut modifier en ligne sans redémarrer le serveur.
 """
+
 import sqlite3
 from pathlib import Path
 
 from app.config import get_settings
-
 
 _CACHED_DB_PATH: Path | None = None
 
@@ -51,3 +51,11 @@ def get_llm_model_classifier() -> str:
     """Retourne le modèle de classification (DB puis .env)."""
     env = get_settings()
     return get_runtime_setting("llm_model_classifier") or env.llm_model_classifier
+
+
+def get_llm_model_qualifier() -> str:
+    """Retourne le modèle dédié à la qualification prospect (DB puis .env)."""
+    env = get_settings()
+    return get_runtime_setting("llm_model_qualifier") or getattr(
+        env, "llm_model_qualifier", "openai/gemma4:31b"
+    )

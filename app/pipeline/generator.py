@@ -7,6 +7,7 @@ import structlog
 from app.cerveau_client import VaultNote, query_vault
 from app.config import MailboxConfig, get_settings
 from app.llm.router import complete
+from app.pipeline.case_classifier import classify_case
 from app.pipeline.language import Language
 from app.pipeline.rag import RetrievedPair, retrieve
 from app.settings_store import get_llm_models
@@ -14,6 +15,17 @@ from app.settings_store import get_llm_models
 log = structlog.get_logger()
 
 PERSONALITY_PATH = Path(__file__).parent.parent / "prompts" / "personality_daniel.txt"
+QUALIFICATION_PATH = Path(__file__).parent.parent / "prompts" / "prospect_qualification.md"
+
+
+_CASE_LABELS = {
+    "incapacite_travail": "Ouvrier en incapacité de travail",
+    "infidelite_filature": "Surveillance / suspicion d'infidélité",
+    "recherche_personne": "Recherche de personne / adresse",
+    "securite_passé_violences": "Passé de violences / sécurité",
+    "contre_espionnage_micros": "Détection micros-caméras / installation",
+    "non_determine": "Cas non déterminé",
+}
 
 
 @dataclass
@@ -29,6 +41,39 @@ class GenerationResult:
 
 def _load_personality() -> str:
     return PERSONALITY_PATH.read_text(encoding="utf-8")
+
+
+def _load_qualification_guide() -> str:
+    """Charge la directive de qualification prospect (v1.22.7)."""
+    if not QUALIFICATION_PATH.exists():
+        return ""
+    return QUALIFICATION_PATH.read_text(encoding="utf-8")
+
+
+def _render_qualification_guide(
+    case_type: str,
+    case_confidence: str,
+    case_reason: str,
+) -> str:
+    """Injecte les variables tarifaires et le cas détecté dans le guide."""
+    guide = _load_qualification_guide()
+    if not guide:
+        return ""
+    settings = get_settings()
+    case_label = _CASE_LABELS.get(case_type, case_type)
+    replacements = {
+        "{{ dossier_opening_fee }}": str(settings.dossier_opening_fee),
+        "{{ report_fee }}": str(settings.report_fee),
+        "{{ hourly_rate_day }}": str(settings.hourly_rate_day),
+        "{{ hourly_rate_night_weekend }}": str(settings.hourly_rate_night_weekend),
+    }
+    for placeholder, value in replacements.items():
+        guide = guide.replace(placeholder, value)
+    header = (
+        f"=== CAS DE FIGURE DÉTECTÉ : {case_label} "
+        f"(confiance {case_confidence}) ===\n{case_reason}\n"
+    )
+    return header + guide
 
 
 def _load_soul_for_brand(brand: str) -> str:
@@ -78,12 +123,20 @@ def _load_daniel_fewshot(max_examples: int = 4) -> str:
     if not db_path.exists():
         return ""
 
-    _RFC2822 = re.compile(
-        r"[A-Za-z]{3},\s+(\d+)\s+(\w+)\s+(\d{4})\s+(\d{2}):(\d{2}):(\d{2})"
-    )
+    _RFC2822 = re.compile(r"[A-Za-z]{3},\s+(\d+)\s+(\w+)\s+(\d{4})\s+(\d{2}):(\d{2}):(\d{2})")
     _MONTHS = {
-        "Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6,
-        "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12,
+        "Jan": 1,
+        "Feb": 2,
+        "Mar": 3,
+        "Apr": 4,
+        "May": 5,
+        "Jun": 6,
+        "Jul": 7,
+        "Aug": 8,
+        "Sep": 9,
+        "Oct": 10,
+        "Nov": 11,
+        "Dec": 12,
     }
 
     def _parse_received_at(text):
@@ -95,8 +148,12 @@ def _load_daniel_fewshot(max_examples: int = 4) -> str:
         day, mon_s, year, hh, mm, ss = m.groups()
         try:
             return datetime(
-                int(year), _MONTHS[mon_s], int(day),
-                int(hh), int(mm), int(ss),
+                int(year),
+                _MONTHS[mon_s],
+                int(day),
+                int(hh),
+                int(mm),
+                int(ss),
                 tzinfo=timezone.utc,
             )
         except (KeyError, ValueError):
@@ -193,9 +250,13 @@ def _build_messages(
     language: Language,
     pairs: list[RetrievedPair],
     vault_notes: list[VaultNote],
+    case_type: str = "non_determine",
+    case_confidence: str = "low",
+    case_reason: str = "",
 ) -> list[dict]:
     soul_section = _load_soul_for_brand(mailbox.brand)
     fewshot = _load_daniel_fewshot(max_examples=4)
+    qualification = _render_qualification_guide(case_type, case_confidence, case_reason)
     # On génère TOUJOURS en français (langue de travail de Daniel).
     # Si le mail entrant est dans une autre langue, le module translator
     # ajoutera traductions + cadre multilingue autour du brouillon.
@@ -205,6 +266,7 @@ def _build_messages(
         + f"\nLangue de réponse OBLIGATOIRE : français (la langue de travail de Daniel)"
         + (f"\n\n{soul_section}" if soul_section else "")
         + (f"\n\n{fewshot}" if fewshot else "")
+        + (f"\n\n{qualification}" if qualification else "")
     )
     vault_section = _format_vault_context(vault_notes)
     user = (
@@ -217,6 +279,7 @@ def _build_messages(
         f"Corps :\n{incoming_body}\n\n"
         f"Génère UN brouillon de réponse EN FRANÇAIS, signé au nom de {mailbox.brand}, "
         f"dans le style de Daniel illustré par les cas ci-dessus. "
+        f"Applique impérativement le PROCESS de qualification ci-dessus pour poser les bonnes questions. "
         f"Renvoie UNIQUEMENT le corps du message, sans préambule, sans 'Sujet:', sans markdown."
     )
     return [
@@ -248,14 +311,35 @@ async def generate_draft(
     )
     log.info("generator.vault", notes=len(vault_notes))
 
+    # v1.22.7 : classification du cas de figure pour adapter la qualification
+    case_type, case_confidence, case_reason = await classify_case(
+        subject=incoming_subject,
+        body=incoming_body,
+        sender=sender,
+    )
+    log.info(
+        "generator.case_classified",
+        case=case_type,
+        confidence=case_confidence,
+    )
+
     messages = _build_messages(
-        incoming_subject, incoming_body, sender, mailbox, language, pairs, vault_notes
+        incoming_subject,
+        incoming_body,
+        sender,
+        mailbox,
+        language,
+        pairs,
+        vault_notes,
+        case_type=case_type,
+        case_confidence=case_confidence,
+        case_reason=case_reason,
     )
     llm_default, _llm_fallback = get_llm_models()
     draft = await complete(
         model=llm_default,
         messages=messages,
-        max_tokens=2000,  # v1.22.0 : 1500 → 2000 (réponses Daniel font 15-30 lignes)
+        max_tokens=2500,  # v1.22.7 : 2000 → 2500 (qualification = réponse plus longue)
         temperature=0.4,
     )
     raw_draft = draft.strip()
@@ -265,8 +349,8 @@ async def generate_draft(
     # Si la langue détectée ≠ FR, on ajoute en-tête (mail original) + traductions.
     final_draft = raw_draft
     if language != "fr":
-        from app.pipeline.translator import translate_from_fr, translate_to_fr
         from app.pipeline.draft_renderer import render_draft_with_translations
+        from app.pipeline.translator import translate_from_fr, translate_to_fr
 
         # Lancer les 2 traductions en parallèle
         translation_to_fr_task = translate_to_fr(incoming_body, language)
@@ -298,3 +382,7 @@ async def generate_draft(
         category=category,
         vault_notes=vault_notes,
     )
+
+
+# Alias exporté pour compatibilité tests
+__all__ = ["GenerationResult", "generate_draft"]

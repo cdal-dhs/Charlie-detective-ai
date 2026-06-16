@@ -1,5 +1,23 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.22.7] — 2026-06-16 (qualification prospect dans les brouillons)
+
+### Contexte
+Les brouillons de réponse doivent mieux qualifier les prospects dès le premier contact. Daniel a besoin de toutes les informations clés pour faire un appel de clôture avec un devis solide. Un fichier de consignes métier a été fourni par CDAL.
+
+### Ajouté
+- **`app/prompts/prospect_qualification.md`** : directive complète de qualification client — règles générales, formulaire de base technique, 5 cas de figures avec questions spécifiques, séquence type et transparence tarifaire.
+- **`app/pipeline/case_classifier.py`** : module dédié qui détecte le cas de figure principal du mail entrant (`incapacite_travail`, `infidelite_filature`, `recherche_personne`, `securite_passé_violences`, `contre_espionnage_micros`, `non_determine`) avec confiance et raison. Modèle configurable via `LLM_MODEL_QUALIFIER` (défaut `openai/gemma4:31b`).
+- **`app/pipeline/generator.py`** : intègre la directive de qualification et le cas détecté dans le system prompt ; max_tokens passé à 2500 pour accueillir les questions complètes.
+- **`app/workers/imap_poller.py`** : les brouillons sont maintenant générés pour toutes les catégories listées dans `DRAFT_CATEGORIES` (`demande_client,prise_contact` par défaut), pas seulement `demande_client`.
+- **`app/config.py`** : nouveaux paramètres `llm_model_qualifier`, tarifs ajustables (`dossier_opening_fee`, `report_fee`, `hourly_rate_day`, `hourly_rate_night_weekend`) et `draft_categories`.
+- **`app/settings_store.py`** : `get_llm_model_qualifier()` pour lecture runtime DB/env.
+- **`.env.example`** : variables `LLM_MODEL_QUALIFIER`, tarifs et `DRAFT_CATEGORIES` documentées.
+
+### Tests
+- `tests/test_case_classifier.py` : 7 tests couvrant l'extraction JSON, le fallback keyword et les erreurs LLM.
+- **82/82 tests verts**.
+
 ## [1.22.6] — 2026-06-16 (fix UI Copier + logs Actions Daniel)
 
 ### Contexte

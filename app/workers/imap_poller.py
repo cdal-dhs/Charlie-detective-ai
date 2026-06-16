@@ -1054,13 +1054,7 @@ async def _process_single_mail(
         # Newsletter / calendrier : auto-approved + low priority (rien à traiter)
         status = "pending"
         text_lower = f"{subject} {body}".lower()
-        if category == "newsletter":
-            status = "approved"
-            priority = "low"
-        elif category == "spam":
-            status = "approved"
-            priority = "low"
-        elif category == "autre" and any(
+        if category == "newsletter" or category == "spam" or (category == "autre" and any(
             kw in text_lower
             for kw in (
                 "invitation",
@@ -1076,7 +1070,7 @@ async def _process_single_mail(
                 "tentative",
                 "provisoire",
             )
-        ):
+        )):
             status = "approved"
             priority = "low"
         log.info(
@@ -1295,7 +1289,11 @@ async def _process_single_mail(
                             )
                         )
 
-        if category == "demande_client" and is_new and not settings.dry_run:
+        # v1.22.7 : générer un brouillon pour toute catégorie configurée (demande_client + prise_contact)
+        draft_categories = {
+            c.strip().lower() for c in settings.draft_categories.split(",") if c.strip()
+        }
+        if category.lower() in draft_categories and is_new and not settings.dry_run:
             incoming = IncomingMail(
                 sender=sender,
                 subject=subject,
@@ -1341,13 +1339,14 @@ async def _process_single_mail(
                     sender=sender,
                     subject=subject,
                 )
-        elif category == "demande_client" and is_new and settings.dry_run:
+        elif category.lower() in draft_categories and is_new and settings.dry_run:
             log.info(
                 "dry_run.skip_draft",
                 mailbox=mailbox.name,
                 uid=uid,
                 recipient=settings.draft_recipient,
                 verified=verified_draft,
+                category=category,
             )
 
         if not settings.dry_run:

@@ -44,6 +44,8 @@ class Settings(BaseSettings):
     llm_model_fallback: str = "openai/glm-5.1:cloud"
     llm_model_classifier: str = "openai/kimi-k2.6:cloud"
     llm_model_chat: str = "openai/kimi-k2.6:cloud"
+    # v1.22.7 : modèle dédié à la qualification prospect (cas de figure + questions)
+    llm_model_qualifier: str = "openai/gemma4:31b"
 
     resend_api_key: str = ""
     resend_from: str = "agent@digitalhs.biz"
@@ -64,6 +66,17 @@ class Settings(BaseSettings):
     # Au-dessus de N crashes successifs sur 1 boîte → email Resend à cdal@digitalhs.biz.
     # Ajustable code uniquement (pas env). Anti-spam 1h/boîte côté alerts.py.
     poller_alert_threshold: int = 5
+
+    # --- Tarifs qualification prospect (v1.22.7) ---
+    # Utilisés dans les brouillons de réponse pour demande_client et prise_contact.
+    # Modifiables via .env ou runtime via app_settings.
+    dossier_opening_fee: int = 200
+    report_fee: int = 150
+    hourly_rate_day: int = 75
+    hourly_rate_night_weekend: int = 95
+
+    # --- Catégories qui déclenchent la génération d'un brouillon (v1.22.7) ---
+    draft_categories: str = "demande_client,prise_contact"
 
     data_dir: Path = Path("./data")
     db_boite_1: Path = Path("./data/boite1.sqlite")
