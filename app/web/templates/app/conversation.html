@@ -206,8 +206,8 @@
             <div class="flex gap-2">
               <button
                 type="button"
-                class="px-3 py-1 bg-gray-800 hover:bg-gray-700 rounded text-xs"
-                @click="navigator.clipboard.writeText(document.getElementById('ai-draft-text').innerText); $el.innerText = 'Copié !'; setTimeout(() => $el.innerText = 'Copier', 1500)"
+                class="px-3 py-1 bg-gray-800 hover:bg-gray-700 rounded text-xs js-copy-draft"
+                data-copy-target="ai-draft-text"
               >Copier</button>
             </div>
           </div>
@@ -259,4 +259,46 @@
     </div>
   </div>
 </div>
+
+<script>
+(function () {
+  document.addEventListener('click', function (e) {
+    const btn = e.target.closest('.js-copy-draft');
+    if (!btn) return;
+    const targetId = btn.dataset.copyTarget;
+    const el = document.getElementById(targetId);
+    if (!el) return;
+    const original = btn.innerText;
+    const text = el.innerText;
+
+    const show = function (label) {
+      btn.innerText = label;
+      setTimeout(function () { btn.innerText = original; }, 1500);
+    };
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text)
+        .then(function () { show('Copié !'); })
+        .catch(function () { show('Erreur'); });
+    } else {
+      // Fallback pour anciens navigateurs / contextes non sécurisés
+      const range = document.createRange();
+      range.selectNode(el);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      try {
+        if (document.execCommand('copy')) {
+          show('Copié !');
+        } else {
+          show('Erreur');
+        }
+      } catch (err) {
+        show('Erreur');
+      }
+      selection.removeAllRanges();
+    }
+  });
+})();
+</script>
 {% endblock %}

@@ -1,5 +1,18 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.22.6] — 2026-06-16 (fix UI Copier + logs Actions Daniel)
+
+### Contexte
+Suite à la demande de review et aux constats VPS :
+- Le bouton **Copier** de la réponse proposée par Charlie sur `/app/conversations/{id}` ne fonctionnait pas (Alpine.js `@click` inline non fiable dans le contexte HTMX).
+- Les mails `demande_client` de `detective_belgium` arrivent correctement `pending`/`high` en base ; ils passent ensuite `approved` suite aux actions de Daniel (`user_id=2`) dans le cockpit. Besoin de visibilité sur ces actions.
+
+### Fixé / Ajouté
+- **`app/web/templates/app/conversation.html`** : remplacement du bouton Copier Alpine par un listener vanilla JS délégué (`js-copy-draft`), compatible HTTPS + localhost, avec fallback `document.execCommand('copy')` si `navigator.clipboard` n'est pas disponible.
+- **`app/web/admin.py`**: nouvelle requête `daniel_actions` récupérant les 50 dernières actions de `user_id=2` (`draft_approve`, `draft_reject`, `status_update`, `manual_draft`, `draft_save`) depuis `audit_logs`.
+- **`app/web/templates/admin/audit.html`** : nouvelle section "👤 Dernières actions de Daniel" dans la page Logs, avec date, action, ressource et détails.
+- **`app/_version.py`** : bump `1.22.5` → `1.22.6`.
+
 ## [1.22.5] — 2026-06-16 (fix robustesse mémoire + tests Cerveau2)
 
 ### Contexte

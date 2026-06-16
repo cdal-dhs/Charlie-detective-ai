@@ -90,7 +90,10 @@ async def _load_settings(db: aiosqlite.Connection, env_settings: dict | None = N
             fallback = ""
             if env_settings and key in env_settings:
                 fallback = env_settings[key]
-            db_vals[key] = {"value": fallback, "masked": "key" in key.lower() or "token" in key.lower()}
+            db_vals[key] = {
+                "value": fallback,
+                "masked": "key" in key.lower() or "token" in key.lower(),
+            }
     return db_vals
 
 
@@ -203,13 +206,19 @@ async def settings_save(
 
     ip = request.client.host if request.client else None
     await audit_log(
-        db, user["id"], "settings_update", "app_settings", None,
-        None, ip, request.headers.get("user-agent"),
+        db,
+        user["id"],
+        "settings_update",
+        "app_settings",
+        None,
+        None,
+        ip,
+        request.headers.get("user-agent"),
     )
     return HTMLResponse(
         '<div class="p-3 bg-green-900/40 border border-green-800 rounded text-green-300 text-sm">'
-        'Paramètres sauvegardés.'
-        '</div>'
+        "Paramètres sauvegardés."
+        "</div>"
     )
 
 
@@ -227,6 +236,7 @@ async def test_imap(
 
     try:
         from aioimaplib import aioimaplib
+
         client = aioimaplib.IMAP4_SSL(settings.imap_host, settings.imap_port)
         await client.wait_hello_from_server()
         resp = await client.login(mb.user, mb.app_password)
@@ -304,8 +314,14 @@ async def add_user(
 
     ip = request.client.host if request.client else None
     await audit_log(
-        db, user["id"], "user_add", "users", email,
-        None, ip, request.headers.get("user-agent"),
+        db,
+        user["id"],
+        "user_add",
+        "users",
+        email,
+        None,
+        ip,
+        request.headers.get("user-agent"),
     )
     return RedirectResponse(url="/admin/users", status_code=302)
 
@@ -350,8 +366,14 @@ async def soul_save(
 
     ip = request.client.host if request.client else None
     await audit_log(
-        db, user["id"], "soul_update", "prompt", "SOUL.md",
-        None, ip, request.headers.get("user-agent"),
+        db,
+        user["id"],
+        "soul_update",
+        "prompt",
+        "SOUL.md",
+        None,
+        ip,
+        request.headers.get("user-agent"),
     )
     return {"ok": True}
 
@@ -434,7 +456,16 @@ async def documents_upload(
         "INSERT INTO document_scanned (doc_id, dossier_id, marque, titre, format, type, date, size_bytes) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(doc_id) DO UPDATE SET created_at=datetime('now')",
-        (doc_id, dossier_id, marque, titre, Path(filename).suffix.lower().lstrip("."), "document", date_str, len(content)),
+        (
+            doc_id,
+            dossier_id,
+            marque,
+            titre,
+            Path(filename).suffix.lower().lstrip("."),
+            "document",
+            date_str,
+            len(content),
+        ),
     )
     await db.commit()
 
@@ -456,8 +487,14 @@ async def documents_upload(
 
     ip = request.client.host if request.client else None
     await audit_log(
-        db, user["id"], "document_upload", "document", doc_id,
-        f"{filename} -> {dossier_id}", ip, request.headers.get("user-agent"),
+        db,
+        user["id"],
+        "document_upload",
+        "document",
+        doc_id,
+        f"{filename} -> {dossier_id}",
+        ip,
+        request.headers.get("user-agent"),
     )
 
     return HTMLResponse(
@@ -498,8 +535,14 @@ async def audit_page(
     async with db.execute(sql, (*params, per_page, offset)) as cur:
         rows = await cur.fetchall()
     cols = [
-        "id", "user_id", "action", "resource_type",
-        "resource_id", "details", "ip_address", "created_at",
+        "id",
+        "user_id",
+        "action",
+        "resource_type",
+        "resource_id",
+        "details",
+        "ip_address",
+        "created_at",
     ]
     logs = [dict(zip(cols, r, strict=True)) for r in rows]
 
@@ -525,6 +568,34 @@ async def audit_page(
         for r in t_rows
     ]
 
+    # Actions de Daniel (user_id=2) : approbations/rejets brouillons + changements status
+    daniel_actions_sql = (
+        "SELECT id, user_id, action, resource_type, resource_id, details, created_at "
+        "FROM audit_logs WHERE user_id = 2 AND action IN "
+        "('draft_approve', 'draft_reject', 'status_update', 'manual_draft', 'draft_save') "
+        "ORDER BY created_at DESC LIMIT 50"
+    )
+    async with db.execute(daniel_actions_sql) as cur:
+        d_rows = await cur.fetchall()
+    daniel_actions = [
+        dict(
+            zip(
+                [
+                    "id",
+                    "user_id",
+                    "action",
+                    "resource_type",
+                    "resource_id",
+                    "details",
+                    "created_at",
+                ],
+                r,
+                strict=True,
+            )
+        )
+        for r in d_rows
+    ]
+
     # Emails traités aujourd'hui (résumé)
     today_mails_sql = (
         "SELECT mailbox_name, category, COUNT(*) as cnt "
@@ -533,10 +604,7 @@ async def audit_page(
     )
     async with db.execute(today_mails_sql) as cur:
         m_rows = await cur.fetchall()
-    today_mails = [
-        dict(zip(["mailbox_name", "category", "count"], r, strict=True))
-        for r in m_rows
-    ]
+    today_mails = [dict(zip(["mailbox_name", "category", "count"], r, strict=True)) for r in m_rows]
 
     return templates.TemplateResponse(
         request,
@@ -551,5 +619,6 @@ async def audit_page(
             "cerveau2_backup": backup_info,
             "telemetry": telemetry,
             "today_mails": today_mails,
+            "daniel_actions": daniel_actions,
         },
     )
