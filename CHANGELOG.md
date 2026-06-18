@@ -1,5 +1,24 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.22.17] — 2026-06-18 (correction classification newsletter corporate — mail #593)
+
+### Contexte
+Mail #593 provenant de `greetje.daneel@bauermediaoutdoor.com` (Google Ads / Bauer Media) : un message de mise à jour de politique/publicitaire a été classifié à tort en `demande_client`, générant un brouillon qualifiant inapproprié. Le mot "devis" présent dans un sujet de type `Re:` a faussement déclenché le rappel "toute demande de devis = demande_client".
+
+### Changé
+- **`app/pipeline/classifier.py`** :
+  - `_looks_like_human_question()` : liste `service_senders` enrichie de `ads-google`, `googleads`, `google-ads`, `bauermedia`, `outdoor.com`.
+  - Ajout de marqueurs corporate/out-of-office dans le body (`dear customer`, `dear advertiser`, `dear partner`, `the google ads team`, `1600 amphitheatre parkway`, `privacy-enhancing technologies`, `platform program policies`, `eu user consent policy`, `transparency and consent framework`).
+  - Rejets explicites des sujets `Re: devis/facture/provision/avenant/contrat/commande/offre/bon de commande` qui n'indiquent pas un humain.
+- **`app/workers/imap_poller.py`** :
+  - `_is_verified_demande_client()` : détection renforcée des bodies corporate/out-of-office (Google Ads Team, Google LLC, privacy policy, TCF, etc.) avant de valider une `demande_client`.
+- **`app/prompts/classifier_prompt.txt`** :
+  - Ajout de l'exemple 13 (Bauer Media / Google Ads policy update) → `newsletter`.
+  - Précision : le mot "devis" dans un email automatique de fournisseur ne transforme pas le robot en prospect.
+
+### Tests
+- **95/95 tests verts** avec `venv/bin/python -m pytest -q`.
+
 ## [1.22.16] — 2026-06-18 (faux positifs email/nom/véhicule/horaires — mail #592)
 
 ### Contexte

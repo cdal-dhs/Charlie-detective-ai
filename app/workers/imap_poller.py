@@ -786,6 +786,7 @@ def _is_verified_demande_client(category: str, msg: Message) -> bool:
 
     sender = str(msg.get("From", "") or "").lower()
     subject = str(msg.get("Subject", "") or "").lower()
+    body = _get_body_text(msg).lower()
 
     # Expéditeur de service connu
     if any(s in sender for s in _SERVICE_SENDERS):
@@ -809,7 +810,37 @@ def _is_verified_demande_client(category: str, msg: Message) -> bool:
         "alerte",
         "notification",
     )
-    return not any(kw in subject for kw in auto_keywords)
+    if any(kw in subject for kw in auto_keywords):
+        return False
+
+    # Body typique d'un email corporate / newsletter / auto (non demande client).
+    auto_body_markers = (
+        "dear customer",
+        "dear user",
+        "dear advertiser",
+        "dear partner",
+        "the google ads team",
+        "the google team",
+        "google llc",
+        "1600 amphitheatre parkway",
+        "privacy-enhancing technologies",
+        "platform program policies",
+        "eu user consent policy",
+        "transparency and consent framework",
+        "this email was sent by",
+        "you are receiving this",
+        "unsubscribe",
+        "view in browser",
+        "manage your preferences",
+    )
+    if any(m in body for m in auto_body_markers):
+        return False
+
+    # Réponses automatiques / Out-of-office.
+    if any(m in body for m in ("out of office", "absent du bureau", "automatic reply", "auto-reply")):
+        return False
+
+    return True
 
 
 def _build_search_criteria(settings) -> str:

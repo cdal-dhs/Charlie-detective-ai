@@ -39,26 +39,28 @@ _INFO_FIELD_SPLIT = re.compile(
 )
 _CLIENT_INFO_LABELS = {
     # "mon nom est" sans séparateur explicite + label Nom complet.
+    # Le label "nom" seul exige une frontière de mot (\b) pour éviter d'accrocher
+    # "nom" au milieu de "economic", "phenomenon", etc.
     "nom": re.compile(
-        rf"(?:mon\s+nom\s+(?:est|saisit|c'est)|nom\s+complet|nom){_INFO_SEP}(.+?){_INFO_STOP}",
+        rf"(?:mon\s+nom\s+(?:est|saisit|c'est)|nom\s+complet|\bnom\b){_INFO_SEP}(.+?){_INFO_STOP}",
         re.IGNORECASE | re.DOTALL,
     ),
-    "prenom": re.compile(rf"pr[ée]nom{_INFO_SEP}(.+?){_INFO_STOP}", re.IGNORECASE | re.DOTALL),
+    "prenom": re.compile(rf"\bpr[ée]nom\b{_INFO_SEP}(.+?){_INFO_STOP}", re.IGNORECASE | re.DOTALL),
     "telephone": re.compile(
-        rf"(?:t[ée]l[ée]phone|gsm|portable){_INFO_SEP}([\d\s./+\-]{{6,}})", re.IGNORECASE
+        rf"(?:\bt[ée]l[ée]phone\b|\bgsm\b|\bportable\b){_INFO_SEP}([\d\s./+\-]{{6,}})", re.IGNORECASE
     ),
-    "email": re.compile(rf"(?:e[-\s]?mail|courriel){_INFO_SEP}([^\s]+@[^\s]+)", re.IGNORECASE),
-    "adresse": re.compile(rf"adresse{_INFO_SEP_STRICT}(.+?){_INFO_STOP_ADDRESS}", re.IGNORECASE | re.DOTALL),
+    "email": re.compile(rf"(?:\be[-\s]?mail\b|\bcourriel\b){_INFO_SEP}([^\s]+@[^\s]+)", re.IGNORECASE),
+    "adresse": re.compile(rf"\badresse\b{_INFO_SEP_STRICT}(.+?){_INFO_STOP_ADDRESS}", re.IGNORECASE | re.DOTALL),
     "heure_contact": re.compile(
         # "Heure de contact" (label explicite) ou "créneau/horaire:" avec séparateur strict
         # pour éviter de capturer les horaires de la cible dans le body libre.
-        rf"(?:heure\s*de\s*contact|créneau|horaire){_INFO_SEP_STRICT}(.+?){_INFO_STOP_NO_HEURE}",
+        rf"(?:\bheure\s*de\s*contact\b|\bcréneau\b|\bhoraire\b){_INFO_SEP_STRICT}(.+?){_INFO_STOP_NO_HEURE}",
         re.IGNORECASE | re.DOTALL,
     ),
     "profil": re.compile(
         # "Profil" / "Votre profil" / "statut:" — exige un séparateur pour éviter
         # d'accrocher des mots comme "type" dans "type de dossier".
-        rf"(?:(?:votre\s+)?profil|statut){_INFO_SEP_STRICT}(.+?){_INFO_STOP_NO_HEURE}",
+        rf"(?:\b(?:votre\s+)?profil\b|\bstatut\b){_INFO_SEP_STRICT}(.+?){_INFO_STOP_NO_HEURE}",
         re.IGNORECASE | re.DOTALL,
     ),
 }
@@ -136,6 +138,17 @@ _TITLE_WORDS = {
     "contact",
     "service",
     "client",
+    # Signatures anglaises / génériques à ignorer (ex. "The Google Ads Team").
+    "the",
+    "team",
+    "best",
+    "kind",
+    "yours",
+    "sincerely",
+    "regards",
+    "faithfully",
+    "google",
+    "ads",
 }
 
 

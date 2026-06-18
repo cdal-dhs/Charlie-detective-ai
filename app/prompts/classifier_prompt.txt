@@ -104,6 +104,13 @@ Sujet : Vraagje over offerte
 Corps : Dag, ik had graag meer info geweten over uw prijzen voor een surveillance opdracht. Kan u mij contacteren?
 → demande_client
 
+Exemple 13 — newsletter (email corporate Google Ads / Bauer Media avec le mot "devis" dans un sujet qui ressemble à une réponse) :
+De : greetje.daneel@bauermediaoutdoor.com
+Sujet : Re: Uw Google Ads-account — update privacy-enhancing technologies
+Corps : Dear Google Ads Advertiser, due to changes in the EU user consent policy and the Transparency and Consent Framework... This email may include a quote/devis reference for your records.
+→ newsletter
+(NB : ce n'est PAS un humain qui sollicite le cabinet. C'est une mise à jour de politique / infolettre commerciale d'un fournisseur. Le mot "devis" seul ne transforme pas un robot en prospect.)
+
 ---
 
 RÈGLES DE DÉCISION :

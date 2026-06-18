@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 from typing import Literal
 
@@ -91,6 +92,8 @@ def _looks_like_human_question(body: str, subject: str, sender: str) -> bool:
     quand le LLM hésite."""
     text = f"{subject}\n{body}".lower()
     sender_l = sender.lower()
+    subject_l = subject.lower()
+    body_l = body.lower()
 
     # Pas une demande humaine si :
     # 1. sender = service / no-reply / infomaniak / microsoft / google / etc.
@@ -102,12 +105,13 @@ def _looks_like_human_question(body: str, subject: str, sender: str) -> bool:
         "hubspot", "zendesk", "intercom", "freshdesk",
         "support@", "billing@", "invoice@", "facture@", "compta@",
         "accounting@", "newsletter@", "promo@", "marketing@",
+        # Expéditeurs de plateformes publicitaires / corporate connues.
+        "ads-google", "googleads", "google-ads", "bauermedia", "outdoor.com",
     )
     if any(s in sender_l for s in service_senders):
         return False
 
     # 2. mots-clés de service évidents dans le sujet
-    subject_l = subject.lower()
     service_subjects = (
         "facture", "invoice", "recu", "reçu", "payment", "paiement",
         "subscription", "abonnement", "renewal", "renouvellement",
@@ -119,7 +123,25 @@ def _looks_like_human_question(body: str, subject: str, sender: str) -> bool:
     if any(s in subject_l for s in service_subjects):
         return False
 
-    # 3. Assez de contenu pour être une vraie question
+    # 3. Email automatique / corporate évident dans le body.
+    auto_body_markers = (
+        "dear customer",
+        "dear user",
+        "dear advertiser",
+        "dear partner",
+        "the google ads team",
+        "the google team",
+        "google llc",
+        "1600 amphitheatre parkway",
+        "privacy-enhancing technologies",
+        "platform program policies",
+        "eu user consent policy",
+        "transparency and consent framework",
+    )
+    if any(m in body_l for m in auto_body_markers):
+        return False
+
+    # 4. Assez de contenu pour être une vraie question
     # On combine subject + body : si le subject seul est "Re:" et le body fait 2 chars,
     # ce n'est pas une vraie question.
     body_only = body.strip()
@@ -127,6 +149,17 @@ def _looks_like_human_question(body: str, subject: str, sender: str) -> bool:
         return False
     if len(f"{subject}\n{body}".strip()) < 15:
         return False
+
+    # 5. "Re:" + sujet purement transactionnel/documentaire = pas une nouvelle demande.
+    # Un vrai prospect répond à un devis existant en posant une question directe.
+    if subject_l.startswith("re:") or subject_l.startswith("re :"):
+        # Si le sujet ne contient qu'un nom de document/état sans verbe/question.
+        transactional_re = re.compile(
+            r"^re\s*:?\s*(devis|facture|provision|avenant|contrat|commande|offre|bon\s+de\s+commande)",
+            re.IGNORECASE,
+        )
+        if transactional_re.search(subject):
+            return False
 
     # Indices positifs : 1 signal fort ou 2 hints faibles
     hits = sum(1 for sig in _HUMAN_QUESTION_SIGNALS if sig in text)
