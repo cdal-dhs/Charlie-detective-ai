@@ -1,5 +1,24 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.22.16] — 2026-06-18 (faux positifs email/nom/véhicule/horaires — mail #592)
+
+### Contexte
+Mail #592 envoyé depuis le formulaire web : le `sender` stocké est `mail@detectivebelgique.be` et le body commence par "je suis avec un avocat...". Le brouillon qualifiant affichait donc :
+- **Votre email : mail@detectivebelgique.be** (email interne du cabinet) ;
+- **Vos nom et prénom : avec un avocat Prodeo maître** (faux positif sur "je suis avec...") ;
+- **Véhicule / adresse de départ / horaires** parasites car le body est un seul bloc sans ponctuation.
+
+### Changé
+- **`app/pipeline/qualification_builder.py`** :
+  - `_NOM_COMPLET_PATTERN` : supprimé `re.IGNORECASE` et alternances explicites `[Mm]on nom...|[Jj]e suis` pour exiger que chaque mot du nom commence par une majuscule. Élimine "je suis avec un avocat...".
+  - `_is_internal_email()` : nouvelle fonction qui ignore les emails internes (`detectivebelgique.be`, `detectivebelgium.com`, `dpdhuinvestigations.be`, `digitalhs.biz`, `no-reply*`) comme fallback email client.
+  - `_VEHICULE_PATTERN` : s'arrête sur les transitions `travaille`, `et cette`, `pour le prouver`, `car` pour ne pas avaler les horaires/lieu.
+  - `_ADRESSE_DEPART_PATTERN` : s'arrête sur `possédant`, `avec`, `travaille`, `et`, `car` pour ne pas avaler le véhicule/horaires.
+  - `_HORAIRE_PATTERN` : capture une indication temporelle optionnelle (`semaine du 18 juin`) + `travaille/horaire/créneau/travail` + heure, avec contexte restreint.
+
+### Tests
+- **95/95 tests verts** avec `venv/bin/python -m pytest -q`.
+
 ## [1.22.15] — 2026-06-18 (extraction qualifiante renforcée — mails #598 et #601)
 
 ### Contexte

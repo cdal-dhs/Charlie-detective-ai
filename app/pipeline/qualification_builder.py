@@ -64,11 +64,11 @@ _CLIENT_INFO_LABELS = {
 }
 
 # Extraction d'un nom complet explicite (ex. "mon nom est Bassem Sophie").
-# Limite aux espaces horizontaux et à 2-5 mots pour ne pas déborder sur l'adresse.
+# PAS de re.IGNORECASE : on exige que chaque mot du nom commence par une majuscule,
+# ce qui élimine les faux positifs du type "je suis avec un avocat...".
 _NOM_COMPLET_PATTERN = re.compile(
-    r"(?:mon\s+nom\s+(?:est|saisit|c'est)|je\s+suis)\s+[:\-=?\s]*"
-    r"([A-ZÀ-Ÿ][a-zà-ÿ]+(?:[ \t]+[A-ZÀ-Ÿ][a-zà-ÿ]+){1,4})",
-    re.IGNORECASE,
+    r"(?:[Mm]on\s+nom\s+(?:est|saisit|c'est)|[Jj]e\s+suis)\s*[:\-=?\s]*"
+    r"([A-ZÀ-Ÿ][a-zà-ÿ]+(?:[ \t]+[A-ZÀ-Ÿ][a-zà-ÿ]+){1,4})"
 )
 
 # Extraction d'adresse postale belge sans label explicite.
@@ -249,6 +249,30 @@ def _clean_snippet(value: str) -> str:
     return value
 
 
+def _is_internal_email(email: str) -> bool:
+    """True si l'email appartient au cabinet Detective ou est un no-reply/formulaire."""
+    lowered = email.lower()
+    if lowered.startswith("no-reply") or lowered.startswith("noreply"):
+        return True
+    internal_domains = {
+        "detectivebelgique.be",
+        "detectivebelgium.com",
+        "dpdhuinvestigations.be",
+        "digitalhs.biz",
+    }
+    domain = lowered.split("@")[-1] if "@" in lowered else ""
+    if domain in internal_domains:
+        return True
+    try:
+        settings = get_settings()
+        for mb in settings.mailboxes():
+            if mb.user and mb.user.lower() == lowered:
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def _extract_client_info(body: str, sender: str) -> dict[str, str | None]:
     """Extrait les informations client déjà fournies dans le body ou le sender."""
     info: dict[str, str | None] = {}
@@ -323,11 +347,14 @@ def _extract_client_info(body: str, sender: str) -> dict[str, str | None]:
         if addr_match:
             info["adresse"] = _clean_value(addr_match.group(0))
 
-    # L'email expéditeur est une source fiable si le body n'en contient pas.
+    # L'email expéditeur est une source fiable si le body n'en contient pas,
+    # mais on ignore les emails internes (boîtes Detective, no-reply, formulaires).
     if not info.get("email") and "@" in sender:
         email_match = re.search(r"[^\s<]+@[^\s>]+", sender)
         if email_match:
-            info["email"] = email_match.group(0).strip("<>")
+            candidate = email_match.group(0).strip("<>")
+            if not _is_internal_email(candidate):
+                info["email"] = candidate
 
     # Normalise l'heure de contact (ajoute "h" si c'est juste un chiffre).
     heure = info.get("heure_contact")
@@ -346,15 +373,21 @@ _NOM_CIBLE_PATTERN = re.compile(
 )
 
 # Véhicule : marque/modèle/couleur/plaque.
+# S'arrête aux transitions logiques (travaille, et, pour, car, etc.) pour ne pas
+# avaler les horaires/lieu de travail dans les textes mal ponctués.
 _VEHICULE_PATTERN = re.compile(
     r"(?:son\s+véhicule\s+(?:est|était|c'est)|possédant|voiture|véhicule|auto|bmw|mercedes|audi|vw|volkswagen|renault|peugeot|toyota|ford|hyundai|citroën|volvo|porsche)\s+"
-    r"(.{5,120}?)(?=\n|j'ai|je|merci|cordialement|sais\s+pas|\.{2,}|\.|$)",
+    r"(.{5,80}?)(?=\n|travaille|et\s+cette|pour\s+(?:le\s+)?prouver|car\s+|j'ai|je\s+voudrais|merci|cordialement|sais\s+pas|\.{2,}|\.|$)",
     re.IGNORECASE | re.DOTALL,
 )
 
 # Horaires / créneaux.
+# Capture une indication temporelle optionnelle ("semaine du 18 juin", "le matin")
+# suivie de travaille/horaire/créneau + l'heure, avec max 4 mots entre les deux.
 _HORAIRE_PATTERN = re.compile(
-    r"(?:travaille|horaire|créneau|de|du)\s+.*?\d{1,2}\s*[hH]\s*(?:à|[-/])\s*\d{1,2}\s*[hH]",
+    r"(?:du\s+\d{1,2}\s+\w+|semaine\s+du\s+\d{1,2}\s+\w+|le\s+\w+|ce\s+\w+|cette\s+\w+)?\s*"
+    r"(?:travaille|horaire|créneau|travail)\s+"
+    r"(?:\S+\s+){0,4}\d{1,2}\s*[hH]\s*(?:à|[-/])\s*\d{1,2}\s*[hH]",
     re.IGNORECASE,
 )
 
@@ -377,6 +410,8 @@ _PHOTO_PATTERN = re.compile(
 )
 
 # Adresse de départ connue (adresse après nom d'entreprise ou "adresse").
+# S'arrête aux transitions courantes (possédant, avec, et, car, etc.) pour éviter
+# d'empiéter sur véhicule/horaires dans les textes mal ponctués.
 _ADRESSE_DEPART_PATTERN = re.compile(
     r"(?:"
     r"adresse\s+(?:de\s+départ|connue|de|du\s+domicile)|"
@@ -385,7 +420,7 @@ _ADRESSE_DEPART_PATTERN = re.compile(
     r"(?:elle|la\s+cible)\s+(?:habite|réside|demeure|vit)\s+(?:à|a|au|en)|"
     r"travaille\s+(?:à|a)"
     r")\s*[:\-=?]?\s*"
-    r"(.{5,160}?)(?=\n|j'ai|je\s+voudrais|merci|cordialement|sais\s+pas|\.{2,}|\.|$)",
+    r"(.{5,80}?)(?=\n|possédant|avec\s+(?:une|la|le)|travaille\s+(?:une\s+fois|le\s+matin|l'après)|et\s+|car\s+|j'ai|je\s+voudrais|merci|cordialement|sais\s+pas|\.{2,}|\.|$)",
     re.IGNORECASE | re.DOTALL,
 )
 

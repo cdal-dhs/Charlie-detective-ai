@@ -1,7 +1,7 @@
 # HANDOVER — Detective.be Agent IA (Charlie)
 
 > Document de transfert pour tout agent (Claude Sonnet/Opus 4.X, GPT, etc.).
-> **Dernière mise à jour** : 2026-06-18 · **Version courante** : v1.22.15 · **Déployé sur** : `detective.digitalhs.biz`
+> **Dernière mise à jour** : 2026-06-18 · **Version courante** : v1.22.16 · **Déployé sur** : `detective.digitalhs.biz`
 
 ---
 
@@ -38,7 +38,7 @@
 
 ---
 
-## 2. Architecture actuelle (v1.22.15)
+## 2. Architecture actuelle (v1.22.16)
 
 ```
 [3 boîtes Infomaniak IMAP] ──polling 5min──► [Worker asyncio Python]
@@ -72,7 +72,7 @@
 | `app/pipeline/translator.py` | **Aide lecture multilingue (v1.21.0)** | `translate_to_fr()` + `translate_from_fr()` avec try/except, troncature 12K. Utilisé si langue mail ≠ FR |
 | `app/pipeline/draft_renderer.py` | **Rendu brouillon enrichi (v1.21.0)** | Compose 4 blocs : email d'origine + traduction FR + proposition FR + traduction langue source |
 | `app/pipeline/generator.py` | **Génération brouillon** | Pour `demande_client`/`prise_contact` : branche `app/pipeline/qualification_builder.py` (brouillon déterministe, v1.22.8). Pour les autres catégories : flux LLM few-shot + Cerveau2. Appelle `translate_to_fr` + `translate_from_fr` en parallèle. **`_load_daniel_fewshot()` (v1.22.4)** : récupère 200 candidats SQL, parse date RFC 2822 en Python, garde top 4 dans fenêtre 30j |
-| `app/pipeline/qualification_builder.py` | **Brouillon qualifiant intelligent (v1.22.15)** | Détection des informations client + spécifiques au cas déjà fournies dans le mail, section "Merci pour les éléments suivants", filtrage des questions redondantes, closing adapté. Gère les cas filature, recherche personne, incapacité, dette, passé violences, micros. |
+| `app/pipeline/qualification_builder.py` | **Brouillon qualifiant intelligent (v1.22.16)** | Détection des informations client + spécifiques au cas déjà fournies dans le mail, section "Merci pour les éléments suivants", filtrage des questions redondantes, closing adapté. Gère les cas filature, recherche personne, incapacité, dette, passé violences, micros. |
 | `app/web/admin.py` | **Simulateur brouillon** (v1.22.9) | `GET /admin/draft-simulator` + `POST /admin/api/draft-simulator/run` : permet à CDAL de coller sujet/corps d'un email simulé et de voir le brouillon généré sans envoyer de vrai mail. RAG/Cerveau2 mockés, classifier LLM réel. |
 | `app/web/templates/admin/draft_simulator.html` | **UI Simulateur brouillon** | Formulaire HTMX super-admin : boîte, catégorie, sujet, corps, affichage du résultat. |
 | `app/pipeline/classifier.py` | **Classification LLM** (v1.22.1 hardened) | 8 catégories avec few-shots. Prompt durci pour ne plus rater aucun `demande_client` |
@@ -87,7 +87,7 @@
 
 ---
 
-## 3. Le pipeline Charlie AI (état v1.22.15)
+## 3. Le pipeline Charlie AI (état v1.22.16)
 
 Le fichier `app/charlie.py` contient `ask_charlie()`. Flow exact :
 
@@ -172,7 +172,7 @@ if not response and rows:
 
 ---
 
-## 4. Stack technique détaillée (v1.22.15)
+## 4. Stack technique détaillée (v1.22.16)
 
 | Couche | Outil | Version / Détail |
 |---|---|---|
@@ -708,11 +708,11 @@ fi
 
 ## Note pour le prochain agent
 
-État au **2026-06-18** : **v1.22.15** déployée en prod. Le brouillon qualifiant est désormais intelligent pour **tous les cas de figure** : détection des informations client et spécifiques déjà fournies, section "Merci pour les éléments suivants", filtrage des questions redondantes, closing adapté. Le chantier ouvert significatif reste le **bug RAG (point de vigilance #1)** — à traiter avant V2c (feedback loop qualité Daniel). Pour le reste, voir HANDOVER §12 (checklist reprise) et §13 (4 niveaux anti-crash silencieux opérationnels).
+État au **2026-06-18** : **v1.22.16** déployée en prod. Le brouillon qualifiant est désormais intelligent pour **tous les cas de figure** : détection des informations client et spécifiques déjà fournies, section "Merci pour les éléments suivants", filtrage des questions redondantes, closing adapté. Le chantier ouvert significatif reste le **bug RAG (point de vigilance #1)** — à traiter avant V2c (feedback loop qualité Daniel). Pour le reste, voir HANDOVER §12 (checklist reprise) et §13 (4 niveaux anti-crash silencieux opérationnels).
 
 **Philosophie CDAL** : MVP simple d'abord, V2 quand qualité prouvée. Pas d'over-engineering. ROI client : "solde 24/7" sans surdimensionner. Communique court en français, écrit parfois avec des fautes de frappe rapides — décoder l'intention.
 
 ---
 
-*Document mis à jour le 2026-06-18 pour la v1.22.15 de Detective.be Agent IA.*
+*Document mis à jour le 2026-06-18 pour la v1.22.16 de Detective.be Agent IA.*
 
