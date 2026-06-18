@@ -81,3 +81,61 @@ def test_build_draft_for_recherche_personne(mailbox: MailboxConfig) -> None:
     )
     assert "Date de naissance exacte" in draft
     assert "Belgique, France, Luxembourg" in draft
+
+
+_SOPHIE_BODY = """Bonjour
+mon nom est  Bassem Sophie
+rue des Déportés 136 6042 Lodelinsart
+gsm 0491502786
+Segers,Grégory
+Brico Fontaine  L'Evêque  : rue de Charleroi 131 6140 Fontaine l'Evêque
+semaine du 18 juin travaille 14h à  20h samedi inclus  après celà je ne
+sais pas l'adresse ou il va retourne chez sa maîtresse   dort et le
+dimanche aussi
+semaine du 22 juin travaille  6h à 14h
+ chez sa maîtresse et puis travaille
+son véhicule est une Bmw grand TOUREUR couleur photo  avec plaque
+
+j'ai besoin une photo quand il rentre chez elle et adresse  s'il a une clé
+de son domicile
+
+je voudrais prouver qu'il dort là bas ne fus que directement après son
+travail  et qu'il vit avec
+ attention petit budget je vis seule avec un de mes enfants  dans le
+domicile conjugal
+
+Le mer. 17 juin 2026 à 11:35, contact@detectivebelgique.be <
+contact@detectivebelgique.be> a écrit :
+
+> Bonjour Sophie,
+>
+> Je comprends que vous souhaitez mettre en place une surveillance afin
+> d'obtenir des éléments concrets sur une situation qui vous préoccupe.
+"""
+
+
+def test_build_draft_for_sophie_601_filters_answered_questions(mailbox: MailboxConfig) -> None:
+    """Mail #601 : Sophie a déjà fourni presque tout, ne pas tout redemander."""
+    draft = build_qualification_draft(
+        subject="Re: Nouveau Message De Détective privé Belgique - Prenons contact",
+        body=_SOPHIE_BODY,
+        sender="sososb2810@gmail.com",
+        mailbox=mailbox,
+        case="infidelite_filature",
+    )
+    assert "Bonjour Sophie," in draft
+    assert "Grégory Segers" in draft
+    assert "rue des Déportés 136" in draft
+    assert "0491502786" in draft
+    assert "rue de Charleroi 131" in draft
+    # Photo non fournie -> doit être redemandée.
+    assert "Photo récente" in draft
+    # Les éléments déjà reçus ne doivent PAS être redemandés (questions numérotées).
+    assert "1. Photo récente" in draft
+    assert "2." not in draft  # une seule question manquante
+    assert "Vos nom et prénom complets" not in draft
+    assert "Votre GSM de contact direct" not in draft
+    assert "Votre adresse complète (ou société" not in draft
+    assert "Adresse précise de départ" not in draft
+    assert "Créneau horaire souhaité" not in draft
+    assert "Véhicule de la personne concernée" not in draft

@@ -1,5 +1,30 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.22.14] — 2026-06-18 (brouillons qualifiants intelligents pour tous les cas)
+
+### Contexte
+Mail #601 (Sophie) : le prospect avait déjà transmis son nom, son adresse, son GSM, le nom de la cible, l'adresse de départ, les horaires, les habitudes et le véhicule. Le brouillon deterministe redemandait pourtant la totalité de la liste. CDAL demande que **chaque cas de figure** détecte les informations déjà fournies et ne redemande que les éléments manquants.
+
+### Changé
+- **`app/pipeline/qualification_builder.py`** :
+  - `_extract_client_info()` : extraction robuste des coordonnées client (nom, prénom, GSM, email, adresse, heure de contact, profil) même sans séparateur explicite (ex. `gsm 0491502786`), fallback adresse postale belge, extraction nom complet (`mon nom est Bassem Sophie`), fallback prénom depuis salutation du thread cité.
+  - `_extract_case_info()` : extraction spécifique au cas de figure :
+    - `infidelite_filature` : nom/prénom cible, adresse de départ, horaires, habitudes, véhicule, photo.
+    - `recherche_personne` : nom/prénom recherché, date de naissance/âge, région/pays.
+    - `incapacite_travail` : certificat/arrêt, horaire, lieu/employeur suspecté.
+    - `securite_passé_violences` & `contre_espionnage_micros` : contexte spécifique.
+  - `_strip_quoted_thread()` & `_body_without_signature()` : suppression du thread cité et de la zone de signature pour éviter les faux positifs (ex. nom du signataire pris pour la cible).
+  - `_build_standard_draft()` : pour tous les cas hors `recuperation_dette`, le brouillon affiche désormais les éléments reçus, filtre les questions déjà répondues et adapte le closing si le dossier est déjà complet.
+  - `_CASE_QUESTION_SPECS` : mapping question → clés d'info pour filtrage déterministe.
+  - `_clean_snippet()` : nettoyage des extraits de phrase sans couper au premier retour à la ligne.
+  - Post-traitement des habitudes : priorité aux indices forts (maîtresse, dort) avant les indices généraux (samedi, dimanche).
+- **`tests/test_qualification_builder.py`** :
+  - Ajout de `test_build_draft_for_sophie_601_filters_answered_questions` avec le vrai body du mail #601.
+  - Vérifie que seule la photo reste à demander et que les éléments déjà fournis ne sont pas redemandés.
+
+### Tests
+- **95/95 tests verts** avec `venv/bin/python -m pytest -q`.
+
 ## [1.22.13] — 2026-06-16 (brouillon dette : ne pas redemander ce qu'on a déjà)
 
 ### Contexte

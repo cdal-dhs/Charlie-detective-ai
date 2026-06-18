@@ -132,7 +132,7 @@ docker compose up -d --build      # si requirements.txt ou Dockerfile modifiés
 
 ---
 
-## Stack technique (état v1.22.4)
+## Stack technique (état v1.22.14)
 
 | Couche | Choix |
 |---|---|
@@ -155,7 +155,7 @@ docker compose up -d --build      # si requirements.txt ou Dockerfile modifiés
 | Service prod | **Docker + Docker Compose + Traefik** (VPS Hostinger KVM8) |
 | Logs | `structlog` (JSON structuré, rotation 7j) |
 | Config | `pydantic-settings` depuis `.env` |
-| Version | Source unique `app/_version.py` (`VERSION = "1.22.13"`) — `pyproject.toml` figé en 1.9.5 (volontaire) |
+| Version | Source unique `app/_version.py` (`VERSION = "1.22.14"`) — `pyproject.toml` figé en 1.9.5 (volontaire) |
 
 **Ne PAS introduire** sans discussion : Kubernetes, Swarm, Celery, Redis, Postgres, ORM lourd, framework JS front (React/Vue/Angular). Le périmètre Docker actuel (1 service Compose + Traefik externe) est figé.
 
@@ -169,7 +169,7 @@ DETECTIVE_BE/
 ├── README.md                    # Ce fichier
 ├── HANDOVER.md                  # État complet + bugs + procédures pour nouvel agent
 ├── CHANGELOG.md                 # Historique des versions
-├── pyproject.toml               # Version source de vérité, deps, ruff, pytest
+├── pyproject.toml               # Dépendances, ruff, pytest — version volontairement figée
 ├── .env.example                 # Template config
 ├── Dockerfile                   # Image Docker Python 3.11
 ├── docker-compose.yml           # Traefik + labels
@@ -254,7 +254,7 @@ DETECTIVE_BE/
 
 ## Statut
 
-✅ **Production active** — `detective.digitalhs.biz` — **v1.22.4**
+✅ **Production active** — `detective.digitalhs.biz` — **v1.22.14**
 
 - **Pipeline IMAP** : polling 3 boîtes toutes les 5 min, classification 8 catégories, priorité intelligente, flag `AgentProcessed` (succès) + `AgentAttempted` (libère la queue même en cas de crash, v1.21.3).
 - **Génération brouillon** : kimi-k2.6:cloud (reasoning model), style Daniel imité via few-shot learning (v1.22.0) + personnalité Cerveau2 + RAG sqlite-vec.
@@ -279,7 +279,7 @@ Voir `docs/ROADMAP.md` pour la roadmap V2b/V2c (polishing cockpit, feedback loop
 
 ## Versions
 
-Version source de vérité : **`app/_version.py`** (`VERSION = "1.22.4"`).
+Version source de vérité : **`app/_version.py`** (`VERSION = "1.22.14"`).
 
 Le badge affiché dans le cockpit est lu dynamiquement depuis `app/_version.py`. **Tolérance zéro** sur la désynchronisation.
 
