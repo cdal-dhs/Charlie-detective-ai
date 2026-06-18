@@ -1,5 +1,23 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.22.19] — 2026-06-18 (follow-up : prénom dans thread cité + cockpit retry)
+
+### Contexte
+Suite au fix du mail #603, CDAL demande d'améliorer le brouillon de follow-up :
+- Le #603 avait un body très court et le prénom "Sophie" se trouvait dans le thread cité ; le brouillon s'ouvrait donc sur "Bonjour,".
+- L'endpoint cockpit `POST /drafts/{id}/retry` ne prenait pas en compte la détection follow-up et régénérait le brouillon qualifiant standard au lieu du brouillon court.
+
+### Changé
+- **`app/pipeline/qualification_builder.py`** :
+  - `build_followup_ack_draft()` cherche le prénom dans 3 sources : signature du mail actuel, infos client extraites du body entier, et salutations `Bonjour <Prénom>,` dans le thread cité.
+- **`app/web/api.py`** :
+  - Nouvelle fonction `_is_web_followup()` détecte les réponses client depuis le cockpit (sujet `Re:`, marqueurs body).
+  - `draft_generate()` passe `is_followup_response` à `generate_draft()` pour que les retry depuis l'interface respectent la nouvelle logique.
+
+### Tests
+- **101/101 tests verts** avec `venv/bin/python -m pytest -q`.
+- Ajout de `test_build_followup_ack_draft_extracts_first_name_from_quoted_thread`.
+
 ## [1.22.18] — 2026-06-18 (réponses client : brouillon de remerciement, pas requalification — mail #586)
 
 ### Contexte

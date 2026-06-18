@@ -1044,8 +1044,30 @@ def build_followup_ack_draft(
     jointes, etc.) et qu'il a déjà un dossier ouvert dans les 30 derniers jours,
     on n'envoie PAS le brouillon qualifiant standard. On envoie un accusé de
     réception professionnel qui indique que Daniel reprend contact prochainement.
+
+    Le prénom est cherché aussi dans le thread cité, car les réponses client
+    sont souvent très courtes et le vrai nom/prénom se trouve dans l'échange
+    précédent.
     """
+    # 1. Prénom depuis le body propre (signature du mail actuel).
     first_name = _extract_first_name(body)
+
+    # 2. Prénom depuis les infos client (labels + salutations dans tout le body).
+    if not first_name:
+        client_info = _extract_client_info(body, sender)
+        first_name = client_info.get("prenom")
+
+    # 3. Cherche une salutation du type "Bonjour Sophie," dans le body entier
+    # (y compris dans les lignes citées avec > ou >>).
+    if not first_name:
+        salutation = re.search(
+            r"(?:^|\n)\s*(?:>\s*)*Bonjour\s+([A-ZÀ-Ÿ][a-zà-ÿ]+)\s*[,.]",
+            body,
+            re.IGNORECASE,
+        )
+        if salutation:
+            first_name = salutation.group(1)
+
     greeting = f"Bonjour {first_name}," if first_name else "Bonjour,"
 
     lines = [

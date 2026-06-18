@@ -159,3 +159,34 @@ def test_build_followup_ack_draft(mailbox: MailboxConfig) -> None:
     assert "1. Vos nom et prénom complets" not in draft
     assert "Ouverture de dossier : 200 € HTVA" not in draft
     assert "Daniel Hurchon" in draft
+
+
+def test_build_followup_ack_draft_extracts_first_name_from_quoted_thread(
+    mailbox: MailboxConfig,
+) -> None:
+    """Réponse courte avec thread cité : le prénom doit être extrait du cité."""
+    body = """Pour mon prouver et donner à l’avocat
+
+
+Le jeu. 18 juin 2026, 08:30, Soso Sb <sososb2810@gmail.com> a écrit :
+
+> Bonjour
+> mon nom est  Bassem Sophie
+> rue des Déportés 136 6042 Lodelinsart
+> gsm 0491502786
+>
+> Le mer. 17 juin 2026 à 11:35, contact@detectivebelgique.be <
+> contact@detectivebelgique.be> a écrit :
+>
+>> Bonjour Sophie,
+>>
+>> Je comprends que vous souhaitez mettre en place une surveillance
+"""
+    draft = build_followup_ack_draft(
+        subject="Photos",
+        body=body,
+        sender="sososb2810@gmail.com",
+        mailbox=mailbox,
+        case="infidelite_filature",
+    )
+    assert "Bonjour Sophie," in draft

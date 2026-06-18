@@ -132,7 +132,7 @@ docker compose up -d --build      # si requirements.txt ou Dockerfile modifiés
 
 ---
 
-## Stack technique (état v1.22.18)
+## Stack technique (état v1.22.19)
 
 | Couche | Choix |
 |---|---|
@@ -254,7 +254,7 @@ DETECTIVE_BE/
 
 ## Statut
 
-✅ **Production active** — `detective.digitalhs.biz` — **v1.22.18**
+✅ **Production active** — `detective.digitalhs.biz` — **v1.22.19**
 
 - **Pipeline IMAP** : polling 3 boîtes toutes les 5 min, classification 8 catégories, priorité intelligente, flag `AgentProcessed` (succès) + `AgentAttempted` (libère la queue même en cas de crash, v1.21.3).
 - **Génération brouillon** : kimi-k2.6:cloud (reasoning model), style Daniel imité via few-shot learning (v1.22.0) + personnalité Cerveau2 + RAG sqlite-vec.

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 import aiosqlite
 import structlog
@@ -27,6 +27,79 @@ templates = Jinja2Templates(directory="app/web/templates")
 
 # Masquer les mails traités avant le 15/05/2026 (pré-prod)
 _CUTOFF_DATE = "2026-05-20"
+
+# Marqueurs indiquant qu'un mail est une réponse client
+_FOLLOWUP_SUBJECT_RE = re.compile(r"^re\s*:\s*", re.IGNORECASE)
+_FOLLOWUP_BODY_MARKERS = (
+    "voici", "en réponse à", "comme demandé", "comme convenu", "cf. ci-joint",
+    "vous trouverez ci-joint", "re-bonjour", "pour compléter", "suite à",
+    "ci-joint", "merci de bien vouloir", "je vous transmets", "je vous envoie",
+    "je joins", "en pièce jointe", "pj", "piece jointe", "ci-dessous",
+)
+
+
+async def _is_web_followup(
+    db: aiosqlite.Connection,
+    sender: str,
+    subject: str,
+    body: str,
+) -> bool:
+    """Détecte si le mail est une réponse d'un client à un échange récent.
+
+    Version cockpit web : pas d'objet Message, on travaille avec les champs bruts.
+    """
+    sender_norm = sender.lower().strip()
+    if not sender_norm:
+        return False
+
+    is_reply = bool(_FOLLOWUP_SUBJECT_RE.search(subject))
+    body_lower = body.lower()
+    if any(marker in body_lower for marker in _FOLLOWUP_BODY_MARKERS):
+        is_reply = True
+
+    if not is_reply:
+        return False
+
+    cutoff = datetime.now(UTC) - timedelta(days=30)
+    rfc_re = re.compile(r"[A-Za-z]{3},\s+(\d+)\s+(\w+)\s+(\d{4})\s+(\d{2}):(\d{2}):(\d{2})")
+    months = {
+        "Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6,
+        "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12,
+    }
+
+    try:
+        async with db.execute(
+            """
+            SELECT received_at
+            FROM mail_processed
+            WHERE LOWER(sender) = ? AND category = 'demande_client'
+            ORDER BY id DESC
+            LIMIT 50
+            """,
+            (sender_norm,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+    except Exception as exc:
+        log.warning("draft_generate.followup_check_failed", error=str(exc))
+        return False
+
+    if not rows:
+        return False
+
+    for (received_at,) in rows:
+        received_at = received_at or ""
+        m = rfc_re.match(str(received_at))
+        if not m:
+            continue
+        day, mon_s, year, hh, mm, ss = m.groups()
+        try:
+            dt = datetime(int(year), months[mon_s], int(day), int(hh), int(mm), int(ss), tzinfo=None)
+        except (KeyError, ValueError):
+            continue
+        if dt >= cutoff.replace(tzinfo=None):
+            return True
+
+    return False
 
 
 _SORTABLE_COLS = {
@@ -270,6 +343,10 @@ async def draft_generate(
             'text-red-300 text-sm">Configuration boîte mail introuvable.</div>'
         )
 
+    # Détection follow-up : si le mail ressemble à une réponse client et que
+    # l'expéditeur a un demande_client récent, on génère le brouillon court.
+    is_followup = await _is_web_followup(db, sender or "", subject or "", full_body)
+
     try:
         language = detect_language(full_body, default=mailbox.default_lang)
         result = await generate_draft(
@@ -279,6 +356,7 @@ async def draft_generate(
             mailbox=mailbox,
             language=language,
             category=category or "",
+            is_followup_response=is_followup,
         )
     except Exception as e:
         log.warning("draft_generate.failed", mail_id=mail_id, error=str(e))
