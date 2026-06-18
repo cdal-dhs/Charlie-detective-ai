@@ -1,5 +1,24 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.22.18] — 2026-06-18 (réponses client : brouillon de remerciement, pas requalification — mail #586)
+
+### Contexte
+CDAL constate que quand un client répond à un mail de Daniel (ex. mail #586 : "Voici...", "En réponse à..."), Charlie envoyait la proposition standard de qualification avec toutes les questions. Or le client a probablement déjà reçu cette proposition lors de son premier contact. Si le même expéditeur a déjà envoyé un mail `demande_client` dans les 30 derniers jours, Charlie doit désormais envoyer un brouillon court de remerciement : *"Merci pour ces compléments d'informations, je vous reviens dès que possible..."*.
+
+### Changé
+- **`app/pipeline/qualification_builder.py`** :
+  - Nouvelle fonction `build_followup_ack_draft()` : génère un brouillon court professionnel de remerciement + promesse de recontact, sans bloc tarifaire ni questions.
+- **`app/workers/imap_poller.py`** :
+  - `_is_client_followup()` : détecte une réponse client via `In-Reply-To`/`References`, sujet `Re:` ou marqueurs body (`voici`, `ci-joint`, `en réponse à`, `comme demandé`, etc.).
+  - Vérifie ensuite si l'expéditeur a un mail `demande_client` datant de moins de 30 jours (parsing RFC 2822 de `received_at`).
+  - Passe le flag `is_followup_response` à `generate_draft()`.
+- **`app/pipeline/generator.py`** :
+  - `generate_draft()` accepte `is_followup_response` et route vers `build_followup_ack_draft()` au lieu du brouillon qualifiant standard.
+
+### Tests
+- **100/100 tests verts** avec `venv/bin/python -m pytest -q`.
+- Ajout de `test_build_followup_ack_draft` et 4 tests sur `_is_client_followup`.
+
 ## [1.22.17] — 2026-06-18 (correction classification newsletter corporate — mail #593)
 
 ### Contexte

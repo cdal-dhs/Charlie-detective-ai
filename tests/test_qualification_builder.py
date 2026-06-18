@@ -9,6 +9,7 @@ import pytest
 from app.config import MailboxConfig
 from app.pipeline.qualification_builder import (
     _extract_first_name,
+    build_followup_ack_draft,
     build_qualification_draft,
 )
 
@@ -139,3 +140,22 @@ def test_build_draft_for_sophie_601_filters_answered_questions(mailbox: MailboxC
     assert "Adresse précise de départ" not in draft
     assert "Créneau horaire souhaité" not in draft
     assert "Véhicule de la personne concernée" not in draft
+
+
+def test_build_followup_ack_draft(mailbox: MailboxConfig) -> None:
+    """Brouillon de suivi : merci pour les compléments, pas de requalification."""
+    body = "Bonjour Daniel,\n\nVoici la photo et l'adresse complète comme demandé.\n\nCordialement,\nPierre Martin"
+    draft = build_followup_ack_draft(
+        subject="Re: Demande de filature",
+        body=body,
+        sender="pierre@example.com",
+        mailbox=mailbox,
+        case="infidelite_filature",
+    )
+    assert "Bonjour Pierre," in draft
+    assert "Merci pour ces compléments d'informations" in draft
+    assert "je vous reviens dès que possible" in draft
+    assert "estimation de devis fiable" not in draft
+    assert "1. Vos nom et prénom complets" not in draft
+    assert "Ouverture de dossier : 200 € HTVA" not in draft
+    assert "Daniel Hurchon" in draft

@@ -11,7 +11,9 @@ Couvre :
 from __future__ import annotations
 
 import sqlite3
+from datetime import UTC, datetime, timedelta
 from email.header import Header
+from email.message import Message
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -20,6 +22,7 @@ from app.workers.imap_poller import (
     AGENT_ATTEMPTED_FLAG,
     AGENT_FLAG,
     _decode_header,
+    _is_client_followup,
     _persist,
     _process_single_mail,
 )
@@ -632,3 +635,72 @@ async def test_alert_poller_persistent_failure_fires_after_cooldown(monkeypatch)
 
     # Envoi OK car > 1h. v1.21.5 : 1 POST Resend + 1 POST Slack = 2
     assert mock_post.call_count == 2
+
+
+# --- 5. _is_client_followup : réponses client à un échange récent ---
+
+
+def _make_followup_msg(subject: str = "Re: Demande", body: str = "Voici les infos.",
+                       in_reply_to: str = "", references: str = "") -> Message:
+    msg = Message()
+    msg["Subject"] = subject
+    msg["From"] = "client@example.com"
+    msg["To"] = "contact@detectivebelgique.be"
+    if in_reply_to:
+        msg["In-Reply-To"] = in_reply_to
+    if references:
+        msg["References"] = references
+    msg.set_payload(body)
+    return msg
+
+
+def _insert_demande_client(db, sender: str, received_at: str):
+    conn = sqlite3.connect(db)
+    conn.execute(
+        """
+        INSERT INTO mail_processed
+        (imap_uid, mailbox_name, subject, sender, received_at, category, draft_generated,
+         body_preview, body, ai_draft, status, priority)
+        VALUES (?, ?, ?, ?, ?, 'demande_client', 1, '', '', '', 'pending', 'high')
+        """,
+        ("123", "detective_belgique", "Demande initiale", sender, received_at),
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_is_client_followup_true_when_reply_and_recent_demande(tmp_path):
+    """Réponse client + demande_client récente = brouillon de suivi."""
+    db = _setup_db(tmp_path)
+    recent = (datetime.now(UTC) - timedelta(days=5)).strftime("%a, %d %b %Y %H:%M:%S +0000")
+    _insert_demande_client(db, "client@example.com", recent)
+
+    msg = _make_followup_msg(body="Bonjour, voici les compléments demandés.")
+    assert _is_client_followup(db, "client@example.com", msg) is True
+
+
+def test_is_client_followup_false_when_no_history(tmp_path):
+    """Réponse client mais pas d'historique = pas de follow-up spécial."""
+    db = _setup_db(tmp_path)
+    msg = _make_followup_msg(body="Bonjour, voici les compléments demandés.")
+    assert _is_client_followup(db, "client@example.com", msg) is False
+
+
+def test_is_client_followup_false_when_history_too_old(tmp_path):
+    """Réponse client mais demande_client > 30 jours = pas de follow-up spécial."""
+    db = _setup_db(tmp_path)
+    old = (datetime.now(UTC) - timedelta(days=45)).strftime("%a, %d %b %Y %H:%M:%S +0000")
+    _insert_demande_client(db, "client@example.com", old)
+
+    msg = _make_followup_msg(body="Bonjour, voici les compléments demandés.")
+    assert _is_client_followup(db, "client@example.com", msg) is False
+
+
+def test_is_client_followup_false_when_new_request(tmp_path):
+    """Nouvelle demande sans header/sujet/body de réponse = pas de follow-up."""
+    db = _setup_db(tmp_path)
+    recent = (datetime.now(UTC) - timedelta(days=5)).strftime("%a, %d %b %Y %H:%M:%S +0000")
+    _insert_demande_client(db, "client@example.com", recent)
+
+    msg = _make_followup_msg(subject="Nouvelle demande", body="Bonjour, je souhaite un devis.")
+    assert _is_client_followup(db, "client@example.com", msg) is False

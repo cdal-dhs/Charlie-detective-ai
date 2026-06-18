@@ -4,7 +4,7 @@ import hashlib
 import html
 import re
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from email import header, message_from_bytes
 from email.errors import HeaderParseError
 from email.message import Message
@@ -83,6 +83,29 @@ _SERVICE_SENDERS = (
     "zendesk",
     "intercom",
     "freshdesk",
+)
+
+# Marqueurs indiquant qu'un mail est une réponse d'un client à un précédent échange
+_FOLLOWUP_SUBJECT_RE = re.compile(r"^re\s*:\s*", re.IGNORECASE)
+_FOLLOWUP_BODY_MARKERS = (
+    "voici",
+    "en réponse à",
+    "comme demandé",
+    "comme convenu",
+    "cf. ci-joint",
+    "vous trouverez ci-joint",
+    "re-bonjour",
+    "pour compléter",
+    "suite à",
+    "ci-joint",
+    "merci de bien vouloir",
+    "je vous transmets",
+    "je vous envoie",
+    "je joins",
+    "en pièce jointe",
+    "pj",
+    "piece jointe",
+    "ci-dessous",
 )
 
 
@@ -256,6 +279,85 @@ def _is_known_sender(db_path: Path, sender: str) -> bool:
         return found
     except Exception:
         return False
+
+
+def _is_client_followup(db_path: Path, sender: str, msg: Message) -> bool:
+    """Détecte si le mail est une réponse d'un client à un échange récent.
+
+    Conditions :
+    - le mail ressemble à une réponse (header In-Reply-To/References, sujet Re:,
+      ou marqueurs body type 'voici', 'ci-joint', 'en réponse à') ;
+    - l'expéditeur a déjà envoyé un mail classé 'demande_client' dans les 30
+      derniers jours (selon la date du header Date, RFC 2822).
+
+    Si les deux sont vrais, on génère un brouillon court de remerciement au lieu
+    du brouillon qualifiant standard.
+    """
+    sender_norm = sender.lower().strip()
+    if not sender_norm:
+        return False
+
+    # --- 1. Le mail ressemble-t-il à une réponse ? ---
+    is_reply = bool(msg.get("In-Reply-To") or msg.get("References"))
+    subject = str(msg.get("Subject", "") or "")
+    if _FOLLOWUP_SUBJECT_RE.search(subject):
+        is_reply = True
+
+    body = _get_body_text(msg).lower()
+    if any(marker in body for marker in _FOLLOWUP_BODY_MARKERS):
+        is_reply = True
+
+    if not is_reply:
+        return False
+
+    # --- 2. L'expéditeur a-t-il un dossier récent (30j) ? ---
+    # La date du header est en RFC 2822 : on filtre en Python pour être fiable.
+    try:
+        conn = sqlite3.connect(db_path)
+        rows = conn.execute(
+            """
+            SELECT id, received_at
+            FROM mail_processed
+            WHERE LOWER(sender) = ? AND category = 'demande_client'
+            ORDER BY id DESC
+            LIMIT 50
+            """,
+            (sender_norm,),
+        ).fetchall()
+        conn.close()
+    except Exception:
+        return False
+
+    if not rows:
+        return False
+
+    cutoff = datetime.now().astimezone() - timedelta(days=30)
+    rfc_re = re.compile(r"[A-Za-z]{3},\s+(\d+)\s+(\w+)\s+(\d{4})\s+(\d{2}):(\d{2}):(\d{2})")
+    months = {
+        "Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6,
+        "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12,
+    }
+
+    for _mid, received_at in rows:
+        received_at = received_at or ""
+        m = rfc_re.match(str(received_at))
+        if not m:
+            continue
+        day, mon_s, year, hh, mm, ss = m.groups()
+        try:
+            dt = datetime(
+                int(year), months[mon_s], int(day),
+                int(hh), int(mm), int(ss),
+                tzinfo=None,
+            )
+        except (KeyError, ValueError):
+            continue
+        # received_at est en UTC (RFC 2822 utilise +0000 par défaut dans notre flux),
+        # cutoff est local → on compare en ignorant le tz (marge de quelques heures OK).
+        if dt.replace(tzinfo=None) >= cutoff.replace(tzinfo=None):
+            return True
+
+    return False
 
 
 def _is_system_email(sender: str) -> bool:
@@ -1118,7 +1220,21 @@ async def _process_single_mail(
         gen = None
         if category == "demande_client" and is_new:
             language = detect_language(body, default=mailbox.default_lang)
-            gen = await generate_draft(subject, body, sender, mailbox, language, category)
+            is_followup = await asyncio.to_thread(
+                _is_client_followup, settings.db_agent_state, sender, msg
+            )
+            if is_followup:
+                log.info(
+                    "poller.followup_response_detected",
+                    mailbox=mailbox.name,
+                    uid=uid,
+                    sender=sender,
+                    subject=subject,
+                )
+            gen = await generate_draft(
+                subject, body, sender, mailbox, language, category,
+                is_followup_response=is_followup,
+            )
             draft_generated = 1
             verified_draft = _is_verified_demande_client(category, msg)
 

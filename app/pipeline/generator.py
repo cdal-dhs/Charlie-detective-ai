@@ -9,7 +9,7 @@ from app.config import MailboxConfig, get_settings
 from app.llm.router import complete
 from app.pipeline.case_classifier import classify_case
 from app.pipeline.language import Language
-from app.pipeline.qualification_builder import build_qualification_draft
+from app.pipeline.qualification_builder import build_followup_ack_draft, build_qualification_draft
 from app.pipeline.rag import RetrievedPair, retrieve
 from app.settings_store import get_llm_models
 
@@ -301,6 +301,7 @@ async def generate_draft(
     mailbox: MailboxConfig,
     language: Language,
     category: str = "",
+    is_followup_response: bool = False,
 ) -> GenerationResult:
     settings = get_settings()
     pairs = await asyncio.to_thread(
@@ -333,7 +334,18 @@ async def generate_draft(
     draft_categories = {
         c.strip().lower() for c in settings.draft_categories.split(",") if c.strip()
     }
-    if category.lower() in draft_categories:
+    if is_followup_response:
+        # Réponse client à un échange récent : on n'envoie pas le brouillon
+        # qualifiant standard, juste un accusé de réception professionnel.
+        raw_draft = build_followup_ack_draft(
+            incoming_subject, incoming_body, sender, mailbox, case_type
+        )
+        log.info(
+            "generator.followup_ack_draft",
+            case=case_type,
+            length=len(raw_draft),
+        )
+    elif category.lower() in draft_categories:
         # Brouillon qualifiant déterministe : les LLM ne suivent pas de façon
         # fiable une consigne de liste numérotée, on construit donc le squelette
         # par code et on garde la main sur les questions/tarifs.

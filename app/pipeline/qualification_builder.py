@@ -1031,6 +1031,41 @@ def _build_standard_draft(
     return lines
 
 
+def build_followup_ack_draft(
+    subject: str,
+    body: str,
+    sender: str,
+    mailbox: MailboxConfig,
+    case: str,
+) -> str:
+    """Génère un brouillon court de remerciement pour une réponse client.
+
+    Quand un client répond à un mail de Daniel (compléments d'infos, pièces
+    jointes, etc.) et qu'il a déjà un dossier ouvert dans les 30 derniers jours,
+    on n'envoie PAS le brouillon qualifiant standard. On envoie un accusé de
+    réception professionnel qui indique que Daniel reprend contact prochainement.
+    """
+    first_name = _extract_first_name(body)
+    greeting = f"Bonjour {first_name}," if first_name else "Bonjour,"
+
+    lines = [
+        greeting,
+        "",
+        "Merci pour ces compléments d'informations.",
+        "",
+        "Je les prends bien en compte et je vous reviens dès que possible "
+        "sur la suite de votre dossier.",
+        "",
+        "Bien à vous,",
+        "",
+        "Daniel Hurchon",
+        f"{mailbox.brand}",
+        "GSM 0471/31.81.20",
+        "contact@detectivebelgique.be",
+    ]
+    return "\n".join(lines)
+
+
 def build_qualification_draft(
     subject: str,
     body: str,
