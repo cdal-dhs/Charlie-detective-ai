@@ -1,5 +1,33 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.22.15] — 2026-06-18 (extraction qualifiante renforcée — mails #598 et #601)
+
+### Contexte
+Suite à la livraison v1.22.14, deux mails réels ont montré des cas d'extraction encore perfectibles :
+- **Mail #598** (filature, réponse depuis un formulaire web) : l'adresse cible, la relation (épouse/madame), l'absence de véhicule et les habitudes n'étaient pas extraits correctement.
+- **Mail #601** (incapacité de travail, body non structuré) : le nom du prospect, son adresse, l'employeur et la personne concernée (Segers Grégory) étaient parasités par des faux positifs.
+
+### Changé
+- **`app/pipeline/qualification_builder.py`** :
+  - `_INFO_STOP` / `_INFO_STOP_ADDRESS` : arrêt sur `gsm`, `rue`, `avenue`, `boulevard` pour éviter que le nom/adresse ne débordent sur les champs suivants.
+  - `_NOM_COMPLET_PATTERN` : limite aux espaces horizontaux et à 2-5 mots pour ne pas absorber l'adresse postale.
+  - `_ADRESSE_BE_PATTERN` : tolère des compléments entre le numéro et le code postal (ex. `(Bierset), Grace-Hollogne`) et s'arrête proprement en fin de ville.
+  - `_CLIENT_INFO_LABELS["heure_contact"]` / `["profil"]` : exigent désormais un séparateur explicite (`:`, `-`, `=`, `?`) pour éviter les faux positifs dans le body libre.
+  - `infidelite_filature` :
+    - Détection de la relation `épouse / conjointe / madame` même sans nom propre.
+    - Extraction de l'adresse cible via `Coordonnées de madame`, `Elle habite`, etc.
+    - Détection explicite de l'absence de véhicule (`pas de voiture`, `pas de véhicule`).
+    - Nettoyage des habitudes pour capturer toute la phrase (jusqu'au point) sans empiéter sur le paragraphe suivant.
+  - `incapacite_travail` :
+    - Extraction du nom/prénom et de l'adresse connue de la personne concernée via `_NOM_CIBLE_PATTERN` et la 2ème adresse postale.
+    - Nouveau `_EMPLOYEUR_PATTERN` pour capturer l'employeur/lieu de travail avec son adresse.
+    - Nouveau `_LIEU_SUSPECT_PATTERN` plus strict (maîtresse, domicile conjugal, adresse connue) évitant d'accrocher `je ne sais pas l'adresse`.
+  - `_format_received_info()` : affiche désormais la personne concernée et son adresse pour `incapacite_travail`, et capitalise aussi le `nom_complet`.
+  - `_clean_snippet()` : supprime un label `Adresse :` résiduel.
+
+### Tests
+- **95/95 tests verts** avec `venv/bin/python -m pytest -q`.
+
 ## [1.22.14] — 2026-06-18 (brouillons qualifiants intelligents pour tous les cas)
 
 ### Contexte

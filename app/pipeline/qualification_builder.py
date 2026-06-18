@@ -22,19 +22,25 @@ import re
 from app.config import MailboxConfig, get_settings
 
 # Labels d'info client fréquents dans les formulaires web.
-_INFO_STOP = r"(?=\n|nom|prénom|téléphone|email|gsm|adresse|profil|heure|$)"
-_INFO_STOP_NO_HEURE = r"(?=\n|nom|prénom|téléphone|email|gsm|adresse|profil|$)"
+# _INFO_STOP : arrêt au prochain champ client ou début d'adresse (rue/avenue...).
+_INFO_STOP = r"(?=\n|nom|prénom|téléphone|email|gsm|adresse|profil|heure|rue|avenue|boulevard|$)"
+# _INFO_STOP_NO_HEURE : idem sans heure.
+_INFO_STOP_NO_HEURE = r"(?=\n|nom|prénom|téléphone|email|gsm|adresse|profil|rue|avenue|boulevard|$)"
+# _INFO_STOP_ADDRESS : pour l'adresse, on ne s'arrête pas sur les mots d'adresse.
+_INFO_STOP_ADDRESS = r"(?=\n|nom|prénom|téléphone|email|gsm|adresse|profil|heure|$)"
 # _INFO_SEP accepte ':', '=', '-', '?' ou un simple espace (ex. "gsm 0491502786").
 # _INFO_SEP_STRICT exige un séparateur explicite pour les labels ambigus (ex. "adresse").
 _INFO_SEP = r"\s*[:\-=?]?\s*"
 _INFO_SEP_STRICT = r"\s*[:\-=?]\s*"
+# Split utilisé pour nettoyer une valeur brute capturée. On évite de couper sur
+# '/' (adresses) et sur '\n' (valeurs multilignes) ; on garde les labels connus.
 _INFO_FIELD_SPLIT = re.compile(
-    r"\s*(?:/|\n|Nom|Prénom|Téléphone|Email|GSM|Adresse|Profil|Heure)"
+    r"\s*(?:^|\n)\s*(?:Nom|Prénom|Téléphone|Email|GSM|Adresse|Profil|Heure)\s*[:\-=?]?\s*"
 )
 _CLIENT_INFO_LABELS = {
-    # "mon nom est" sans séparateur explicite.
+    # "mon nom est" sans séparateur explicite + label Nom complet.
     "nom": re.compile(
-        rf"(?:mon\s+nom\s+(?:est|saisit|c'est)|nom){_INFO_SEP}(.+?){_INFO_STOP}",
+        rf"(?:mon\s+nom\s+(?:est|saisit|c'est)|nom\s+complet|nom){_INFO_SEP}(.+?){_INFO_STOP}",
         re.IGNORECASE | re.DOTALL,
     ),
     "prenom": re.compile(rf"pr[ée]nom{_INFO_SEP}(.+?){_INFO_STOP}", re.IGNORECASE | re.DOTALL),
@@ -42,27 +48,35 @@ _CLIENT_INFO_LABELS = {
         rf"(?:t[ée]l[ée]phone|gsm|portable){_INFO_SEP}([\d\s./+\-]{{6,}})", re.IGNORECASE
     ),
     "email": re.compile(rf"(?:e[-\s]?mail|courriel){_INFO_SEP}([^\s]+@[^\s]+)", re.IGNORECASE),
-    "adresse": re.compile(rf"adresse{_INFO_SEP_STRICT}(.+?){_INFO_STOP}", re.IGNORECASE | re.DOTALL),
+    "adresse": re.compile(rf"adresse{_INFO_SEP_STRICT}(.+?){_INFO_STOP_ADDRESS}", re.IGNORECASE | re.DOTALL),
     "heure_contact": re.compile(
-        rf"(?:heure\s*de\s*contact|horaire|créneau){_INFO_SEP}(.+?){_INFO_STOP_NO_HEURE}",
+        # "Heure de contact" (label explicite) ou "créneau/horaire:" avec séparateur strict
+        # pour éviter de capturer les horaires de la cible dans le body libre.
+        rf"(?:heure\s*de\s*contact|créneau|horaire){_INFO_SEP_STRICT}(.+?){_INFO_STOP_NO_HEURE}",
         re.IGNORECASE | re.DOTALL,
     ),
     "profil": re.compile(
-        rf"(?:profil|type|statut){_INFO_SEP}(.+?){_INFO_STOP_NO_HEURE}",
+        # "Profil" / "Votre profil" / "statut:" — exige un séparateur pour éviter
+        # d'accrocher des mots comme "type" dans "type de dossier".
+        rf"(?:(?:votre\s+)?profil|statut){_INFO_SEP_STRICT}(.+?){_INFO_STOP_NO_HEURE}",
         re.IGNORECASE | re.DOTALL,
     ),
 }
 
 # Extraction d'un nom complet explicite (ex. "mon nom est Bassem Sophie").
+# Limite aux espaces horizontaux et à 2-5 mots pour ne pas déborder sur l'adresse.
 _NOM_COMPLET_PATTERN = re.compile(
-    r"(?:mon\s+nom\s+(?:est|saisit|c'est)|je\s+suis)\s+[:\-=?\s]*([A-ZÀ-Ÿ][a-zà-ÿ]+(?:\s+[A-ZÀ-Ÿ][a-zà-ÿ]+)+)",
+    r"(?:mon\s+nom\s+(?:est|saisit|c'est)|je\s+suis)\s+[:\-=?\s]*"
+    r"([A-ZÀ-Ÿ][a-zà-ÿ]+(?:[ \t]+[A-ZÀ-Ÿ][a-zà-ÿ]+){1,4})",
     re.IGNORECASE,
 )
 
 # Extraction d'adresse postale belge sans label explicite.
+# Tolère des compléments entre le numéro et le code postal (ex. "(Bierset), Grace-Hollogne").
 _ADRESSE_BE_PATTERN = re.compile(
     r"(?:rue|avenue|boulevard|chaussée|place|square|route|chemin|impasse|allée|quai|passage|drève|voie)\s+"
-    r"[\w\s'\-]+?\s+\d{1,4}(?:\s*[A-Z]?)?\s+\d{4}\s+\w[\w\s'\-]*",
+    r"[^\n]*?\s+\d{1,4}[^\n]{0,40}\s+\d{4}\s+"
+    r"[A-ZÀ-Ÿ][a-zà-ÿ]+(?:[ \t'\-][a-zà-ÿA-ZÀ-Ÿ]+){0,4}",
     re.IGNORECASE,
 )
 
@@ -229,6 +243,8 @@ def _clean_snippet(value: str) -> str:
     value = value.replace("\n", " ").strip()
     value = value.lstrip(":-").strip()
     value = value.rstrip(";,.-:")
+    # Supprime un éventuel label "Adresse :" resté accroché.
+    value = re.sub(r"^Adresse\s*[\-:]\s*", "", value, flags=re.IGNORECASE)
     value = re.sub(r"\s+", " ", value)
     return value
 
@@ -245,17 +261,32 @@ def _extract_client_info(body: str, sender: str) -> dict[str, str | None]:
         else:
             info[key] = None
 
-    # Le profil (formulaire web) peut être dans le thread cité ; on le cherche
-    # aussi dans le body entier si absent du body propre.
-    if not info.get("profil"):
-        match = _CLIENT_INFO_LABELS["profil"].search(body)
-        if match:
-            info["profil"] = _clean_value(match.group(1)) or None
+    # Certains formulaires web envoient leurs champs dans le thread cité
+    # (telephone, heure_contact, profil). On les cherche aussi dans le body
+    # entier si absents du body propre, mais avec priorité au body propre.
+    for key in ("telephone", "heure_contact", "profil"):
+        if not info.get(key):
+            match = _CLIENT_INFO_LABELS[key].search(body)
+            if match:
+                info[key] = _clean_value(match.group(1)) or None
 
     # Nom complet explicite (ex. "mon nom est Bassem Sophie").
     match = _NOM_COMPLET_PATTERN.search(clean_body)
     if match:
         info["nom_complet"] = _clean_value(match.group(1))
+
+    # Si on a "Nom:" et "Prénom:" séparés (formulaire web), on les combine.
+    if not info.get("nom_complet") and (info.get("nom") or info.get("prenom")):
+        nom = info.get("nom") or ""
+        prenom = info.get("prenom") or ""
+        nom = nom.strip()
+        prenom = prenom.strip()
+        if nom and prenom and prenom.lower() not in nom.lower():
+            info["nom_complet"] = f"{prenom} {nom}"
+        elif nom and not prenom:
+            info["nom_complet"] = nom
+        elif prenom and not nom:
+            info["nom_complet"] = prenom
 
     # Fallback prénom depuis une salutation du thread précédent ("Bonjour Sophie,").
     if not info.get("prenom"):
@@ -266,6 +297,17 @@ def _extract_client_info(body: str, sender: str) -> dict[str, str | None]:
         )
         if salutation:
             info["prenom"] = salutation.group(1)
+
+    # Fallback prénom depuis une signature simple ("Bien à vous\nAnthony").
+    if not info.get("prenom"):
+        simple_sig = re.search(
+            r"(?:Bien\s+à\s+vous|Cordialement|Bien\s+cordialement),?\s*\n\s*"
+            r"([A-ZÀ-Ÿ][a-zà-ÿ]+)\s*$",
+            clean_body,
+            re.IGNORECASE | re.MULTILINE,
+        )
+        if simple_sig:
+            info["prenom"] = simple_sig.group(1)
 
     # Fallback prénom depuis le nom complet (dernier mot = prénom le plus souvent).
     if not info.get("prenom") and info.get("nom_complet"):
@@ -336,7 +378,13 @@ _PHOTO_PATTERN = re.compile(
 
 # Adresse de départ connue (adresse après nom d'entreprise ou "adresse").
 _ADRESSE_DEPART_PATTERN = re.compile(
-    r"(?:adresse\s+(?:de\s+départ|connue|de|du\s+domicile)|domicile\s+conjugal|travaille\s+(?:à|a))\s*[:\-=?]?\s*"
+    r"(?:"
+    r"adresse\s+(?:de\s+départ|connue|de|du\s+domicile)|"
+    r"domicile\s+conjugal|"
+    r"coordonnées\s+(?:de\s+)?(?:madame|mme|la\s+cible|l'épouse|la\s+femme)|"
+    r"(?:elle|la\s+cible)\s+(?:habite|réside|demeure|vit)\s+(?:à|a|au|en)|"
+    r"travaille\s+(?:à|a)"
+    r")\s*[:\-=?]?\s*"
     r"(.{5,160}?)(?=\n|j'ai|je\s+voudrais|merci|cordialement|sais\s+pas|\.{2,}|\.|$)",
     re.IGNORECASE | re.DOTALL,
 )
@@ -362,10 +410,25 @@ _CERTIFICAT_INCAPACITE_PATTERN = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
-# Incapacité : lieu suspect (chantier, travail au noir).
+# Incapacité : employeur / lieu de travail.
+_EMPLOYEUR_PATTERN = re.compile(
+    r"(?:"
+    r"(?:employeur|entreprise|société|boîte|magasin|usine|grossiste|brico)\s*[:\-=?]?\s*|"
+    r"travaille\s+(?:à|a|pour|chez)\s+"
+    r")"
+    r"(.{3,120}?)(?=\n\s*\n|du\s+\d|semaine|jour|merci|cordialement|sais\s+pas|\.|$)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+# Incapacité : lieu suspect (chez la maîtresse, domicile conjugal, adresse connue).
 _LIEU_SUSPECT_PATTERN = re.compile(
-    r"(?:chantier|travail\s+au\s+noir|lieu|adresse|domicile|employeur|grossiste|entreprise)\s*"
-    r"(.{5,120}?)(?=\n|merci|cordialement|\.|$)",
+    r"(?:"
+    r"chez\s+(?:sa\s+)?maîtresse|maîtresse|"
+    r"domicile\s+conjugal|"
+    r"adresse\s+(?:connue|de\s+la\s+personne|du\s+domicile)|"
+    r"lieu\s+suspect|lieu\s+de\s+rendez[\-]vous"
+    r")\s*[:\-=?]?\s*"
+    r"(.{5,120}?)(?=\n|merci|cordialement|sais\s+pas|\.|$)",
     re.IGNORECASE | re.DOTALL,
 )
 
@@ -427,45 +490,86 @@ def _extract_case_info(body: str, case: str) -> dict[str, str | None]:
 
     # --- Infidelité / filature / surveillance ---
     if case == "infidelite_filature":
+        # Mots communs de lieux qu'on ne veut pas traiter comme un nom de cible.
+        _LIEU_WORDS = {
+            "cité", "verte", "selembao", "kinshasa", "liège", "bruxelles",
+            "charleroi", "waterloo", "belgique", "france", "luxembourg",
+            "rue", "avenue", "boulevard", "place", "square",
+        }
+
         # Nom de la cible (recherche plus large que le label "Nom:").
-        # 1. Pattern "Nom, Prénom" explicite.
+        # 1. Pattern "Nom, Prénom" explicite, filtré pour éviter les noms de lieux.
         nom_match = _NOM_CIBLE_PATTERN.search(clean_body)
         if nom_match:
-            info["nom_cible"] = nom_match.group(1).strip().strip(";,.:")
-            info["prenom_cible"] = nom_match.group(2).strip().strip(";,.:")
-        else:
-            # 2. "mon mari X Y", "ma femme X Y", "la personne X Y".
+            candidate = f"{nom_match.group(1).strip()} {nom_match.group(2).strip()}"
+            lowered_cand = {w.lower() for w in candidate.split()}
+            if not lowered_cand & _LIEU_WORDS and len(candidate.split()) <= 5:
+                info["nom_cible"] = nom_match.group(1).strip().strip(";,.:")
+                info["prenom_cible"] = nom_match.group(2).strip().strip(";,.:")
+
+        # 2. Relation explicite : "mon mari X Y", "ma femme X Y", "mon épouse X Y",
+        #    "madame X Y", "ma conjointe X Y".
+        if not info.get("prenom_cible"):
             relation_match = re.search(
-                r"(?:mon\s+mari|ma\s+femme|mon\s+conjoint|ma\s+conjointe|la\s+personne)\s+"
-                r"([A-ZÀ-Ÿ][a-zà-ÿ]+(?:\s+[A-ZÀ-Ÿ][a-zà-ÿ]+)+)",
+                r"(?:"
+                r"mon\s+(?:mari|époux|épouse|femme|conjoint|conjointe)|"
+                r"ma\s+(?:femme|épouse|conjointe)|"
+                r"(?:madame|mme)"
+                r")\s*"
+                r"([A-ZÀ-Ÿ][a-zà-ÿ]+(?:\s+[A-ZÀ-Ÿ][a-zà-ÿ]+){0,3})?",
                 clean_body,
                 re.IGNORECASE,
             )
             if relation_match:
-                full = _clean_cible_name(relation_match.group(1))
-                if full:
-                    parts = full.split()
-                    if len(parts) >= 2:
-                        info["prenom_cible"] = parts[0]
-                        info["nom_cible"] = " ".join(parts[1:])
+                name_part = (relation_match.group(1) or "").strip()
+                if name_part:
+                    full = _clean_cible_name(name_part)
+                    if full:
+                        parts = full.split()
+                        if len(parts) >= 2:
+                            info["prenom_cible"] = parts[0]
+                            info["nom_cible"] = " ".join(parts[1:])
+                        else:
+                            info["prenom_cible"] = full
+                else:
+                    # On sait au moins qu'il s'agit de la femme/épouse/madame.
+                    info["relation_cible"] = "épouse / conjointe"
 
         # Véhicule.
         veh_match = _VEHICULE_PATTERN.search(clean_body)
         if veh_match:
             info["vehicule_cible"] = _clean_snippet(veh_match.group(1))
+        # Mention explicite "pas de voiture / pas de véhicule".
+        if re.search(r"(?:pas\s+de\s+(?:voiture|véhicule)|n'a\s+pas\s+de\s+(?:voiture|véhicule))", clean_body, re.IGNORECASE):
+            info["vehicule_cible"] = info.get("vehicule_cible") or "aucun (transport en commun / taxi)"
 
         # Adresse de départ / lieu de travail / domicile de la cible.
+        # 1. Labels explicites : "Coordonnées de madame", "Adresse de la cible", "Elle habite".
         addr_depart = _ADRESSE_DEPART_PATTERN.search(clean_body)
         if addr_depart:
             info["adresse_depart_cible"] = _clean_snippet(addr_depart.group(1))
         else:
-            # Fallback : deuxième adresse postale trouvée (la première étant souvent celle du client).
-            addresses = _ADRESSE_BE_PATTERN.findall(clean_body)
-            if len(addresses) >= 2:
-                info["adresse_depart_cible"] = _clean_value(addresses[1])
-            elif len(addresses) == 1 and not info.get("adresse_client_fallback"):
-                # Si le client n'a pas d'adresse, la seule adresse est probablement celle de la cible.
-                pass
+            # 2. Cherche une adresse après "madame / épouse / femme / elle habite".
+            relation_addr = re.search(
+                r"(?:"
+                r"coordonnées\s+(?:de\s+)?(?:madame|mme|la\s+cible|l'épouse|la\s+femme)|"
+                r"(?:elle|la\s+cible)\s+(?:habite|réside|demeure|vit)\s+(?:à|a|au|en)|"
+                r"domicile\s+(?:de|du|d'elle|conjugal)"
+                r")\s*[:\-=?]?\s*"
+                r"(.{5,200}?)(?=\n|j'ai|je\s+voudrais|merci|cordialement|sais\s+pas|\.{2,}|\.|$)",
+                clean_body,
+                re.IGNORECASE | re.DOTALL,
+            )
+            if relation_addr:
+                info["adresse_depart_cible"] = _clean_snippet(relation_addr.group(1))
+            else:
+                # 3. Fallback : deuxième adresse postale trouvée (la première étant souvent celle du client).
+                addresses = _ADRESSE_BE_PATTERN.findall(clean_body)
+                if len(addresses) >= 2:
+                    info["adresse_depart_cible"] = _clean_value(addresses[1])
+                elif len(addresses) == 1 and not info.get("adresse_client_fallback"):
+                    # Si le client n'a pas d'adresse, la seule adresse est probablement celle de la cible.
+                    pass
 
         # Horaires / créneau.
         horaires = _HORAIRE_PATTERN.findall(clean_body)
@@ -481,10 +585,20 @@ def _extract_case_info(body: str, case: str) -> dict[str, str | None]:
                 start -= 1
             while start < habitudes_match.start() and clean_body[start].isspace():
                 start += 1
-            end = min(len(clean_body), habitudes_match.end() + 70)
-            # S'arrête à la fin d'une phrase ou d'une ligne.
-            while end < len(clean_body) and clean_body[end] not in "\n.":
-                end += 1
+            # S'arrête à la fin de la phrase suivant le keyword (max 200 car).
+            end = min(len(clean_body), habitudes_match.end() + 200)
+            # Cherche un point qui termine une phrase (lettre/chiffre suivi de '.').
+            dot_pos = -1
+            for i in range(habitudes_match.end(), end):
+                if clean_body[i] == "." and i > 0 and clean_body[i - 1].isalnum():
+                    dot_pos = i
+                    break
+            if dot_pos != -1:
+                end = dot_pos + 1  # inclure le point final
+            else:
+                newline_pos = clean_body.find("\n", habitudes_match.end())
+                if newline_pos != -1 and newline_pos < end:
+                    end = newline_pos
             snippet = clean_body[start:end]
             info["habitudes_cible"] = _clean_snippet(snippet)
 
@@ -536,9 +650,26 @@ def _extract_case_info(body: str, case: str) -> dict[str, str | None]:
         if horaires:
             info["horaire_surveillance"] = " ; ".join(_clean_value(h) for h in horaires)
 
+        # Personne concernée : nom + adresse connue (2ème adresse postale = lieu de travail).
+        nom_match = _NOM_CIBLE_PATTERN.search(clean_body)
+        if nom_match:
+            info["nom_cible"] = nom_match.group(1).strip().strip(";,.:")
+            info["prenom_cible"] = nom_match.group(2).strip().strip(";,.:")
+        addresses = _ADRESSE_BE_PATTERN.findall(clean_body)
+        if len(addresses) >= 2:
+            info["adresse_cible"] = _clean_value(addresses[1])
+
+        # Lieu de travail / employeur suspecté : label explicite, puis 2ème adresse postale.
+        employeur_match = _EMPLOYEUR_PATTERN.search(clean_body)
+        if employeur_match:
+            info["lieu_suspect"] = _clean_value(employeur_match.group(1))
+        if len(addresses) >= 2 and not info.get("lieu_suspect"):
+            info["lieu_suspect"] = _clean_value(addresses[1])
+
+        # Lieu suspect alternatif (maîtresse, domicile conjugal).
         lieu_match = _LIEU_SUSPECT_PATTERN.search(clean_body)
         if lieu_match:
-            info["lieu_suspect"] = _clean_value(lieu_match.group(1))
+            info["lieu_suspect"] = info.get("lieu_suspect") or _clean_value(lieu_match.group(1))
 
     # --- Passé de violences / sécurité ---
     elif case == "securite_passé_violences":
@@ -678,7 +809,7 @@ def _format_received_info(
     # --- Infos client ---
     prenom = _capitalize_name(client_info.get("prenom"))
     nom = _capitalize_name(client_info.get("nom"))
-    nom_complet = client_info.get("nom_complet")
+    nom_complet = _capitalize_name(client_info.get("nom_complet"))
 
     full = nom_complet or " ".join(p for p in [prenom, nom] if p)
     if full:
@@ -724,6 +855,14 @@ def _format_received_info(
             lines.append(f"- Région / pays de recherche : {case_info['region_recherche']}")
 
     elif case == "incapacite_travail":
+        cible_parts = [p for p in [
+            _capitalize_name(case_info.get("prenom_cible")),
+            _capitalize_name(case_info.get("nom_cible")),
+        ] if p]
+        if cible_parts:
+            lines.append(f"- Personne concernée : {' '.join(cible_parts)}")
+        if case_info.get("adresse_cible"):
+            lines.append(f"- Adresse connue de la personne : {case_info['adresse_cible']}")
         if case_info.get("certificat_incapacite"):
             lines.append(f"- Certificat / arrêt : {case_info['certificat_incapacite']}")
         if case_info.get("horaire_surveillance"):
