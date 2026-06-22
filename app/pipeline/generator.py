@@ -379,13 +379,16 @@ async def generate_draft(
         raw_draft = draft.strip()
         log.info("generator.draft", length=len(raw_draft), preview=raw_draft[:200])
 
-    # --- Enrichissement multilingue pour aide à la lecture Daniel ---
-    # Si la langue détectée ≠ FR, on ajoute en-tête (mail original) + traductions.
-    final_draft = raw_draft
-    if language != "fr":
-        from app.pipeline.draft_renderer import render_draft_with_translations
-        from app.pipeline.translator import translate_from_fr, translate_to_fr
+    # --- Enrichissement du rendu : message original en dessous de la proposition ---
+    # Si langue ≠ FR : on ajoute aussi traductions FR + proposition traduite.
+    # Si langue == FR : on garde proposition FR + message original du client.
+    from app.pipeline.draft_renderer import render_draft_with_translations
+    from app.pipeline.translator import translate_from_fr, translate_to_fr
 
+    if language == "fr":
+        translation_to_fr = ""
+        translation_from_fr = ""
+    else:
         # Lancer les 2 traductions en parallèle
         translation_to_fr_task = translate_to_fr(incoming_body, language)
         translation_from_fr_task = translate_from_fr(raw_draft, language)
@@ -393,19 +396,19 @@ async def generate_draft(
             translation_to_fr_task, translation_from_fr_task
         )
 
-        final_draft = render_draft_with_translations(
-            incoming_body=incoming_body,
-            draft_fr=raw_draft,
-            source_lang=language,
-            incoming_subject=incoming_subject,
-            translation_to_fr=translation_to_fr,
-            translation_from_fr=translation_from_fr,
-        )
-        log.info(
-            "generator.draft_enriched",
-            language=language,
-            final_length=len(final_draft),
-        )
+    final_draft = render_draft_with_translations(
+        incoming_body=incoming_body,
+        draft_fr=raw_draft,
+        source_lang=language,
+        incoming_subject=incoming_subject,
+        translation_to_fr=translation_to_fr,
+        translation_from_fr=translation_from_fr,
+    )
+    log.info(
+        "generator.draft_enriched",
+        language=language,
+        final_length=len(final_draft),
+    )
 
     return GenerationResult(
         draft=final_draft,

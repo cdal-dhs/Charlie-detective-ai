@@ -1,5 +1,21 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.22.21] — 2026-06-18 (brouillons FR : message original manquant)
+
+### Contexte
+Daniel constate sur le mail #615 (FR) que la régénération cockpit ne met pas le message original du client sous la proposition. La v1.22.20 avait déplacé la gestion de l'original dans `draft_renderer.py`, mais `generate_draft()` ne l'appelait que pour les langues étrangères. Les brouillons FR ressortaient donc sans le message original.
+
+### Changé
+- **`app/pipeline/generator.py`** :
+  - `render_draft_with_translations()` est désormais appelée **pour toutes les langues**, y compris le FR.
+  - Pour le FR : la proposition est enrichie du message original du client en dessous.
+  - Pour les autres langues : 4 blocs multilingues + message original en dessous (inchangé).
+- **`tests/test_generator_draft.py`** :
+  - Nouveau test garantissant qu'un `demande_client` en FR inclut le bloc `MESSAGE ORIGINAL DU CLIENT` sous la proposition.
+
+### Tests
+- **106/106 tests verts** avec `venv/bin/python -m pytest -q`.
+
 ## [1.22.20] — 2026-06-18 (rendu brouillons multilingues + message original complet)
 
 ### Contexte
