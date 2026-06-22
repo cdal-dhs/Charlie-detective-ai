@@ -1,7 +1,7 @@
 # HANDOVER — Detective.be Agent IA (Charlie)
 
 > Document de transfert pour tout agent (Claude Sonnet/Opus 4.X, GPT, etc.).
-> **Dernière mise à jour** : 2026-06-18 · **Version courante** : v1.22.21 · **Déployé sur** : `detective.digitalhs.biz`
+> **Dernière mise à jour** : 2026-06-18 · **Version courante** : v1.23.0 · **Déployé sur** : `detective.digitalhs.biz`
 
 ---
 

@@ -1,5 +1,14 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.23.0] — 2026-06-18 (version stable — brouillons multilingues + messages originaux)
+
+### Contexte
+Bascule en version mineure 1.23.0 pour marquer la stabilisation du rendu des brouillons après les fixes 1.22.20 et 1.22.21.
+
+### Changé
+- Mise à jour de la source de vérité de version : `app/_version.py` → `VERSION = "1.23.0"`.
+- Synchronisation des références version dans `README.md` et `HANDOVER.md`.
+
 ## [1.22.21] — 2026-06-18 (brouillons FR : message original manquant)
 
 ### Contexte
