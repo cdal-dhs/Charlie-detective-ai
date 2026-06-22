@@ -206,6 +206,22 @@ Resend reste actif **uniquement** pour :
 
 ---
 
+## ✅ Hotfixes v1.24.x — Hardening détection (meeting Daniel 2026-06-22)
+
+**Contexte** : meeting Daniel 2026-06-22 remonte 3 clients réels ratés (#515, #606, #614) — tous partagent le même défaut : le classifier se fiait au **sujet** alors que le **body** contenait une vraie demande client.
+
+- [x] **v1.24.0 — 3 règles déterministes** où le body l'emporte sur le sujet :
+  - [x] `_is_wp_contact_form()` — formulaires WordPress toutes boîtes (detectivebelgium.com NL, detectivebelgique.be FR), force `demande_client` depuis toute catégorie
+  - [x] `_is_reply_to_daniel()` — Re: + citation signée Daniel + expéditeur humain
+  - [x] `_has_strong_human_demand()` — exception au « jamais remonter depuis phishing » (prénom signé + vocabulaire enquête + question tarif, sans marqueur phishing actif)
+  - [x] 36 tests hardening + 123 suite complète verts
+- [x] **v1.24.0 — reclassement prod** : #515 (Nathalie Hairemans) + #606 (Van Houtte) reclassés `facture` → `demande_client`, brouillons générés + livrés en IMAP Drafts
+- [x] **v1.24.1 — brouillon hors-légalité** : `_detect_illegal_request()` (11 regex FR/NL/EN) + `_build_illegal_refusal_draft()` = refus poli (cadre légal belge + infractions pénales) + alternative légale (filature/surveillance/constat). Pour #614 (Serge M / piratage WhatsApp). 14 tests + 137 suite verte.
+- [ ] **v1.24.1 — reclassement prod #614** : `backfill_reclassify.py --apply --only-id 614` puis `deliver_pending_drafts.py --only-id 614 --apply`. **À valider avec CDAL** (le brouillon est un refus poli, à confronter au ton de Daniel) → démarrage dès reprise.
+- [ ] **Task #4 — Extraction vrai contact client formulaires WP** : les formulaires WP ne demandent jamais l'email — le vrai contact = téléphone (`Telefoonnummer`). Le brouillon doit dire « je vous appelle au 04xx » plutôt que répondre par email au forwarder `mail@/wordpress@/contact@detective*`. Pour les mails directs : récupérer le vrai email client.
+
+---
+
 ## ⬜ V2b — Polishing cockpit : latence Charlie + UX inbox
 
 **Pré-requis** : V2a déployé et stable.

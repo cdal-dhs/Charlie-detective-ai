@@ -45,7 +45,7 @@
 
 ## 3. Stack technique
 
-État au **2026-06-04 (v1.21.5)**. La SPEC.md d'origine est désalignée sur certains points — **cette section fait foi**.
+État au **2026-06-22 (v1.24.1)**. La SPEC.md d'origine est désalignée sur certains points — **cette section fait foi**.
 
 | Couche | Choix |
 |---|---|
@@ -198,7 +198,7 @@ Le script `scripts/deploy-to-vps.sh` intègre ce workflow. **Ne jamais utiliser 
 
 ## 7. État courant du projet
 
-État au **2026-06-04 — v1.21.5** déployée en prod. Voir `HANDOVER.md` pour le détail complet, `CHANGELOG.md` pour l'historique, `docs/ROADMAP.md` pour la roadmap à jour.
+État au **2026-06-22 — v1.24.1** déployée en prod. Voir `HANDOVER.md` pour le détail complet, `CHANGELOG.md` pour l'historique, `docs/ROADMAP.md` pour la roadmap à jour.
 
 ### ✅ Livré
 - **S1 → S4 terminées** : infra & data, pipeline IMAP, RAG + génération, prod 24/7 sur KVM8.
@@ -210,10 +210,15 @@ Le script `scripts/deploy-to-vps.sh` intègre ce workflow. **Ne jamais utiliser 
 - **Aide lecture multilingue v1.21.0** : pour les mails NL/EN/DE/ES/etc., brouillon enrichi avec 4 blocs (email d'origine + traduction FR + proposition FR + traduction langue source). Daniel n'a plus à déchiffrer une langue qu'il ne maîtrise pas.
 - **Endpoint retry-draft v1.21.0** : `POST /api/drafts/{id}/retry` permet de régénérer un brouillon manquant (cas deadlock poller).
 - **LLM kimi-k2.6:cloud stable v1.21.1+** : bascule depuis gemma4:31b (obsolète) + claude-sonnet-4 (404). Extraction `reasoning_content` + post-traitement `_clean_reasoning()` v1.21.2 (filtre 30+ patterns de traces de raisonnement).
+- **Hardening classifier v1.24.0** (meeting Daniel 2026-06-22) : 3 règles déterministes où le body l'emporte sur le sujet — `_is_wp_contact_form()` (formulaires WordPress toutes boîtes), `_is_reply_to_daniel()` (Re:+citation signée Daniel), `_has_strong_human_demand()` (exception au « jamais remonter depuis phishing »). Rattrape #515 (formulaire WP classé facture), #606 (Re:+devis classé facture), #614 (homoglyphes itsme classé phishing). #515 + #606 reclassés et livrés en prod. Règle d'or : faux positifs acceptables, faux négatifs intolérables.
+- **Brouillon hors-légalité v1.24.1** : `_detect_illegal_request()` (11 regex FR/NL/EN) court-circuite le brouillon qualifiant si le client demande un piratage / accès non autorisé aux communications (WhatsApp, téléphone, compte, logiciel espion) → `_build_illegal_refusal_draft()` = refus poli + cadre légal belge (infractions pénales) + alternative légale (filature/surveillance/constat). Pour #614 (Serge M / « faire sortir les conversations WhatsApp »).
 
 ### ⏳ En cours
 - **V2b — Polishing cockpit** : filtres inbox (3 boîtes cochées par défaut), latence Charlie < 5s (parallélisation Cerveau2 + SQL déjà faite).
 - **V2c — Feedback loop qualité Daniel** : détecter les mails `Sent` qui correspondent à un brouillon V2a, calculer le diff, taux d'acceptation, affiner `personality_daniel.txt` avec les patterns d'édition. **Démarrage lundi 2026-05-25** (cf. mémoire `project_v2_drafts_approval`).
+- **Reclassement #614 (post-v1.24.1)** : `backfill_reclassify.py --apply --only-id 614` puis `deliver_pending_drafts.py --only-id 614 --apply` — à valider avec CDAL (brouillon = refus poli, confronter au ton de Daniel).
+- **Task #4 — Extraction vrai contact client formulaires WP** : les formulaires WP ne demandent jamais l'email — le vrai contact = téléphone (`Telefoonnummer`). Le brouillon doit dire « je vous appelle au 04xx » plutôt que répondre par email au forwarder `mail@/wordpress@/contact@detective*`.
+- **Point de vigilance #10** : `case_classifier` + `translator` tournent encore sur `gemma4:31b` (obsolète) — basculer `LLM_MODEL_QUALIFIER` sur `kimi-k2.6:cloud` + purger `app_settings`. Hors-scope v1.24.1.
 
 ### ⬜ À venir
 - **V3** : module factures (extraction montant/échéance/fournisseur), bot WhatsApp client, dashboard web supervision dédié, suppression mails > 28 jours, architecture multi-sub-agents avec LLM différencié par tâche.
@@ -233,7 +238,7 @@ Le script `scripts/deploy-to-vps.sh` intègre ce workflow. **Ne jamais utiliser 
 
 ---
 
-## 9. État des pré-requis (au 2026-06-04)
+## 9. État des pré-requis (au 2026-06-22)
 
 Tous les pré-requis S1 sont livrés :
 

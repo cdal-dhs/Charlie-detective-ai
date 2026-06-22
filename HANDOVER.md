@@ -1,14 +1,14 @@
 # HANDOVER — Detective.be Agent IA (Charlie)
 
 > Document de transfert pour tout agent (Claude Sonnet/Opus 4.X, GPT, etc.).
-> **Dernière mise à jour** : 2026-06-18 · **Version courante** : v1.23.0 · **Déployé sur** : `detective.digitalhs.biz`
+> **Dernière mise à jour** : 2026-06-22 · **Version courante** : v1.24.1 · **Déployé sur** : `detective.digitalhs.biz`
 
 ---
 
 ## TABLE DES MATIÈRES (TL;DR)
 
 1. [Qui, quoi, pourquoi](#1-qui-quoi-pourquoi)
-2. [Architecture actuelle v1.23.0](#2-architecture-actuelle-v1230)
+2. [Architecture actuelle v1.24.1](#2-architecture-actuelle-v1241)
 3. [Le pipeline Charlie AI](#3-le-pipeline-charlie-ai)
 4. [Stack technique détaillée](#4-stack-technique-détaillée)
 5. [Cerveau2-Det — second cerveau](#5-cerveau2-det--second-cerveau)
@@ -38,7 +38,7 @@
 
 ---
 
-## 2. Architecture actuelle (v1.23.0)
+## 2. Architecture actuelle (v1.24.1)
 
 ```
 [3 boîtes Infomaniak IMAP] ──polling 5min──► [Worker asyncio Python]
@@ -63,19 +63,19 @@
 
 | Fichier | Rôle critique | À savoir |
 |---|---|---|
-| `app/_version.py` | **Source unique de vérité** version | `VERSION = "1.23.0` — tolérance zéro, ne JAMAIS utiliser `importlib.metadata`. |
+| `app/_version.py` | **Source unique de vérité** version | `VERSION = "1.24.1` — tolérance zéro, ne JAMAIS utiliser `importlib.metadata`. |
 | `app/charlie.py` | **Cœur intelligent Charlie AI** | `ask_charlie()` : extraction entités → SQL programmatique (bypass LLM) + vault Cerveau2 (fallback direct GET) + archives + corrections + mémoire → nuage de liaison familial → **résumé de dossier narratif LLM** (v1.19.1) → garde anti-vide + garde anti-"pas trouvé" |
 | `app/charlie_memory.py` | **Mémoire persistante** | Table `charlie_memory` (feedback good/bad, corrections, auto-save) |
 | `app/cerveau_client.py` | **Client HTTP Cerveau2** | `query_vault()`, `get_vault_note()` (fallback direct), `feed_correspondance()`, `feed_document()`. Bearer Token statique. **Dégradation silencieuse** (retourne `[]` si Cerveau2 down) |
 | `app/config.py` | **Configuration pydantic-settings** | `llm_model_default = "openai/kimi-k2.6:cloud"` (Ollama Pro, cloud). Provider `openai/` + `api_base=https://ollama.com/v1` |
 | `app/llm/router.py` | **Wrapper LiteLLM** | `complete()` avec fallback automatique + extraction `reasoning_content` (kimi-k2.6 reasoning) + post-traitement `_clean_reasoning()` (30+ patterns pour traces raisonnement) |
 | `app/pipeline/translator.py` | **Aide lecture multilingue (v1.21.0)** | `translate_to_fr()` + `translate_from_fr()` avec try/except, troncature 12K. Utilisé si langue mail ≠ FR |
-| `app/pipeline/draft_renderer.py` | **Rendu brouillon enrichi (v1.21.0 → v1.23.0)** | Compose 4 blocs pour langues étrangères ; pour le FR, proposition FR + message original du client en dessous |
+| `app/pipeline/draft_renderer.py` | **Rendu brouillon enrichi (v1.21.0 → v1.24.1)** | Compose 4 blocs pour langues étrangères ; pour le FR, proposition FR + message original du client en dessous |
 | `app/pipeline/generator.py` | **Génération brouillon** | Pour `demande_client`/`prise_contact` : branche `app/pipeline/qualification_builder.py` (brouillon déterministe, v1.22.8). Pour les autres catégories : flux LLM few-shot + Cerveau2. Appelle `translate_to_fr` + `translate_from_fr` en parallèle. **`_load_daniel_fewshot()` (v1.22.4)** : récupère 200 candidats SQL, parse date RFC 2822 en Python, garde top 4 dans fenêtre 30j |
-| `app/pipeline/qualification_builder.py` | **Brouillon qualifiant intelligent (v1.22.16)** | Détection des informations client + spécifiques au cas déjà fournies dans le mail, section "Merci pour les éléments suivants", filtrage des questions redondantes, closing adapté. Gère les cas filature, recherche personne, incapacité, dette, passé violences, micros. |
+| `app/pipeline/qualification_builder.py` | **Brouillon qualifiant intelligent (v1.22.16, + hors-légalité v1.24.1)** | Détection des informations client + spécifiques au cas déjà fournies dans le mail, section "Merci pour les éléments suivants", filtrage des questions redondantes, closing adapté. Gère les cas filature, recherche personne, incapacité, dette, passé violences, micros. **v1.24.1** : `_detect_illegal_request()` (11 regex FR/NL/EN) court-circuite le brouillon standard si le client demande un piratage / accès non autorisé aux communications (WhatsApp, téléphone, compte, logiciel espion) → `_build_illegal_refusal_draft()` = refus poli + cadre légal belge + alternative légale. Cf. mail #614 (Serge M). |
 | `app/web/admin.py` | **Simulateur brouillon** (v1.22.9) | `GET /admin/draft-simulator` + `POST /admin/api/draft-simulator/run` : permet à CDAL de coller sujet/corps d'un email simulé et de voir le brouillon généré sans envoyer de vrai mail. RAG/Cerveau2 mockés, classifier LLM réel. |
 | `app/web/templates/admin/draft_simulator.html` | **UI Simulateur brouillon** | Formulaire HTMX super-admin : boîte, catégorie, sujet, corps, affichage du résultat. |
-| `app/pipeline/classifier.py` | **Classification LLM** (v1.22.1 hardened) | 8 catégories avec few-shots. Prompt durci pour ne plus rater aucun `demande_client` |
+| `app/pipeline/classifier.py` | **Classification LLM** (v1.24.0 hardened) | 8 catégories avec few-shots. **`_enforce_recall_over_precision`** : post-traitement qui force `demande_client` en cas de doute. **v1.24.0** — 3 règles déterministes prioritaires où le body l'emporte sur le sujet : (1) `_is_wp_contact_form()` (formulaires WordPress toutes boîtes, force depuis toute catégorie), (2) `_is_reply_to_daniel()` (Re: + citation signée Daniel + expéditeur humain), (3) `_has_strong_human_demand()` (prénom signé + vocabulaire enquête + question tarif, sans marqueur phishing actif — exception au « jamais remonter depuis phishing »). Règle d'or : faux positifs acceptables, faux négatifs intolérables. Cf. mails #515, #606, #614. |
 | `app/pipeline/language.py` | **Détection langue** | `Language = str` (toutes BCP-47), `language_label()` pour affichage humain |
 | `app/web/api.py` | **Endpoints HTMX + Charlie** | `charlie_ask()`, `charlie_feedback()`, `draft_generate()`, **`POST /api/drafts/{id}/retry`** (régénération manuelle) |
 | `app/workers/imap_poller.py` | **Polling IMAP** | 1 task asyncio par boîte, flag `AgentProcessed` (sans `$`) + flag `AgentAttempted` (libère la queue même en cas de crash, v1.21.3). Appelle `generate_draft()` pour `demande_client` → brouillon enrichi |
@@ -87,7 +87,7 @@
 
 ---
 
-## 3. Le pipeline Charlie AI (état v1.23.0)
+## 3. Le pipeline Charlie AI (état v1.24.1)
 
 Le fichier `app/charlie.py` contient `ask_charlie()`. Flow exact :
 
@@ -172,7 +172,7 @@ if not response and rows:
 
 ---
 
-## 4. Stack technique détaillée (v1.23.0)
+## 4. Stack technique détaillée (v1.24.1)
 
 | Couche | Outil | Version / Détail |
 |---|---|---|
@@ -397,9 +397,9 @@ Le poller IMAP ne traite que les mails reçus depuis cette date. Les archives hi
 
 ---
 
-## 9. Bugs résolus et points de vigilance (état au 2026-06-18, v1.23.0)
+## 9. Bugs résolus et points de vigilance (état au 2026-06-22, v1.24.1)
 
-### ✅ Bugs résolus récents (v1.22.0 → v1.23.0)
+### ✅ Bugs résolus récents (v1.22.0 → v1.24.1)
 
 | # | Problème | Statut | Fichier | Notes |
 |---|---|---|---|---|
@@ -410,6 +410,8 @@ Le poller IMAP ne traite que les mails reçus depuis cette date. Les archives hi
 | 16 | **Pas de moyen de tester les brouillons sans envoyer de vrai email** — CDAL veut itérer sur la qualité des brouillons localement/prod sans risquer d'envoyer des emails. | ✅ **Corrigé v1.22.9** | `app/web/admin.py` + `app/web/templates/admin/draft_simulator.html` + `scripts/test_draft_qualification.py` | Simulateur super-admin `/admin/draft-simulator` (HTMX, mocks RAG/Cerveau2, vrai classifier). Script CLI local `scripts/test_draft_qualification.py` avec cas prédéfinis et `--subject/--body` custom. Tests ajoutés. |
 | 17 | **Wording brouillon déterministe pas assez "Daniel"** — premier test prod du simulateur : intro et closing trop génériques. | ✅ **Corrigé v1.22.10** | `app/pipeline/qualification_builder.py` | Intro : "Afin de préparer votre dossier dans les meilleures conditions, et pouvoir vous donner une estimation de devis fiable...". Closing : "Dès réception de ces éléments, je reprendrai contact avec vous pour finaliser le devis et convenir d'un échange téléphonique sur ce nouveau dossier." |
 | 18 | **Nouveau cas métier : récupération de dette** — CDAL partage une vraie demande client (Eunice, membre d'entourage devant une somme). Besoin d'un brouillon spécifique. | ✅ **Corrigé v1.22.11 → v1.22.13** | `app/pipeline/case_classifier.py` + `app/pipeline/qualification_builder.py` | Ajout du cas `recuperation_dette`. Brouillon structuré : intro dette, question créance, infos sur la personne concernée, closing légal. **v1.22.13** : extraction auto des infos client déjà reçues (nom, prénom, GSM, email, heure, profil) pour ne plus les redemander. **94/94 tests verts**. |
+| 19 | **3 clients ratés par le classifier (body ignoré au profit du sujet)** — meeting Daniel 2026-06-22. #515 (Nathalie Hairemans, formulaire WP classé facture à cause sujet « Réinitialisation mot de passe »), #606 (Van Houtte, Re:+citation devis classé facture), #614 (Serge M, homoglyphes itsme classé phishing). | ✅ **Corrigé v1.24.0** | `app/pipeline/classifier.py` + `tests/test_classifier_hardening.py` | 3 règles déterministes prioritaires où le body l'emporte sur le sujet : `_is_wp_contact_form()` (formulaires WordPress toutes boîtes), `_is_reply_to_daniel()` (Re:+citation signée Daniel), `_has_strong_human_demand()` (exception au « jamais remonter depuis phishing » si prénom signé + vocabulaire enquête + question tarif, sans marqueur phishing actif). Règle d'or : faux positifs acceptables, faux négatifs intolérables. **#515 et #606 reclassés + brouillons livrés en prod** (IMAP Drafts). **136/136 tests hardening verts, 123/123 suite complète**. |
+| 20 | **Demande hors-légalité sans réponse adaptée** — #614 (Serge M) demande de « faire sortir les conversations WhatsApp » du téléphone de son épouse = accès non autorisé = infraction pénale en BE. Le brouillon qualifiant infidélité standard est inadapté. Daniel demande une réponse polie expliquant le cadre légal. | ✅ **Corrigé v1.24.1** | `app/pipeline/qualification_builder.py` + `scripts/backfill_reclassify.py` + `tests/test_illegal_request.py` | `_detect_illegal_request()` (11 regex FR/NL/EN : piratage, extraction conversations, logiciel espion, mise sur écoute, relevés, mot de passe) court-circuite le brouillon standard → `_build_illegal_refusal_draft()` = refus poli + cadre légal belge (infractions pénales, détectives agréés tenus de respecter la loi) + alternative légale selon le cas (filature/surveillance/constat) + questions de collecte + tarifs + signature Daniel. `backfill_reclassify.py --only-id` ne filtre plus par catégorie (permet de remonter #614 phishing → demande_client). **14 tests, 137/137 suite verte**. #614 en attente de backfill (validation brouillon avec CDAL). |
 | 2 | **76 mails `demande_client` manqués** par classifier v1.21.5 (trop conservateur sur les cas ambigus) | ✅ **Corrigé v1.22.1** | `app/pipeline/classifier.py` + `scripts/backfill_demande_client.py` | Prompt classifier durci. Backfill script one-shot re-classifie + génère brouillons pour les 76 mails historiques ratés. |
 | 3 | **153 brouillons en DB mais 0 dans Drafts IMAP** — poller ne re-livre pas les brouillons existants (`is_new` condition) | ✅ **Corrigé v1.22.2** | `scripts/deliver_pending_drafts.py` + colonne `delivered_at` | Script one-shot livre les brouillons existants en IMAP Drafts. Bilan : 153/154 livrés. 14 échecs dus à CRLF dans sujets (Google Calendar invitations) → corrigé via `_sanitize_subject()`. |
 | 4 | **127 vieux brouillons accumulés dans Drafts IMAP** (avant 2026-06-02) | ✅ **Corrigé v1.22.3** | `scripts/cleanup_old_drafts.py` | Script one-shot avec dry-run par défaut, SELECT probe (v1.21.9 fix), SEARCH SUBJECT, store +FLAGS \Deleted + EXPUNGE. Deux passes : 80 supprimés (cutoff 2026-01-02) + 47 supprimés (cutoff 2026-06-02). |
@@ -422,7 +424,7 @@ Le poller IMAP ne traite que les mails reçus depuis cette date. Les archives hi
 | 11 | **Poller IMAP crash en boucle** sur boîte `detective_belgique` (3 bugs cumulés) | ✅ **Corrigé v1.21.3** | `app/workers/imap_poller.py` + `app/alerts.py` | Bug 1 : `_decode_header` crash sur charset `unknown-8bit`. Bug 2 : `_persist` crash sur `Header` objects. Bug 3 : retry éternel. Fix : try/except englobant + nouveau flag `AgentAttempted`. 19 tests de résilience. Alerte Resend si ≥5 crashes/boîte (anti-spam 1h/boîte). |
 | 12 | **Filtre date hardcodé incohérent** — code dit `2026-06-01`, .env disait `2026-05-01` (régression silencieuse) | ✅ **Corrigé v1.21.4** | `app/workers/imap_poller.py` + `.env.example` + `.env.production` | Tous alignés à `2026-06-01`. |
 
-### 🔴 Points de vigilance ouverts (état au 2026-06-16)
+### 🔴 Points de vigilance ouverts (état au 2026-06-22)
 
 #### Point de vigilance #1 — RAG cassé depuis 2026-05-28 (CRITIQUE)
 **Pire que prévu** : le RAG est cassé sur les **3 boîtes** (pas seulement `boite2`).
@@ -490,6 +492,9 @@ Les fiches `04_entities/personnes/*.md` créées manuellement ne sont pas dans l
 - L'instance `CDAL2` (`/Users/cdal/DEV_APP_CLAUDE/CDAL2/`)
 
 Le serveur Cerveau2 n'est pas affecté par ces fixes. Si tu réutilises Charlie comme base pour un nouveau client (via `SECONDCERVEAU-PRO`), les patches sont **réutilisables** — voir `docs/PATTERNS_FROM_CHARLIE_V1.21.3.md` pour le détail d'implémentation.
+
+#### Point de vigilance #10 — case_classifier + translator tournent encore sur `gemma4:31b` (OBSOLÈTE)
+Découvert 2026-06-22 (v1.24.1) dans les logs du backfill #515 : `case_classifier` et `translator` loggent `model=openai/gemma4:31b`, alors que `gemma4:31b` est **obsolète** depuis v1.21.1 (CLAUDE.md §3, bug #8 résolu). Le modèle principal (génération brouillon) est bien sur `kimi-k2.6:cloud`, mais le sous-modèle de classification de cas et le traducteur utilisent encore l'ancien modèle — probablement via `LLM_MODEL_QUALIFIER` (défaut `gemma4:31b` dans `app/config.py`, cf. bug #15). **À corriger** : basculer `LLM_MODEL_QUALIFIER` (et le modèle translator) sur `kimi-k2.6:cloud`, puis purger la table `app_settings` (cf. point #5). Hors-scope v1.24.1 — à traiter prochaine version.
 
 ---
 

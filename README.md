@@ -132,7 +132,7 @@ docker compose up -d --build      # si requirements.txt ou Dockerfile modifiés
 
 ---
 
-## Stack technique (état v1.23.0)
+## Stack technique (état v1.24.1)
 
 | Couche | Choix |
 |---|---|
@@ -155,7 +155,7 @@ docker compose up -d --build      # si requirements.txt ou Dockerfile modifiés
 | Service prod | **Docker + Docker Compose + Traefik** (VPS Hostinger KVM8) |
 | Logs | `structlog` (JSON structuré, rotation 7j) |
 | Config | `pydantic-settings` depuis `.env` |
-| Version | Source unique `app/_version.py` (`VERSION = "1.23.0"`) — `pyproject.toml` figé en 1.9.5 (volontaire) |
+| Version | Source unique `app/_version.py` (`VERSION = "1.24.1"`) — `pyproject.toml` figé en 1.9.5 (volontaire) |
 
 **Ne PAS introduire** sans discussion : Kubernetes, Swarm, Celery, Redis, Postgres, ORM lourd, framework JS front (React/Vue/Angular). Le périmètre Docker actuel (1 service Compose + Traefik externe) est figé.
 
@@ -254,7 +254,7 @@ DETECTIVE_BE/
 
 ## Statut
 
-✅ **Production active** — `detective.digitalhs.biz` — **v1.23.0**
+✅ **Production active** — `detective.digitalhs.biz` — **v1.24.1**
 
 - **Pipeline IMAP** : polling 3 boîtes toutes les 5 min, classification 8 catégories, priorité intelligente, flag `AgentProcessed` (succès) + `AgentAttempted` (libère la queue même en cas de crash, v1.21.3).
 - **Génération brouillon** : kimi-k2.6:cloud (reasoning model), style Daniel imité via few-shot learning (v1.22.0) + personnalité Cerveau2 + RAG sqlite-vec.
@@ -279,11 +279,11 @@ Voir `docs/ROADMAP.md` pour la roadmap V2b/V2c (polishing cockpit, feedback loop
 
 ## Versions
 
-Version source de vérité : **`app/_version.py`** (`VERSION = "1.23.0"`).
+Version source de vérité : **`app/_version.py`** (`VERSION = "1.24.1"`).
 
 Le badge affiché dans le cockpit est lu dynamiquement depuis `app/_version.py`. **Tolérance zéro** sur la désynchronisation.
 
-Voir [`CHANGELOG.md`](CHANGELOG.md) pour l'historique détaillé (1.18.x → 1.23.x).
+Voir [`CHANGELOG.md`](CHANGELOG.md) pour l'historique détaillé (1.18.x → 1.24.x).
 
 ---
 
