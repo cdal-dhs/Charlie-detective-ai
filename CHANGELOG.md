@@ -1,5 +1,24 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.22.20] — 2026-06-18 (rendu brouillons multilingues + message original complet)
+
+### Contexte
+CDAL remonte deux problèmes de rendu des brouillons signalés par Daniel :
+- Les emails arrivant dans une langue autre que le FR (NL/EN/DE/...) ne suivaient plus la structure du mail #503 (original → traduction FR → proposition FR → proposition traduite dans la langue source).
+- Le message original complet du client n'était plus systématiquement positionné sous la proposition, ce qui gênait la relecture de Daniel.
+
+### Changé
+- **`app/pipeline/draft_renderer.py`** :
+  - Pour les emails en FR : la proposition FR est désormais suivie du message original du client en dessous.
+  - Pour les emails en langue étrangère : restauration de la structure 4 blocs (#503) avec le message original complet ajouté en pied.
+- **`app/delivery/imap_draft.py`** :
+  - Suppression du bloc redondant "=== MESSAGE ORIGINAL DU CLIENT ===" dans `_build_draft_body()` : l'original est désormais géré exclusivement par `draft_renderer.py`.
+- **`tests/test_draft_renderer.py`**, **`tests/test_imap_draft.py`** :
+  - Nouveaux tests couvrant le rendu FR, le rendu NL 4 blocs + original, et l'absence de duplication par la couche IMAP.
+
+### Tests
+- **105/105 tests verts** avec `venv/bin/python -m pytest -q`.
+
 ## [1.22.19] — 2026-06-18 (follow-up : prénom dans thread cité + cockpit retry)
 
 ### Contexte

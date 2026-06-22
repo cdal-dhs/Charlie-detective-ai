@@ -22,19 +22,39 @@ def render_draft_with_translations(
 ) -> str:
     """Compose le brouillon final.
 
-    - Si source_lang == 'fr' ou aucune traduction disponible : draft_fr seul.
-    - Sinon : structure à 4 blocs séparés par des séparateurs visuels.
+    - Si source_lang == 'fr' : proposition FR suivie du message original.
+    - Sinon : structure 4 blocs (origine + trad FR + proposition FR + trad
+      proposition) puis le message original complet en dessous pour Daniel.
     """
+
+    def _original_block() -> str:
+        lines = [
+            "",
+            "────────────────────────────────────────",
+            "=== MESSAGE ORIGINAL DU CLIENT ===",
+        ]
+        if incoming_subject:
+            lines.append(f"Sujet : {incoming_subject}")
+        lines.append(incoming_body.strip())
+        return "\n".join(lines)
+
     if source_lang == "fr":
-        return draft_fr
+        return (
+            f"================================================\n"
+            f"✉️ PROPOSITION DE RÉPONSE (en Français)\n"
+            f"================================================\n"
+            f"{draft_fr.strip()}"
+            f"{_original_block()}"
+        )
 
     if not translation_to_fr and not translation_from_fr:
         # Traductions ont toutes échoué (garde-fou) : on rend juste le draft FR
-        # + une note en tête pour que Daniel sache que la langue source n'est pas FR.
+        # + le message original en dessous + une note sur la langue source.
         label = language_label(source_lang)
         return (
             f"=== ⚠️ Mail entrant en {label} (traductions indisponibles) ===\n\n"
             f"{draft_fr}"
+            f"{_original_block()}"
         )
 
     label = language_label(source_lang)
@@ -75,5 +95,8 @@ def render_draft_with_translations(
             f"================================================\n"
             f"{translation_from_fr.strip()}"
         )
+
+    # Message original en dessous de tout (même langue étrangère)
+    blocks.append(_original_block())
 
     return "\n".join(blocks)

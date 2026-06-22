@@ -156,21 +156,17 @@ def _build_draft_body(
     mail_id: int | None,
     base_url: str,
 ) -> str:
-    """Assemble le corps text/plain du brouillon avec bandeau contextuel."""
+    """Assemble le corps text/plain du brouillon avec bandeau contextuel.
+
+    Le message original du client est déjà inclus dans gen.draft (via
+    draft_renderer.py), on ne le duplique pas ici.
+    """
     lines = ["⚠️  BROUILLON IA — À RELIRE AVANT ENVOI"]
     if mail_id and base_url:
         lines.append(f"Dossier cockpit : {base_url.rstrip('/')}/app/conversation/{mail_id}")
     lines.append("────────────────────────────────────────")
     lines.append("")
     lines.append(gen.draft)
-    lines.append("")
-    lines.append("────────────────────────────────────────")
-    lines.append("=== MESSAGE ORIGINAL DU CLIENT ===")
-    lines.append(f"Date : {incoming.received_at or '-'}")
-    lines.append(f"De : {incoming.sender}")
-    lines.append(f"Sujet : {incoming.subject}")
-    lines.append("")
-    lines.append(incoming.body)
     return "\n".join(lines)
 
 
