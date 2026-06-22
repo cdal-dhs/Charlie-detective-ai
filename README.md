@@ -279,11 +279,11 @@ Voir `docs/ROADMAP.md` pour la roadmap V2b/V2c (polishing cockpit, feedback loop
 
 ## Versions
 
-Version source de vérité : **`app/_version.py`** (`VERSION = "1.23.0"}).
+Version source de vérité : **`app/_version.py`** (`VERSION = "1.23.0"`).
 
 Le badge affiché dans le cockpit est lu dynamiquement depuis `app/_version.py`. **Tolérance zéro** sur la désynchronisation.
 
-Voir [`CHANGELOG.md`](CHANGELOG.md) pour l'historique détaillé (1.18.x → 1.22.4).
+Voir [`CHANGELOG.md`](CHANGELOG.md) pour l'historique détaillé (1.18.x → 1.23.x).
 
 ---
 
