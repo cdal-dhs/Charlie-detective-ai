@@ -1,5 +1,36 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.24.0] — 2026-06-22 (hardening détection — zéro client raté sur 3 patterns pièges)
+
+### Contexte
+Suite au meeting Daniel du 2026-06-22, trois clients réels ont été ratés par le classifier (0 brouillon généré, Daniel n'a pas eu de proposition). Tous partagent le même défaut : le classifier se fiait au **sujet** alors que le **body** contenait une vraie demande client. v1.24.0 inverse la priorité — le body l'emporte sur le sujet — via 3 règles déterministes.
+
+| Mail | Client | Sujet trompeur | Classé | Vraie demande |
+|---|---|---|---|---|
+| #515 | Nathalie Hairemans | `[Privédetective België] Réinitialisation du mot de passe` (template WP mal configuré) | `facture` | Jalousie / sa nicht (formulaire WordPress) |
+| #606 | Frédéric Van Houtte | `Re: Mission ouvrier en maladie` | `facture` | Follow-up avec coordonnées (TVA, GSM, employé) |
+| #614 | Serge M | `іtѕⅿе-Bеvеіlіgіngѕmеldіng` (homoglyphes itsme) | `phishing` | Infidélité / filature Congo-WhatsApp |
+
+### Ajouté — `app/pipeline/classifier.py`
+3 fonctions de détection déterministe + 1 exception sécurisée au « jamais remonter depuis phishing » :
+
+1. **`_is_wp_contact_form(body)`** — détecte les formulaires de contact WordPress (detectivebelgium.com NL : `Achternaam/Voornaam/Telefoonnummer` ; detectivebelgique.be FR : `Nom/Prénom/Téléphone`). Ces mails arrivent via un expéditeur technique (`mail@`/`wordpress@`/`contact@detective*`) avec un sujet parfois trompeur, mais le body structuré en champs est la signature fiable. Force `demande_client` depuis **toute catégorie** (y compris phishing/spam/newsletter) — un formulaire WP ne peut pas être un phishing.
+
+2. **`_is_reply_to_daniel(body, sender)`** — détecte les réponses client à un mail de Daniel : `Re:` + body cite un mail de Daniel (préfixe `>` + signature `Daniel Hurchon` / `Chaussée Bara 213` / `Autorisation ministérielle` / `GSM 0471/31.81.20`) + expéditeur humain (pas un forwarder `mail@/wordpress@/contact@detective*` ni no-reply). Force `demande_client` depuis toute catégorie. Corrige le piège « Re: + citation d'un devis avec mots devis/facture/HTVA ».
+
+3. **`_has_strong_human_demand(body)`** — exception sécurisée au « jamais remonter depuis phishing » : si le body a une demande humaine **forte** (prénom signé en fin de body + vocabulaire métier enquête + question de tarif) **sans** marqueur de phishing actif (`cliquez ici`, `votre compte a été suspendu`, `vérifiez votre identité`…), on autorise la remontée depuis phishing/spam/newsletter. Permet de rattraper #614 (sujet itsme leurre mais body demande directe de Serge M). Les URL (`https://`) sont volontairement **exclues** des marqueurs phishing : un client peut légitimement mentionner un profil Facebook.
+
+4. **`_enforce_recall_over_precision` réécrite** — ordre de priorité clair (formulaire WP → réponse à Daniel → demande forte → heuristique humaine classique), chaque override loggué avec sa `rule` pour traçabilité.
+
+### Tests — `tests/test_classifier_hardening.py`
+- 17 nouveaux tests backportant les 3 cas réels (#515 NL, #606 citation Daniel, #614 demande forte) + anti-régression (vrai phishing itsme reste phishing, formulaire sans prénom/tarif ne remonte pas, expéditeur service ne déclenche pas reply_to_daniel, formulaire FR #615).
+- **36/36 tests verts** sur le module hardening.
+- **123/123 tests verts** sur la suite complète (aucune régression).
+
+### Note opérationnelle
+- Les 3 clients ratés (#515, #606, #614) doivent être **reclassés manuellement** après déploiement et leurs brouillons régénérés via le cockpit (`POST /api/drafts/{id}/retry`). Voir task #6.
+- Découvertes latérales : (a) les formulaires WP ne demandent **jamais l'email** du client — le vrai contact = téléphone (`Telefoonnummer`) ; le brouillon devra dire « je vous appelle au 04xx » plutôt que répondre par email au forwarder. (b) `detective_belgium` n'a reçu aucun mail traité depuis le 11 juin (11 jours de silence) — le poller fonctionne (cycles OK), c'est un flux business bas, donc chaque mail compte double. (c) Bug RAG (point de vigilance #1 HANDOVER) toujours ouvert sur les 3 boîtes.
+
 ## [1.23.0] — 2026-06-18 (version stable — brouillons multilingues + messages originaux)
 
 ### Contexte

@@ -19,6 +19,9 @@ import pytest
 
 from app.pipeline.classifier import (
     _enforce_recall_over_precision,
+    _has_strong_human_demand,
+    _is_reply_to_daniel,
+    _is_wp_contact_form,
     _looks_like_human_question,
     classify,
 )
@@ -208,3 +211,198 @@ async def test_classify_already_demande_kept():
     with patch("app.pipeline.classifier.complete", new=AsyncMock(return_value="demande_client")):
         result = await classify(subject, body, sender)
     assert result == "demande_client"
+
+
+# ── v1.24.0 — formulaires WordPress, réponses à Daniel, demande forte ──────
+# Backport des 3 clients ratés remontés par Daniel le 2026-06-22.
+
+
+# Mail #515 — Nathalie Hairemans (jalousie / sa nicht), formulaire NL WordPress
+# avec sujet trompeur « Réinitialisation du mot de passe » (template WP mal configuré).
+_BODY_515 = """Achternaam: Hairemans
+Voornaam: Nathalie
+Telefoonnummer: 0468287587
+Tijdsstippen: 15u
+Uw profiel ?: Particulier
+Hoe kunnen wij u helpen ? Vertel ons meer: Beste, dit is eigenlijk een speciaal verhaal. Ik ben al 16j samen met mijn man. Ik heb een nicht dat al heel mijn leven in mijn schaduw loopt. Zij probeert al heel ons leven een competitie tussen ons te voeren. Er is veel jaloezie langs haar kant.
+Wettelijke kennisgeving & privacybeleid: Dit formulier stelt ons in staat de gegevens te verzamelen."""
+
+
+def test_is_wp_contact_form_515_nl():
+    """Le formulaire NL de #515 doit être détecté."""
+    assert _is_wp_contact_form(_BODY_515) is True
+
+
+def test_recall_override_515_wp_form_from_facture():
+    """#515 : LLM dit 'facture' (leurre sujet reset password) → formulaire WP force demande_client."""
+    subject = "[Privédetective België] Réinitialisation du mot de passe"
+    sender = "wordpress@detectivebelgium.com"
+    result = _enforce_recall_over_precision("facture", subject, _BODY_515, sender)
+    assert result == "demande_client"
+
+
+def test_recall_override_515_wp_form_from_phishing():
+    """Un formulaire WP ne peut jamais être un phishing — on remonte même depuis phishing."""
+    subject = "[Privédetective België] Réinitialisation du mot de passe"
+    sender = "wordpress@detectivebelgium.com"
+    result = _enforce_recall_over_precision("phishing", subject, _BODY_515, sender)
+    assert result == "demande_client"
+
+
+def test_is_wp_contact_form_615_fr():
+    """Formulaire FR detectivebelgique.be (#615) — message en haut + champs Nom/Prénom."""
+    body = """bonjour j'habite actuellement en espagne mais dans une semaine je reviens en belgique  j'aurai besoin d'un détective pour faire une petite enquete au bureau de douane de Kaiserslautern est ce que vous accepteriez de le faire ? merci
+Nom: scurbecq
+Prénom: andree marie
+Téléphone: 0484636111
+Heure de contact: neant
+Votre profil ?: Particulier
+Mentions légales & Politique de Confidentialité: Ce formulaire nous permet de collecter."""
+    assert _is_wp_contact_form(body) is True
+
+
+def test_is_wp_contact_form_negative_pure_text():
+    """Un mail texte libre sans champs formulaire ne doit PAS matcher."""
+    body = "Bonjour, j'aimerais un devis pour une filature. Merci."
+    assert _is_wp_contact_form(body) is False
+
+
+# Mail #606 — Frédéric Van Houtte (follow-up avec coordonnées), Re: + citation du
+# devis de Daniel. Le LLM voit « devis », « facturer », « HTVA » dans la citation et
+# classe 'facture'. Mais c'est une vraie demande client (le client fournit TVA, GSM).
+_BODY_606 = """Bonjour Monsieur
+
+Je vous ai répondu en vert sur votre mail
+
+Bien à vous
+
+Frédéric Van Houtte
+
+GSM : +32(0)483 047 356
+Email : etsvanhoutte@gmail.com
+
+
+> Le 16 juin 2026 à 15:23, Detective Belgique <contact@detectivebelgique.be> a écrit :
+>
+> MISSION : OUVRIER EN INCAPACITÉ DE TRAVAIL AVEC SUSPICION DE TRAVAILLER AILLEURS
+> Notre devis : Ouverture de dossier : 200€ HTVA. Provision : 1263.24€ TVAC
+>
+> DétectiveBelgique.be SRL
+> Daniel Hurchon Détective Privé
+> Siège Social : Chaussée Bara 213, 1410 Waterloo
+> Autorisation ministérielle – 14.0625.12
+> GSM – 0471/31.81.20
+> E-mail – contact@detectivebelgique.be
+"""
+
+
+def test_is_reply_to_daniel_606():
+    """#606 : Re: + citation signée Daniel + expéditeur humain gmail."""
+    assert _is_reply_to_daniel(_BODY_606, "etsvanhoutte@gmail.com") is True
+
+
+def test_is_reply_to_daniel_negative_service_sender():
+    """Un forwarder wordpress@/mail@detective* n'est pas une réponse humaine."""
+    assert _is_reply_to_daniel(_BODY_606, "mail@detectivebelgium.com") is False
+
+
+def test_is_reply_to_daniel_negative_no_daniel_signature():
+    """Une citation sans signature Daniel ne déclenche pas la règle."""
+    body = "> Le devis est prêt. Cordialement."
+    assert _is_reply_to_daniel(body, "client@gmail.com") is False
+
+
+def test_recall_override_606_reply_to_daniel_from_facture():
+    """#606 : LLM dit 'facture' → Re:+citation Daniel force demande_client."""
+    subject = "Re: Mission ouvrier en maladie"
+    sender = "etsvanhoutte@gmail.com"
+    result = _enforce_recall_over_precision("facture", subject, _BODY_606, sender)
+    assert result == "demande_client"
+
+
+# Mail #614 — Serge M (infidélité / filature Congo-WhatsApp). Sujet = homoglyphes
+# itsme (« іtѕⅿе-Bеvеіlіgіngѕmеldіng »). Le LLM classe 'phishing' à cause du sujet.
+# Mais le body est une vraie demande humaine directe (prénom signé + vocabulaire
+# enquête + question de tarif, sans marqueur phishing actif).
+_BODY_614 = (
+    "Bonjour,\n\r\n"
+    "J 'aimerais prouver l 'infidélité de ma femme qui selon moi dure depuis au moinq 6-8 ans\n\r\n"
+    "Elle est en ce moment au congo et je suis certain que son téléphone contient tout les secrets\n\r\n"
+    "Est ce que vous pouvez faire sortir toutes les conversations d'au moins 2 ans dans le passé ?\n\r\n"
+    "Les enfants ont surpris un message whatsapp ou elle appelait un autre homme \"mon chéri\".\n\r\n"
+    "Pouvez vous me dire combien cela va t il coûter et quelles méthodes possédez vous pour "
+    "l' attraper la main dans le sac car elle nie absolument tout.\n\r\n"
+    "merci\r\n\r\nSerge M"
+)
+
+
+def test_has_strong_human_demand_614():
+    """#614 : demande humaine forte — prénom signé + infidélité + combien coûte."""
+    match, reason = _has_strong_human_demand(_BODY_614)
+    assert match is True, f"attendu True, raison refus: {reason}"
+
+
+def test_has_strong_human_demand_negative_real_phishing():
+    """Un vrai phishing itsme avec CTA d'urgence ne doit PAS matcher."""
+    body = (
+        "itsme-Beveiligingsmelding: uw dienst stopgezet. "
+        "votre compte a été suspendu. Cliquez ici pour vérifier votre identité."
+    )
+    match, _ = _has_strong_human_demand(body)
+    assert match is False
+
+
+def test_has_strong_human_demand_negative_no_signed_name():
+    """Demande sans prénom signé → pas assez fort pour remonter depuis phishing."""
+    body = "Bonjour, je veux prouver l'infidélité. Combien ça coûte ?"
+    match, _ = _has_strong_human_demand(body)
+    assert match is False
+
+
+def test_has_strong_human_demand_negative_no_price():
+    """Vocabulaire enquête + prénom mais pas de question tarif → pas assez fort."""
+    body = "Bonjour, je soupçonne mon mari. Cordialement, Marie."
+    match, _ = _has_strong_human_demand(body)
+    assert match is False
+
+
+def test_recall_override_614_strong_demand_from_phishing():
+    """#614 : LLM dit 'phishing' → demande humaine forte force demande_client."""
+    subject = "іtѕⅿе-Bеvеіlіgіngѕmеldіng: սw dіеnѕt ѕtорgеzеt"
+    sender = "yashwantsharma@colorsofindiatours.com"
+    result = _enforce_recall_over_precision("phishing", subject, _BODY_614, sender)
+    assert result == "demande_client"
+
+
+@pytest.mark.asyncio
+async def test_classify_515_via_llm():
+    """End-to-end #515 : LLM dit 'facture' → formulaire WP force demande_client."""
+    subject = "[Privédetective België] Réinitialisation du mot de passe"
+    sender = "wordpress@detectivebelgium.com"
+    with patch("app.pipeline.classifier.complete", new=AsyncMock(return_value="facture")):
+        result = await classify(subject, _BODY_515, sender)
+    assert result == "demande_client"
+
+
+@pytest.mark.asyncio
+async def test_classify_614_via_llm():
+    """End-to-end #614 : LLM dit 'phishing' → demande forte force demande_client."""
+    subject = "іtѕⅿе-Bеvеіlіgіngѕmеldіng: սw dіеnѕt ѕtорgеzеt"
+    sender = "yashwantsharma@colorsofindiatours.com"
+    with patch("app.pipeline.classifier.complete", new=AsyncMock(return_value="phishing")):
+        result = await classify(subject, _BODY_614, sender)
+    assert result == "demande_client"
+
+
+@pytest.mark.asyncio
+async def test_classify_real_phishing_kept():
+    """Anti-régression : un vrai phishing itsme reste phishing."""
+    subject = "іtѕⅿе-Bеvеіlіgіngѕmеldіng: uw dienst stopgezet"
+    sender = "noreply@itsme.be"
+    body = (
+        "itsme-Beveiligingsmelding: uw dienst stopgezet. "
+        "votre compte a été suspendu. Cliquez ici pour vérifier votre identité."
+    )
+    with patch("app.pipeline.classifier.complete", new=AsyncMock(return_value="phishing")):
+        result = await classify(subject, body, sender)
+    assert result == "phishing"

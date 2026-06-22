@@ -85,6 +85,144 @@ _HUMAN_HINTS_IN_BODY = (
     "m. hurchon",
 )
 
+# v1.24.0 — détection des formulaires de contact WordPress (toutes boîtes).
+# Les sites detectivebelgium.com (NL) et detectivebelgique.be (FR) transfèrent
+# les demandes du formulaire web vers la boîte mail avec un expéditeur technique
+# (mail@/wordpress@/contact@detective*) et un sujet parfois trompeur (template WP
+# « Réinitialisation du mot de passe »). Le body structuré en champs est la seule
+# signature fiable. Voir mails #515 (Nathalie Hairemans), #555, #503, #615.
+_WP_FORM_NL_FIELDS = ("achternaam:", "voornaam:", "telefoonnummer:")
+_WP_FORM_FR_FIELDS = ("nom:", "prénom:", "téléphone:", "prenom:", "telephone:")
+_WP_FORM_FR_MARKER = "votre profil"
+_WP_FORM_NL_MARKER = "hoe kunnen wij u helpen"
+
+# v1.24.0 — marqueurs d'un phishing ACTIF dans le body. Si présents, on ne remonte
+# JAMAIS depuis phishing même si le body ressemble à une demande. Permet de
+# distinguer #614 (demande réelle) d'un vrai phishing. On ne met PAS les URL
+# (https://) ici : un client peut légitimement mentionner un profil Facebook, un
+# site, etc. On cible uniquement les CTAs d'urgence de phishing.
+_ACTIVE_PHISHING_MARKERS = (
+    "cliquez ici", "cliquez sur le lien", "click here", "click the link",
+    "cliquez pour vérifier", "vérifiez votre identité", "verify your identity",
+    "confirmez votre compte", "votre compte a été suspendu",
+    "your account has been suspended", "votre compte sera désactivé",
+    "reactiver votre compte", "réactiver votre compte",
+    "action requise sur votre compte", "votre compte sera bloqué",
+    "connexion à votre espace", "identifiants sont erronés",
+)
+
+# v1.24.0 — vocabulaire métier enquête (FR + NL + EN). Présence combinée à une
+# signature prénom + question de tarif = demande humaine forte (exception phishing).
+_ENQUIRY_VOCAB = (
+    "infidélité", "infidélite", "infidele", "infidèle", "adultère", "tromper",
+    "trompe", "filature", "surveillance", "enquête", "enquete", "investigation",
+    "détective", "detective", "soupçonn", "suspect", "prouver", "preuve",
+    "attraper la main dans le sac", "attraper", "mandant", "mission",
+    "incapacité", "incapacite", "arrêt maladie", "arret maladie", "maladie",
+    "ontrouw", "overspel", "afluisteren", "bewaking", "onderzoek",
+    "privédetective", "privedetective", "detective",
+    "cheating", "affair", "surveillance", "investigation", "private detective",
+)
+
+# v1.24.0 — question de tarif (FR + NL + EN). Indique un prospect réel.
+_PRICE_QUESTION = (
+    "combien", "tarif", "coûte", "coute", "prix", "devis", "estimation",
+    "offerte", "prijs", "kosten", "tarief", "hoeveel",
+    "how much", "cost", "price", "quote", "fee",
+)
+
+# Signature prénom en fin de body : "merci\nSerge M" / "Bien à vous,\nFrédéric Van Houtte"
+# / "Groeten,\nToon Breyne". On cherche une ligne finale avec 1-3 mots dont le 1er
+# commence par une majuscule (prénom). Pas trop strict pour tolérer les fautes.
+_SIGNED_NAME_RE = re.compile(
+    r"(?:merci|groet(?:en)?|mvg|met vriendelijke groet|bien à vous|bien a vous|cordialement|regards|best regards)\s*[,.\s]*\n*\s*([A-ZÀ-Ý][\wà-ÿ\-]+(?:\s+[A-ZÀ-Ý\w][\wà-ÿ\-]*){0,3})\s*$",
+    re.IGNORECASE,
+)
+# Fallback : juste un prénom + nom en toute fin de body (sans formule de politesse).
+_TRAILING_NAME_RE = re.compile(
+    r"\n\s*([A-ZÀ-Ý][\wà-ÿ\-]+(?:\s+[A-ZÀ-Ý\w][\wà-ÿ\-]*){0,3})\s*$"
+)
+
+
+def _is_wp_contact_form(body: str) -> bool:
+    """Détecte un formulaire de contact WordPress (detectivebelgium.com NL ou
+    detectivebelgique.be FR). Ces mails arrivent via un expéditeur technique
+    (mail@/wordpress@/contact@detective*) avec un sujet parfois trompeur, mais
+    le body structuré en champs est la signature fiable d'une vraie demande client.
+    """
+    b = body.lower()
+    nl_hits = sum(1 for f in _WP_FORM_NL_FIELDS if f in b)
+    if nl_hits >= 2 and _WP_FORM_NL_MARKER in b:
+        return True
+    fr_hits = sum(1 for f in _WP_FORM_FR_FIELDS if f in b)
+    if fr_hits >= 2 and _WP_FORM_FR_MARKER in b:
+        return True
+    # Cas robuste : 3 champs NL sans le marker (formulaire variant)
+    if nl_hits >= 3:
+        return True
+    return False
+
+
+def _has_strong_human_demand(body: str) -> tuple[bool, str]:
+    """Détecte une demande humaine forte dans le body : prénom signé + vocabulaire
+    métier enquête + question de tarif, SANS marqueur de phishing actif.
+
+    Utilisé pour autoriser la remontée depuis phishing/spam (sinon interdit).
+    Retourne (match, raison).
+    """
+    b = body.lower()
+    if any(m in b for m in _ACTIVE_PHISHING_MARKERS):
+        return False, "active_phishing_marker"
+    has_vocab = any(v in b for v in _ENQUIRY_VOCAB)
+    has_price = any(p in b for p in _PRICE_QUESTION)
+    if not (has_vocab and has_price):
+        return False, "no_enquiry_or_price"
+    # Signature prénom : formule de politesse + nom, OU nom en fin de body.
+    signed = bool(_SIGNED_NAME_RE.search(body.strip()))
+    if not signed:
+        # Fallback : prénom en fin de body (ex "merci\nSerge M")
+        tail = body.strip()[-120:]
+        signed = bool(_TRAILING_NAME_RE.search(tail))
+    if not signed:
+        return False, "no_signed_name"
+    return True, "strong_human_demand"
+
+
+# v1.24.0 — détection d'une réponse client à un mail de Daniel (Re: + citation).
+# Le body cite un mail de Daniel (préfixe > avec signature DetectiveBelgique/
+# DetectiveBelgium/DPDH). L'expéditeur est humain. On force demande_client même
+# si le LLM voit des mots "devis/facture" dans la citation. Voir mail #606 (Van Houtte).
+_DANIEL_SIGNATURE_PATTERNS = (
+    "daniel hurchon",
+    "detectivebelgique.be srl",
+    "detectivebelgium.com",
+    "détectivebelgique.be srl",
+    "detectivebelgique.be srl",
+    "autorisation ministérielle",
+    "autorisation ministeriele",
+    "gsm – 0471/31.81.20",
+    "gsm - 0471/31.81.20",
+    "chaussée bara 213",
+    "chaussÃ©e bara 213",
+)
+
+
+def _is_reply_to_daniel(body: str, sender: str) -> bool:
+    """Re: + body cite un mail de Daniel (préfixe > + signature cabinet) +
+    expéditeur humain (pas un service/no-reply)."""
+    sender_l = sender.lower()
+    service_hints = (
+        "noreply", "no-reply", "ne-pas-repondre", "mailer-daemon",
+        "infomaniak", "wordpress@", "mail@detective", "contact@detective",
+    )
+    # mail@/contact@detective* = forwarder formulaire (pas une réponse humaine à Daniel)
+    if any(h in sender_l for h in service_hints):
+        return False
+    if ">" not in body:
+        return False
+    b = body.lower()
+    return any(sig in b for sig in _DANIEL_SIGNATURE_PATTERNS)
+
 
 def _looks_like_human_question(body: str, subject: str, sender: str) -> bool:
     """Renvoie True si on a des indices forts qu'un humain pose une question
@@ -170,19 +308,62 @@ def _looks_like_human_question(body: str, subject: str, sender: str) -> bool:
 def _enforce_recall_over_precision(
     llm_category: str, subject: str, body: str, sender: str
 ) -> Category:
-    """v1.22.1 — post-traitement non-négociable.
+    """v1.22.1 — post-traitement non-négociable. v1.24.0 — élargi aux formulaires WP,
+    aux réponses à Daniel et aux demandes humaines fortes (exception phishing).
 
     Règle absolue CDAL : on ne rate AUCUN demande_client. Faux positifs acceptables
     (max 1-2%), faux négatifs intolérables (Daniel perd des clients).
 
-    Si le LLM hésite vers autre/facture/rappel/urgent MAIS qu'on a des indices
-    humains forts → on force demande_client.
+    Ordre de priorité (du plus sûr au plus risqué) :
+    1. Formulaire de contact WordPress (body structuré) → force depuis TOUTE catégorie.
+       Un formulaire WP est toujours une vraie demande client, jamais un phishing.
+    2. Réponse client à un mail de Daniel (Re: + citation signée) → force depuis TOUTE
+       catégorie (expéditeur humain déjà vérifié).
+    3. Demande humaine forte (prénom signé + vocabulaire enquête + question tarif, sans
+       marqueur phishing actif) → autorise la remontée depuis phishing/spam/newsletter.
+    4. Heuristique humaine classique → remontée depuis autre/facture/rappel/urgent.
     """
     if llm_category == "demande_client":
         return "demande_client"
 
-    # Catégories où on tolère la remontée vers demande_client
-    # (on ne remonte PAS depuis phishing/spam/newsletter — trop dangereux)
+    # 1. Formulaire WordPress — signature body, sans ambiguïté.
+    if _is_wp_contact_form(body):
+        log.info(
+            "classifier.recall_override",
+            rule="wp_contact_form",
+            llm_said=llm_category,
+            forced_to="demande_client",
+            subject=subject[:60],
+            sender=sender[:40],
+        )
+        return "demande_client"
+
+    # 2. Réponse client à un mail de Daniel (Re: + citation signée).
+    if _is_reply_to_daniel(body, sender):
+        log.info(
+            "classifier.recall_override",
+            rule="reply_to_daniel",
+            llm_said=llm_category,
+            forced_to="demande_client",
+            subject=subject[:60],
+            sender=sender[:40],
+        )
+        return "demande_client"
+
+    # 3. Demande humaine forte — autorise la remontée depuis phishing/spam/newsletter.
+    strong, _reason = _has_strong_human_demand(body)
+    if strong:
+        log.info(
+            "classifier.recall_override",
+            rule="strong_human_demand",
+            llm_said=llm_category,
+            forced_to="demande_client",
+            subject=subject[:60],
+            sender=sender[:40],
+        )
+        return "demande_client"
+
+    # 4. Comportement v1.22.1 : remontée classique depuis autre/facture/rappel/urgent.
     upgradable = {"autre", "facture", "rappel", "urgent"}
     if llm_category not in upgradable:
         return llm_category  # type: ignore[return-value]
@@ -190,6 +371,7 @@ def _enforce_recall_over_precision(
     if _looks_like_human_question(body, subject, sender):
         log.info(
             "classifier.recall_override",
+            rule="human_question",
             llm_said=llm_category,
             forced_to="demande_client",
             subject=subject[:60],
