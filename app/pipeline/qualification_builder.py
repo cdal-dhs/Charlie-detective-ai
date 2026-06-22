@@ -19,7 +19,11 @@ from __future__ import annotations
 
 import re
 
+import structlog
+
 from app.config import MailboxConfig, get_settings
+
+log = structlog.get_logger()
 
 # Labels d'info client fréquents dans les formulaires web.
 # _INFO_STOP : arrêt au prochain champ client ou début d'adresse (rue/avenue...).
@@ -1088,6 +1092,205 @@ def build_followup_ack_draft(
     return "\n".join(lines)
 
 
+# --- v1.24.1 — Détection des demandes hors-légalité (piratage / accès non autorisé) ----
+# Quand un client demande à pirater un téléphone/WhatsApp/compte, extraire des
+# conversations privées, installer un logiciel espion ou mettre sur écoute sans
+# consentement, on ne génère PAS le brouillon qualifiant standard : on renvoie
+# une réponse polie et ferme qui explique qu'on respecte les lois belges et qui
+# propose l'alternative légale (filature, surveillance, constat). Cf. mail #614
+# (Serge M / « faire sortir les conversations WhatsApp »).
+_ILLEGAL_REQUEST_PATTERNS: tuple[re.Pattern[str], ...] = (
+    # Extraction / récupération de communications privées (FR)
+    re.compile(
+        r"(?:faire\s+sortir|extraire|r[ée]cup[ée]rer|obtenir|avoir\s+acc[èe]s)"
+        r".{0,40}(?:conversation|message|sms|texto|historique|whatsapp|"
+        r"mail|e-?mail|relev[ée]|appel)",
+        re.IGNORECASE,
+    ),
+    # Piratage d'un téléphone / compte / messagerie
+    re.compile(
+        r"(?:pirater|hacker|cracker|piratage|hack\b).{0,40}"
+        r"(?:t[ée]l[ée]phone|compte|whatsapp|messagerie|facebook|instagram|"
+        r"mail|e-?mail|bo[îi]te|r[ée]seau)",
+        re.IGNORECASE,
+    ),
+    # Accès aux communications privées (« accéder à son téléphone », « lire ses messages »)
+    re.compile(
+        r"(?:acc[ée]der|lire|consulter|voir|r[ée]cup[ée]rer).{0,20}"
+        r"(?:[àa]\s+son|au\s+son|ses|son|sa).{0,20}"
+        r"(?:t[ée]l[ée]phone|compte|whatsapp|messagerie|message|conversation|"
+        r"sms|mail|e-?mail|historique|bo[îi]te|facebook|instagram)",
+        re.IGNORECASE,
+    ),
+    # Logiciel espion / mise sur écoute / installation cachée
+    re.compile(
+        r"(?:logiciel\s+espion|mouchard|keylogger|spyware|mise\s+sur\s+[ée]coute|"
+        r"sur\s+[ée]coute|[ée]coutes?\s+t[ée]l[ée]phoniques?|installer.{0,25}"
+        r"(?:un\s+micro|une\s+cam[ée]ra|un\s+mouchard).{0,40}"
+        r"(?:sans|insu|chez\s+[èe]lle|chez\s+lui))",
+        re.IGNORECASE,
+    ),
+    # Relevés téléphoniques / bancaires
+    re.compile(
+        r"(?:relev[ée]s?|factures?\s+d[ée]taill[ée]es?).{0,15}"
+        r"(?:t[ée]l[ée]phonique|bancaire|appels?)",
+        re.IGNORECASE,
+    ),
+    # Géolocalisation sans consentement
+    re.compile(
+        r"(?:localiser|g[ée]olocaliser).{0,30}"
+        r"(?:sans\s+(?:son\s+consentement|le\s+savoir|qu['e]\s*elle\s+le\s+sache))",
+        re.IGNORECASE,
+    ),
+    # Obtention d'un mot de passe
+    re.compile(
+        r"(?:obtenir|r[ée]cup[ée]rer|trouver|avoir).{0,20}(?:son\s+)?mot\s+de\s+passe",
+        re.IGNORECASE,
+    ),
+    # NL : hackeren / aftappen / afluisteren / meeluisteren / bespionneren
+    re.compile(r"(?:hackeren|aftappen|afluisteren|meeluisteren|bespionneren)", re.IGNORECASE),
+    re.compile(r"wachtwoord.{0,30}(?:achterhalen|krijgen|ophalen|buiten|zonder)", re.IGNORECASE),
+    # EN : hack into / access her phone / retrieve her messages / spy on her / tap her phone
+    re.compile(
+        r"(?:hack\s+into|access\s+(?:her|his|their).{0,20}"
+        r"(?:phone|account|whatsapp|messages?|email|inbox)|"
+        r"retrieve\s+(?:her|his).{0,20}"
+        r"(?:messages?|texts?|conversations?|call\s+history|whatsapp)|"
+        r"spy\s+on\s+(?:her|him|my\s+(?:wife|husband))|"
+        r"tap\s+(?:her|his)\s+(?:phone|line)|"
+        r"install\s+(?:spyware|a\s+tracker|keylogger))",
+        re.IGNORECASE,
+    ),
+)
+
+
+def _detect_illegal_request(body: str) -> tuple[bool, str]:
+    """Détecte une demande d'accès non autorisé aux communications privées
+    (piratage, extraction de messages, logiciel espion, mise sur écoute,
+    relevés sans mandat, etc.). Retourne (match, extrait). Cf. v1.24.1 — #614.
+    """
+    for pattern in _ILLEGAL_REQUEST_PATTERNS:
+        m = pattern.search(body)
+        if m:
+            return True, m.group(0)[:60]
+    return False, ""
+
+
+# Alternative légale proposée selon le cas de figure sous-jacent.
+_LEGAL_ALTERNATIVE: dict[str, str] = {
+    "infidelite_filature": (
+        "organiser une filature discrète et une surveillance sur le terrain "
+        "afin d'établir un constat objectif du comportement de la personne et "
+        "de ses rencontres — éléments qui restent exploitables devant un "
+        "tribunal le cas échéant"
+    ),
+    "recherche_personne": "rechercher la personne par des moyens d'enquête légaux et discrets",
+    "incapacite_travail": (
+        "organiser une surveillance légale pour vérifier la situation "
+        "d'incapacité alléguée, dans le respect du cadre légal"
+    ),
+    "securite_passé_violences": "mener une enquête de passé dans le respect du cadre légal",
+    "contre_espionnage_micros": (
+        "inspecter vos locaux pour détecter d'éventuels micros ou caméras "
+        "cachés — prestation légale que nous proposons"
+    ),
+    "recuperation_dette": (
+        "retrouver la personne et établir un dossier de créance dans le "
+        "respect du cadre légal"
+    ),
+    "non_determine": (
+        "mener une enquête sur le terrain par des moyens légaux, dans le "
+        "respect du cadre applicable aux détectives privés en Belgique"
+    ),
+}
+
+
+def _build_illegal_refusal_draft(
+    greeting: str,
+    first_name: str | None,
+    mailbox: MailboxConfig,
+    case: str,
+    client_info: dict[str, str | None],
+    case_info: dict[str, str | None],
+) -> list[str]:
+    """Brouillon de refus poli d'une demande hors-légalité + alternative légale.
+
+    v1.24.1 — répond au besoin de Daniel : expliquer qu'on respecte les lois et
+    proposer ce qu'on peut faire à la place. Cf. mail #614 (Serge M / piratage).
+    """
+    settings = get_settings()
+    received = _format_received_info(client_info, case_info, case)
+    missing = _filter_missing_questions(case, client_info, case_info)
+    alternative = _LEGAL_ALTERNATIVE.get(case, _LEGAL_ALTERNATIVE["non_determine"])
+
+    lines = [greeting, ""]
+    lines.extend([
+        "Nous accusons bonne réception de votre demande. Je comprends la "
+        "situation que vous décrivez et je prends votre démarche très au "
+        "sérieux.",
+        "",
+    ])
+    lines.extend([
+        "Je dois toutefois être transparent avec vous sur un point essentiel : "
+        "en Belgique, nous ne pouvons pas accéder aux communications privées "
+        "d'une personne (WhatsApp, SMS, e-mails, comptes téléphoniques ou "
+        "réseaux sociaux) sans son consentement. L'extraction de conversations, "
+        "le piratage d'un téléphone ou d'un compte, l'installation d'un logiciel "
+        "espion ou la mise sur écoute sans le consentement de la personne "
+        "constituent des infractions pénales (atteinte à la vie privée, accès "
+        "frauduleux à un système informatique). En tant que détectives agréés, "
+        "nous sommes tenus de respecter scrupuleusement la loi et ne proposons "
+        "jamais ce type de prestation.",
+        "",
+    ])
+    lines.extend([
+        f"Ce que nous pouvons faire en revanche, dans un cadre parfaitement "
+        f"légal et éprouvé, c'est {alternative}.",
+        "",
+    ])
+
+    if received:
+        lines.extend(["Merci pour les éléments suivants :", "", *received, ""])
+
+    if missing:
+        lines.extend([
+            "Afin de préparer votre dossier dans les meilleures conditions, "
+            "pourriez-vous me transmettre les éléments suivants :",
+        ])
+        for i, q in enumerate(missing, 1):
+            lines.append(f"{i}. {q}.")
+        lines.append("")
+
+    lines.extend([
+        "Sur le plan tarifaire :",
+        f"- Ouverture de dossier : {settings.dossier_opening_fee} € HTVA.",
+        f"- Rapport final : {settings.report_fee} € HTVA.",
+        f"- Heure de détective : {settings.hourly_rate_day} €/h HTVA "
+        f"({settings.hourly_rate_night_weekend} €/h nuit/week-end).",
+    ])
+    if case == "infidelite_filature":
+        lines.extend([
+            "",
+            "Pour toute filature ou surveillance mobile, nous déployons "
+            "systématiquement deux détectives afin d'assurer l'efficacité et "
+            "la discrétion.",
+        ])
+
+    lines.extend([
+        "",
+        "Dès réception de ces éléments, je reprendrai contact avec vous pour "
+        "finaliser le devis et convenir d'un échange téléphonique sur ce dossier.",
+        "",
+        "Bien à vous,",
+        "",
+        "Daniel Hurchon",
+        f"{mailbox.brand}",
+        "GSM 0471/31.81.20",
+        "contact@detectivebelgique.be",
+    ])
+    return lines
+
+
 def build_qualification_draft(
     subject: str,
     body: str,
@@ -1096,6 +1299,24 @@ def build_qualification_draft(
     case: str,
 ) -> str:
     """Génère un brouillon qualifiant structuré et déterministe."""
+    # v1.24.1 — refus poli d'une demande hors-légalité (piratage, extraction de
+    # communications, logiciel espion). On court-circuite le brouillon qualifiant
+    # standard par une réponse ferme qui propose l'alternative légale. Cf. #614.
+    is_illegal, _reason = _detect_illegal_request(body)
+    if is_illegal:
+        client_info = _extract_client_info(body, sender)
+        case_info = _extract_case_info(body, case)
+        first_name = client_info.get("prenom") or _extract_first_name(body)
+        greeting = f"Bonjour {first_name}," if first_name else "Bonjour,"
+        log.info(
+            "qualification.illegal_request_detected",
+            case=case,
+            first_name=first_name,
+        )
+        return "\n".join(_build_illegal_refusal_draft(
+            greeting, first_name, mailbox, case, client_info, case_info,
+        ))
+
     client_info = _extract_client_info(body, sender)
     case_info = _extract_case_info(body, case)
     first_name = client_info.get("prenom") or _extract_first_name(body)

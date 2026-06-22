@@ -50,19 +50,31 @@ async def _fetch_candidates(
 
     conn = sqlite3.connect(db_path)
     try:
-        where_cats = ",".join("?" * len(categories))
-        sql = f"""
-            SELECT id, imap_uid, mailbox_name, subject, sender, received_at, category,
-                   status, priority, body, length(ai_draft) as draft_len
-            FROM mail_processed
-            WHERE category IN ({where_cats})
-              AND (ai_draft IS NULL OR ai_draft = '')
-              AND draft_generated = 0
-        """
-        params: list = list(categories)
+        # v1.24.1 — quand un ID précis est ciblé (--only-id), on ne filtre PLUS par
+        # catégorie : CDAL sait quel mail il veut retraiter (ex: un phishing mal
+        # classé qu'on veut remonter en demande_client après le hardening). On garde
+        # uniquement le filtre « pas encore de brouillon généré ».
         if only_id is not None:
-            sql += " AND id = ?"
-            params.append(only_id)
+            sql = """
+                SELECT id, imap_uid, mailbox_name, subject, sender, received_at, category,
+                       status, priority, body, length(ai_draft) as draft_len
+                FROM mail_processed
+                WHERE (ai_draft IS NULL OR ai_draft = '')
+                  AND draft_generated = 0
+                  AND id = ?
+            """
+            params: list = [only_id]
+        else:
+            where_cats = ",".join("?" * len(categories))
+            sql = f"""
+                SELECT id, imap_uid, mailbox_name, subject, sender, received_at, category,
+                       status, priority, body, length(ai_draft) as draft_len
+                FROM mail_processed
+                WHERE category IN ({where_cats})
+                  AND (ai_draft IS NULL OR ai_draft = '')
+                  AND draft_generated = 0
+            """
+            params = list(categories)
         if limit is not None:
             sql += " LIMIT ?"
             params.append(limit)

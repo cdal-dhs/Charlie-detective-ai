@@ -1,5 +1,34 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.24.1] — 2026-06-22 (brouillon hors-légalité — refus poli + alternative légale)
+
+### Contexte
+Suite au meeting Daniel du 2026-06-22, le mail #614 (Serge M) est une demande **mixte** : prouver l'infidélité de son épouse (légal — filature/surveillance) **+** « faire sortir toutes les conversations WhatsApp » du téléphone de son épuse (illégal en Belgique — accès non autorisé aux communications privées = atteinte à la vie privée + accès frauduleux à un système informatique). Le brouillon qualifiant infidélité standard est inadapté : il proposerait une filature sans adresser la demande de piratage, laissant croire qu'on pourrait le faire.
+
+Daniel demande : « pour la demande hors-légalité, préparer une réponse polie qu'il y a des lois et que nous sommes tenus de les respecter ».
+
+### Ajouté — `app/pipeline/qualification_builder.py`
+- **`_ILLEGAL_REQUEST_PATTERNS`** — 11 regex (FR + NL + EN) détectant les demandes d'accès non autorisé : extraction de conversations/messages, piratage de téléphone/compte/WhatsApp/messagerie, accès aux communications privées d'une personne, logiciel espion / mise sur écoute / installation cachée, relevés téléphoniques/bancaires, géolocalisation sans consentement, obtention de mot de passe.
+- **`_detect_illegal_request(body)`** — renvoie `(match, extrait)`. Match sur le body de #614 (« faire sortir toutes les conversations »).
+- **`_LEGAL_ALTERNATIVE`** — mapping cas → alternative légale proposée (filature discrète, surveillance, enquête de passé, détection micros, etc.).
+- **`_build_illegal_refusal_draft(...)`** — brouillon de refus poli : (1) accusé réception + reconnaissance de la situation, (2) refus ferme et transparent sur le cadre légal belge (infractions pénales, détectives agréés tenus de respecter la loi), (3) alternative légale selon le cas sous-jacent, (4) infos reçues + questions de collecte manquantes + tarifs (transparence), (5) signature Daniel. Ton identique au brouillon qualifiant standard.
+- **`build_qualification_draft`** — court-circuite le brouillon qualifiant standard si `_detect_illegal_request` matche. Log `qualification.illegal_request_detected`.
+
+### Changé — `scripts/backfill_reclassify.py`
+- `--only-id N` ne filtre **plus** par catégorie (avant : `category IN (autre, facture, rappel, urgent)` empêchait de retraiter un phishing mal classé comme #614). Avec un ID précis, on cible le mail sans filtrage de catégorie — on garde uniquement le filtre « pas encore de brouillon généré ». Permet de remonter #614 (phishing → demande_client) après le hardening v1.24.0.
+
+### Reclassement appliqué en prod (post-déploiement v1.24.0)
+- **#515** (Nathalie Hairemans, detective_belgium) — reclassé `facture` → `demande_client`, brouillon généré (10556 chars), livré dans `Drafts` de detective_belgium.
+- **#606** (Frédéric Van Houtte, detective_belgique) — reclassé `facture` → `demande_client`, brouillon généré (4653 chars, case `incapacite_travail`), livré dans `Drafts` de detective_belgique.
+- **#614** (Serge M) — en attente du déploiement v1.24.1 (le brouillon sera le refus poli + alternative légale).
+
+### Tests — `tests/test_illegal_request.py`
+- 14 nouveaux tests : détection positive (faire sortir, pirater WhatsApp, accéder téléphone, logiciel espion, sur écoute, mot de passe, relevés, NL hackeren, EN hack into) + négatifs (filature légitime, surveillance légale, question tarif simple) + brouillon #614 contient « infractions pénales » + alternative légale + pas de reformulation du piratage + signature Daniel + demande légitime ne déclenche pas le refus.
+- **137/137 tests verts** sur la suite complète (aucune régression).
+
+### Découvertes latérales
+- `case_classifier` et `translator` tournent encore sur `openai/gemma4:31b` (modèle **obsolète** selon CLAUDE.md §3). À corriger dans une prochaine version (basculer sur kimi-k2.6:cloud). Hors-scope v1.24.1.
+
 ## [1.24.0] — 2026-06-22 (hardening détection — zéro client raté sur 3 patterns pièges)
 
 ### Contexte
