@@ -1,5 +1,21 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.25.5] — 2026-06-23 (détection newsletter durcie — #619 Arval via Eloqua)
+
+### Contexte
+#619 = newsletter marketing B2B Arval (`arval@info.arval.com`, sujet « Arval | Quelques conseils pour préparer vos vacances d'été », body contenant une URL Eloqua `elqTrackId`/`elqaid` + « Découvrez nos conseils » + « Monsieur Daniel Hurchon ») classée `demande_client` (priority high, status pending) à tort par le LLM. Le pré-filtre `is_newsletter` a raté pour 3 raisons : (1) matching accent-sensible (« découvrez » ≠ « decouvrez »), (2) sender `info.arval.com` absent de `NEWSLETTER_SENDERS`, (3) pas de détection des signatures URL Eloqua/Mailchimp. Le LLM a vu « Daniel Hurchon » + un « conseil » et a cru à une demande.
+
+### Ajouté
+- **Matching accent-insensible** (`_unaccent` via `unicodedata.NFKD` + encode ASCII ignore) sur le sujet ET le body ET les keywords : « découvrez » (body) matche désormais le keyword « decouvrez ».
+- **Détection signatures URL plateformes marketing** (`NEWSLETTER_MARKETING_URLS` = `elqtrackid`/`elqaid`/`elq=` Eloqua, `mc_cid`/`mc_eid` Mailchimp, `xtrk=`/`trk_`) dans le body — robuste indépendamment du sender (rattrape les marketeurs qui envoient depuis un domaine d'envoi neutre).
+- **Détection sous-domaines marketing** (`NEWSLETTER_DOMAINS` = `info.`/`news.`/`newsletter.`/`email.`/`marketing.`/`communications.`/`mailing.`/`campaign.`/`edm.`) via extraction du domaine de l'expéditeur (`email.utils.parseaddr`) : les vraies demandes clients ne viennent jamais de `info.arval.com`/`news.entreprise.com`. Attention : `info@brand.com` ne matche PAS (« info » est dans la partie locale, pas le domaine).
+
+### Changé
+- `is_newsletter` (app/pipeline/prefilter.py) réécrite avec `_unaccent` sur subject/body/keywords + check URLs marketing + check sous-domaines marketing. Ordre `quick_classify` inchangé : newsletter AVANT service_email (les newsletters peuvent matcher des mots-clés service).
+
+### Tests
+- `tests/test_prefilter_newsletter.py` (13 tests) : #619 Arval détecté + quick_classify newsletter, accent-insensibilité (subject + body), URL Eloqua/Mailchimp (sender neutre), sous-domaines marketing (news./email./marketing.), non-régressions (vraie demande client, `info@detectivebelgium.com` partie locale ≠ sous-domaine, `contact@brand.com`, sujet sans marqueurs).
+
 ## [1.25.4] — 2026-06-23 (sujets non-représentatifs #515 + tag NO_EMAIL_IN_THE_FORM pour forwarders WP)
 
 ### Contexte

@@ -1,5 +1,7 @@
 import re
+import unicodedata
 from email.message import Message
+from email.utils import parseaddr
 
 # ── Newsletter ────────────────────────────────────────────────
 NEWSLETTER_HEADERS = ("List-Unsubscribe", "List-Id", "Precedence")
@@ -18,6 +20,24 @@ NEWSLETTER_SENDERS = (
     "constantcontact", "getresponse", "activecampaign", "aweber",
     "convertkit", "klaviyo", "substack", "mailerlite", "campaign",
 )
+# Sous-domaines marketing : les vraies demandes clients ne viennent jamais
+# de info.*/news.*/email.* (plateformes d'envoi type Eloqua, Mailchimp, etc.).
+NEWSLETTER_DOMAINS = (
+    "info.", "news.", "newsletter.", "email.", "marketing.",
+    "communications.", "mailing.", "campaign.", "edm.",
+)
+# Signatures URL de plateformes marketing dans le body (détection robuste,
+# indépendante du sender). Eloqua = elqTrackId/elqaid, Mailchimp = mc_cid/mc_eid.
+NEWSLETTER_MARKETING_URLS = (
+    "elqtrackid", "elqaid", "elq=",
+    "mc_cid", "mc_eid",
+    "xtrk=", "trk_",
+)
+
+
+def _unaccent(s: str) -> str:
+    """Normalise en ASCII (découvrez → decouvrez) pour matching accent-insensible."""
+    return unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
 
 # ── Phishing ───────────────────────────────────────────────────
 PHISHING_KEYWORDS = (
@@ -167,17 +187,25 @@ def is_newsletter(msg: Message) -> bool:
     # Headers typiques
     if any(msg.get(h) for h in NEWSLETTER_HEADERS):
         return True
-    # Mots-clés dans le sujet
-    subject = (msg.get("Subject", "") or "").lower()
-    if any(kw in subject for kw in NEWSLETTER_KEYWORDS):
+    # Matching accent-insensible : « découvrez » (body) == « decouvrez » (keyword)
+    subject = _unaccent((msg.get("Subject", "") or "").lower())
+    body_snippet = _unaccent(_get_body_snippet(msg))
+    keywords = [_unaccent(kw) for kw in NEWSLETTER_KEYWORDS]
+    if any(kw in subject for kw in keywords):
         return True
-    # Mots-clés dans le corps
-    body_snippet = _get_body_snippet(msg)
-    if any(kw in body_snippet for kw in NEWSLETTER_KEYWORDS):
+    if any(kw in body_snippet for kw in keywords):
+        return True
+    # Signatures URL de plateformes marketing (Eloqua, Mailchimp) dans le body
+    if any(u in body_snippet for u in NEWSLETTER_MARKETING_URLS):
         return True
     # Expéditeur connu de plateforme mailing
     sender = (msg.get("From", "") or "").lower()
-    return bool(any(s in sender for s in NEWSLETTER_SENDERS))
+    if any(s in sender for s in NEWSLETTER_SENDERS):
+        return True
+    # Sous-domaines marketing : info.arval.com, news.entreprise.com, email.xxx
+    addr = parseaddr(sender)[1]
+    domain = addr.split("@")[-1] if "@" in addr else ""
+    return bool(domain and any(domain.startswith(d) for d in NEWSLETTER_DOMAINS))
 
 
 def _is_own_domain(sender: str) -> bool:
