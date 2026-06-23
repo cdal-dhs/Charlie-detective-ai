@@ -1,5 +1,20 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.25.10] — 2026-06-23 (garde anti-faux-négatif post-pré-filtre — #625 réponse à #621)
+
+### Contexte
+#625 (Olivier Léonard, `olivier.leonard@magotteaux.com`) = réponse à #621 (« RE: Nouveau Message De Détective privé Belgique - Prenons contact »). Un vrai mail humain de suivi : « Je vous remercie pour votre e-mail. Je vais voir avec mon responsable la suite à donner et je vous tiendrai informé. » Le **pré-filtre rapide** l'a classé `autre` (probablement à cause d'une bannière de sécurité / keyword automatique dans le corps). Résultat : pas de brouillon généré, car le poller sautait le classifier LLM dès qu'un pré-filtre retournait une catégorie. Les heuristiques v1.25.8 (`_is_human_followup`) n'ont donc pas pu s'appliquer.
+
+### Ajouté
+- **`_bypass_prefilter_for_followup()`** (`app/workers/imap_poller.py`) : si le pré-filtre retourne `autre`/`newsletter`/`rappel`/`facture` **et** que le mail est visiblement une relance/réponse humaine (`_is_reply_to_daniel` ou `_is_human_followup`), le poller ignore le pré-filtre et passe par `classify()` + son post-traitement `_enforce_recall_over_precision`. Règle d'or : on ne laisse plus un pré-filtre rugueux absorber une réponse client.
+
+### Changé
+- Logique de `_process_single_mail` (poller) : la garde anti-faux-négatif est évaluée avant de valider le résultat du pré-filtre. Si elle déclenche, le LLM classifier reprend la main et produit `demande_client` → brouillon ack (car `_is_client_followup` détecte aussi la relance).
+
+### Tests
+- `tests/test_prefilter_followup_bypass.py` : 5 tests (bypass sur relance humaine #625, bypass sur citation Daniel #606, pas de bypass pour `phishing`, pas de bypass pour vrai service automatique, pas de bypass quand pré-filtre None).
+- 235 tests au total, 0 régression.
+
 ## [1.25.9] — 2026-06-23 (brouillon IMAP : EMAIL #xxx + mail original visibles)
 
 ### Contexte

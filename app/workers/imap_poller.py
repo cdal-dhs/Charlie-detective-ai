@@ -1108,6 +1108,21 @@ async def _maybe_alert_poller_failure(
     )
 
 
+def _bypass_prefilter_for_followup(
+    prefilter_category: str | None,
+    subject: str,
+    body: str,
+    sender: str,
+) -> bool:
+    """v1.25.10 — retourne True si le pré-filtre doit être ignoré car le mail
+    est visiblement une relance/réponse humaine. Le pré-filtre rapide est trop
+    rugueux sur les réponses clients (bannières de sécurité, keywords génériques).
+    """
+    if prefilter_category not in {"autre", "newsletter", "rappel", "facture"}:
+        return False
+    return _is_reply_to_daniel(body, sender) or _is_human_followup(subject, body, sender)
+
+
 async def _process_single_mail(
     client: aioimaplib.IMAP4,
     uid: str,
@@ -1217,10 +1232,24 @@ async def _process_single_mail(
 
         prefilter_category = quick_classify(msg)
         if prefilter_category:
+            # v1.25.10 — garde anti-faux-négatif : une relance/réponse humaine ne doit
+            # JAMAIS être absorbée par le pré-filtre service/newsletter/autre/rappel/facture.
+            # Le pré-filtre scanne des keywords génériques qui peuvent apparaître dans
+            # des réponses clients (ex: bannière "Do not reply", "External email", ...).
+            if _bypass_prefilter_for_followup(prefilter_category, subject, body, sender):
+                category = await classify(subject, body, sender)
+                log.info(
+                    "poller.prefilter_followup_guard",
+                    mailbox=mailbox.name,
+                    uid=uid,
+                    sender=sender,
+                    prefilter=prefilter_category,
+                    llm_category=category,
+                )
             # Garde anti-faux-positif phishing : si l'expéditeur est déjà connu
             # (présent dans mail_processed), ne pas forcer phishing via prefilter.
             # On laisse le LLM classifier décider à la place.
-            if prefilter_category == "phishing" and await asyncio.to_thread(
+            elif prefilter_category == "phishing" and await asyncio.to_thread(
                 _is_known_sender, settings.db_agent_state, sender
             ):
                 category = await classify(subject, body, sender)
