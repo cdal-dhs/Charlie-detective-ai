@@ -80,7 +80,10 @@ async def translate_from_fr(text: str, target_lang: Language) -> str:
                 "content": (
                     f"Tu es un traducteur professionnel. Tu traduis fidèlement du français vers le {label}. "
                     "Tu conserves le ton, les formules de politesse, les dates et montants. "
-                    "Tu ne fais AUCUN commentaire, AUCUNE interprétation. Tu renvoies UNIQUEMENT la traduction."
+                    "Règle absolue : quand le texte contient une liste à puces avec des tarifs ou montants, "
+                    "tu la réécris d'abord sous forme de phrases continues en français, puis tu traduis ces phrases. "
+                    "Tu ne supprimes AUCUN tarif ni AUCUN montant. "
+                    "Tu ne fais AUCUN commentaire, AUCUNE interprétation. Tu renvoies UNIQUEMENT la traduction complète."
                 ),
             },
             {
@@ -91,7 +94,7 @@ async def translate_from_fr(text: str, target_lang: Language) -> str:
         result = await complete(
             model=llm_default,
             messages=messages,
-            max_tokens=3000,
+            max_tokens=4000,
             temperature=0.1,
         )
         log.info("translator.from_fr", target=target_lang, length=len(result))

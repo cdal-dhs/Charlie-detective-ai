@@ -1,5 +1,11 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.25.14] — 2026-06-23 (corrections brouillons #513/#515 : prénom + tarifs NL)
+
+### Fixé
+- **`_strip_quoted_thread()`** dans `app/pipeline/qualification_builder.py` : gère désormais les citations Outlook sans préfixe `>` (en-têtes `Van:/Verzonden:/Aan:/Onderwerp:`, `De:/Date:/À:/Objet:`, `From:/Sent:/To:/Subject:`). Évite d'extraire "Daniel" comme prénom client dans les réponses qui citent un mail de Daniel.
+- **Prompt de traduction `translate_from_fr()`** dans `app/pipeline/translator.py` : instruction explicite pour convertir les listes à puces avec tarifs en phrases continues avant traduction. Corrige le bug où gemma4:31b sautait systématiquement les tarifs dans la traduction néerlandaise.
+
 ## [1.25.13] — 2026-06-23 (audit automatique des faux négatfs demande_client)
 
 ### Contexte

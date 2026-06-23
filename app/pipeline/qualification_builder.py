@@ -157,7 +157,12 @@ _TITLE_WORDS = {
 
 
 def _strip_quoted_thread(body: str) -> str:
-    """Supprime le thread cité (réponses en dessous de "... a écrit :" ou "> ...")."""
+    """Supprime le thread cité (réponses en dessous de "... a écrit :" ou "> ...").
+
+    Gère aussi les threads Outlook sans préfixe ">" mais avec en-têtes
+    Van:/Verzonden:/Aan:/Onderwerp: (NL), De:/Date:/À:/Objet: (FR),
+    From:/Sent:/To:/Subject: (EN).
+    """
     if not body:
         return body
     # 1. Coupe au premier "Le ... a écrit :" même si Gmail casse l'adresse sur 2 lignes.
@@ -171,10 +176,19 @@ def _strip_quoted_thread(body: str) -> str:
     )
     if cutoff:
         body = body[: cutoff.start()]
-    # 2. Coupe aussi au premier bloc de lignes citées (> ...).
+    # 2. Coupe au premier bloc de lignes citées (> ...).
     quoted_start = re.search(r"\n\s*>\s+\S", body)
     if quoted_start:
         body = body[: quoted_start.start()]
+    # 3. Coupe au premier bloc d'en-têtes Outlook (sans ">").
+    outlook_start = re.search(
+        r"(?:^|\n)\s*(?:Van|De|From)\s*:\s*.*\n\s*(?:Verzonden|Date|Sent)\s*:"
+        r".*\n\s*(?:Aan|À|To)\s*:.*\n\s*(?:Onderwerp|Objet|Subject)\s*:",
+        body,
+        re.IGNORECASE | re.MULTILINE,
+    )
+    if outlook_start:
+        body = body[: outlook_start.start()]
     return body.strip()
 
 
