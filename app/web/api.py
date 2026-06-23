@@ -204,6 +204,7 @@ async def _fetch_mails_partial(
         "body_preview",
         "body",
         "attachment_count",
+        "ai_draft",
     ]
 
     def _mask_sender(row_dict: dict) -> dict:
@@ -222,7 +223,8 @@ async def _fetch_mails_partial(
     hot_sql = (
         "SELECT m.id, m.mailbox_name, m.subject, m.sender, m.received_at, m.category, "
         "m.status, m.priority, m.processed_at, m.body_preview, m.body, "
-        "(SELECT COUNT(*) FROM email_attachment WHERE mail_processed_id = m.id) AS attachment_count "
+        "(SELECT COUNT(*) FROM email_attachment WHERE mail_processed_id = m.id) AS attachment_count, "
+        "m.ai_draft "
         "FROM mail_processed m WHERE " + " AND ".join(hot_where) + " "
         f"ORDER BY {col} {order} LIMIT ?"
     )
@@ -239,7 +241,8 @@ async def _fetch_mails_partial(
     other_sql = (
         "SELECT m.id, m.mailbox_name, m.subject, m.sender, m.received_at, m.category, "
         "m.status, m.priority, m.processed_at, m.body_preview, m.body, "
-        "(SELECT COUNT(*) FROM email_attachment WHERE mail_processed_id = m.id) AS attachment_count "
+        "(SELECT COUNT(*) FROM email_attachment WHERE mail_processed_id = m.id) AS attachment_count, "
+        "m.ai_draft "
         "FROM mail_processed m WHERE " + " AND ".join(other_where) + " "
         f"ORDER BY (m.status = 'pending') DESC, (m.priority = 'high') DESC, {col} {order} LIMIT ?"
     )

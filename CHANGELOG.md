@@ -1,5 +1,19 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.25.20] — 2026-06-23 (fix badge brouillon HTMX + test de non-régression cockpit)
+
+### Contexte
+Suite au fix P0 v1.25.19, le cockpit `/app/` fonctionnait, mais le fragment HTMX `/api/inbox` (rechargement de la liste) ne retournait pas la colonne `ai_draft`. Conséquence : le badge "Proposition de réponse générée par Charlie" disparaissait après un refresh HTMX, et le template risquait un comportement instable.
+
+### Fixé
+- **`app/web/api.py`** : ajout de `m.ai_draft` dans les `SELECT` de `_fetch_mails_partial()` et dans `cols`, avec le bon ordre (`body`, `attachment_count`, `ai_draft`).
+
+### Ajouté
+- **`tests/test_web_inbox_render.py`** : test de non-régression qui vérifie le rendu de `/app/` et `/api/inbox` avec une DB temporaire. Couvre : affichage sans erreur 500, badge brouillon quand `ai_draft` est présent, masque `NO_EMAIL_IN_THE_FORM` pour les forwarders WP sans email client, et absence de crash `int has no len()` sur `ai_draft|length`.
+
+### Procédure
+- Avant chaque deploy, la suite de tests web/inbox doit passer (`pytest tests/test_web_inbox_render.py tests/test_web_fix_subject.py tests/test_web_draft_retry.py`).
+
 ## [1.25.19] — 2026-06-23 (fix P0 cockpit 500 après v1.25.18)
 
 ### Contexte
