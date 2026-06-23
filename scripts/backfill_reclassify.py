@@ -52,16 +52,18 @@ async def _fetch_candidates(
     try:
         # v1.24.1 — quand un ID précis est ciblé (--only-id), on ne filtre PLUS par
         # catégorie : CDAL sait quel mail il veut retraiter (ex: un phishing mal
-        # classé qu'on veut remonter en demande_client après le hardening). On garde
-        # uniquement le filtre « pas encore de brouillon généré ».
+        # classé qu'on veut remonter en demande_client après le hardening).
+        # v1.25.2 — on retire AUSSI le filtre « pas encore de brouillon généré » :
+        # un mail déjà brouillonné (draft_generated=1) doit pouvoir être retraité
+        # quand CDAL demande explicitement son ID (ex: brouillon LLM inadapté à
+        # remplacer par le builder déterministe, cf. #614). Aucun filtre ne reste
+        # pour --only-id : CDAL sait quel mail il cible.
         if only_id is not None:
             sql = """
                 SELECT id, imap_uid, mailbox_name, subject, sender, received_at, category,
                        status, priority, body, length(ai_draft) as draft_len
                 FROM mail_processed
-                WHERE (ai_draft IS NULL OR ai_draft = '')
-                  AND draft_generated = 0
-                  AND id = ?
+                WHERE id = ?
             """
             params: list = [only_id]
         else:

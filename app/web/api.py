@@ -12,10 +12,11 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
 from app import __version__
-from app.charlie import BOX_ABBR, ask_charlie
 from app.cerveau_client import push_correction
+from app.charlie import BOX_ABBR, ask_charlie
 from app.charlie_memory import save_feedback
 from app.config import get_settings
+from app.pipeline.classifier import classify
 from app.pipeline.generator import generate_draft
 from app.pipeline.language import detect_language
 from app.web.deps import get_db, require_operator
@@ -346,6 +347,54 @@ async def draft_generate(
     # Détection follow-up : si le mail ressemble à une réponse client et que
     # l'expéditeur a un demande_client récent, on génère le brouillon court.
     is_followup = await _is_web_followup(db, sender or "", subject or "", full_body)
+
+    # v1.25.2 — reclassifie AVANT de (re)générer. Sans ça, un mail mal classé
+    # (ex: phishing resté phishing alors que le hardening v1.24.0 _has_strong_
+    # human_demand devrait le remonter en demande_client) recevrait un brouillon
+    # LLM inadapté via la branche `else` de generate_draft. Cf. #614 (Serge M) :
+    # le retry cockpit avait régénéré un brouillon LLM hybride incomplet parce
+    # que #614 était resté classé phishing en base.
+    try:
+        new_category = await classify(subject or "", full_body, sender or "")
+    except Exception as exc:
+        log.warning(
+            "draft_generate.reclassify_failed", mail_id=mail_id, error=str(exc)
+        )
+        new_category = category or ""
+    if new_category != (category or ""):
+        await db.execute(
+            "UPDATE mail_processed SET category = ?, status = 'pending', "
+            "priority = 'high' WHERE id = ?",
+            (new_category, mail_id),
+        )
+        await db.commit()
+        log.info(
+            "draft_generate.reclassified",
+            mail_id=mail_id,
+            old=category,
+            new=new_category,
+        )
+        category = new_category
+
+    # v1.25.2 — garde anti-brouillon-LLM-inadapté : on ne génère un brouillon
+    # QUE pour les catégories qui appellent le builder déterministe (draft_
+    # categories). Pour les autres (phishing, spam, facture…), aucune réponse
+    # n'est attendue — retourner un message clair au lieu d'un brouillon LLM.
+    draft_cats = {
+        c.strip().lower() for c in settings.draft_categories.split(",") if c.strip()
+    }
+    if (category or "").lower() not in draft_cats:
+        ip = request.client.host if request.client else None
+        await audit_log(
+            db, user["id"], "draft_generate_skip", "mail_processed", str(mail_id),
+            f"category={category}", ip, request.headers.get("user-agent"),
+        )
+        return HTMLResponse(
+            '<div class="p-3 bg-yellow-900/40 border border-yellow-800 rounded '
+            f'text-yellow-300 text-sm">Mail classé « {category} » — aucune '
+            'génération de brouillon pour cette catégorie (le classifier a été '
+            'réappliqué).</div>'
+        )
 
     try:
         language = detect_language(full_body, default=mailbox.default_lang)

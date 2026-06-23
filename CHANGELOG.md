@@ -1,5 +1,28 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.25.2] — 2026-06-23 (reclassify avant (re)génération + backfill --only-id robuste — #614)
+
+### Contexte
+Livraison de #614 (Serge M / demande d'extraction des conversations WhatsApp = piratage). Diagnostic : #614 était resté classé `phishing` en base. Le retry cockpit (`POST /api/drafts/{id}/retry`) régénérait le brouillon SANS reclassifier → `generate_draft` prenait la branche `else` (LLM) et produisait un brouillon hybride incomplet (annonçait des questions et des tarifs sans les lister) au lieu du brouillon déterministe `illegal_refusal` (qui contient cadrage légal + alternative + questions + tarifs chiffrés).
+
+### Corrigé
+- **Bug P0 — retry/generate sans reclassification** (`app/web/api.py::draft_generate`) : on reclassifie maintenant via `classify()` AVANT d'appeler `generate_draft`. Si la catégorie change, on update la DB (`category`, `status='pending'`, `priority='high'`) et on log `draft_generate.reclassified`. Garde ajoutée : si la catégorie finale n'est pas dans `draft_categories` (`demande_client`, `prise_contact`), on NE génère AUCUN brouillon (les phishing/spam/facture ne reçoivent pas de réponse) — on retourne un message clair au cockpit au lieu d'un brouillon LLM inadapté. Cf. #614.
+- **Bug — backfill `--only-id` bloqué par `draft_generated`** (`scripts/backfill_reclassify.py::_fetch_candidates`) : en `--only-id`, on retirait déjà le filtre catégorie (v1.24.1) mais PAS le filtre `draft_generated=0 AND ai_draft IS NULL`. Conséquence : impossible de retraiter un mail déjà brouillonné (ex: remplacer un brouillon LLM inadapté). Désormais `--only-id` ne filtre PLUS que par `id` — CDAL sait quel mail il cible.
+
+### Procédure #614 appliquée en prod
+1. `backfill_reclassify --apply --only-id 614` (après reset du brouillon LLM) → reclassé `phishing→demande_client` + brouillon `illegal_refusal` déterministe généré (cadrage légal complet + alternative filature + 9 questions opérationnelles + tarifs 200/150/75/95 € + 2 détectives + signature Daniel).
+2. `deliver_pending_drafts --apply --only-id 614` → déposé dans les Drafts IMAP de `detective_belgique`, `verified=True`.
+
+### Tests
+- `tests/test_web_draft_retry.py` (2) : retry reclassifie avant de générer (mail phishing → demande_client + brouillon déterministe) ; garde anti-brouillon sur catégorie non-demande (generate_draft jamais appelé, ancien brouillon conservé).
+- `tests/test_backfill_reclassify.py` (5) : `--only-id` retourne un mail déjà brouillonné ; bulk garde le filtre `draft_generated=0` ; `_regenerate_draft` remplace le brouillon si reclassé demande_client, n'en génère pas sinon.
+- **157 tests verts** (150 + 7).
+
+### Point de vigilance
+Le backfill et le retry dépendent de `classify()` (LLM gemma4:31b) — un faux négatif (classify laisse en phishing un vrai demande_client) reste possible, mais le hardening v1.24.0 `_has_strong_human_demand` (tarif + vocab enquête + signature) lève la majorité des cas. Règle d'or conservée : faux positifs acceptables, faux négatifs intolérables.
+
+---
+
 ## [1.25.1] — 2026-06-23 (sujet de brouillon lisible + brouillon pour demande floue — #515)
 
 ### Contexte
