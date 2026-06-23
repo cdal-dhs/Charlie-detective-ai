@@ -19,7 +19,7 @@ from app.config import get_settings
 from app.pipeline.classifier import classify
 from app.pipeline.generator import generate_draft
 from app.pipeline.language import detect_language
-from app.pipeline.subject_fixer import fix_subject_llm
+from app.pipeline.subject_fixer import fix_subject_llm, tag_no_email
 from app.web.deps import get_db, require_operator
 from app.web.utils import audit_log
 
@@ -503,22 +503,26 @@ async def mail_fix_subject(
     db: aiosqlite.Connection = Depends(get_db),  # noqa: B008
     user: dict = Depends(require_operator),  # noqa: B008
 ) -> HTMLResponse:
-    """Corrige un sujet illisible (homoglyphes itsme, cyrillique, etc.) via LLM.
+    """Corrige un sujet incohérent ou illisible (homoglyphes, forwarder WP) via LLM.
 
-    v1.25.3 — rétrocorrection des anciens mails (ex: #614). Le sujet original
-    est conservé dans l'audit log (forensic/debug). Dégradation silencieuse si
-    le LLM échoue ou ne propose rien de mieux (on garde l'original).
+    v1.25.4 — rétrocorrection des anciens mails : (1) reformulation LLM du sujet
+    pour refléter la demande réelle (#614 homoglyphes, #515 forwarder WP
+    « Réinitialisation du mot de passe »), (2) tag [NO_EMAIL_IN_THE_FORM] si le
+    sender est un forwarder WP (pas d'email client, vrai contact = téléphone).
+    Le sujet original est conservé dans l'audit log (forensic/debug). Dégradation
+    silencieuse si le LLM échoue ET le sender n'est pas un forwarder WP.
     """
     ip = request.client.host if request.client else None
     ua = request.headers.get("user-agent")
     async with db.execute(
-        "SELECT subject, body FROM mail_processed WHERE id = ?", (mail_id,)
+        "SELECT subject, body, sender FROM mail_processed WHERE id = ?", (mail_id,)
     ) as cur:
         row = await cur.fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="Mail not found")
-    original_subject, body = row
+    original_subject, body, sender = row
     original_subject = original_subject or ""
+    sender = sender or ""
     body_preview = (body or "")[:600]
 
     if not original_subject:
@@ -534,8 +538,14 @@ async def mail_fix_subject(
         )
         return HTMLResponse('<span class="text-gray-400 italic">(aucun sujet)</span>')
 
+    # 1) Reformulation LLM (homoglyphes OU sujet non-représentatif).
     fixed = await fix_subject_llm(original_subject, body_preview)
-    if not fixed:
+    base = fixed if fixed else original_subject
+    # 2) Tag [NO_EMAIL_IN_THE_FORM] si forwarder WP (déterministe, sans LLM).
+    tagged = tag_no_email(base, sender)
+
+    if tagged == original_subject:
+        # Ni LLM ni tag n'ont rien changé → noop.
         await audit_log(
             db,
             user["id"],
@@ -549,10 +559,10 @@ async def mail_fix_subject(
         return HTMLResponse(
             f'<span class="text-yellow-300">{original_subject}</span>'
             f'<div class="text-xs text-yellow-500/70 mt-1">'
-            "Aucune correction proposée (LLM a échoué ou sujet déjà lisible).</div>"
+            "Aucune correction proposée (LLM a échoué ou sujet déjà représentatif).</div>"
         )
 
-    await db.execute("UPDATE mail_processed SET subject = ? WHERE id = ?", (fixed, mail_id))
+    await db.execute("UPDATE mail_processed SET subject = ? WHERE id = ?", (tagged, mail_id))
     await db.commit()
     await audit_log(
         db,
@@ -560,7 +570,7 @@ async def mail_fix_subject(
         "subject_fixed",
         "mail_processed",
         str(mail_id),
-        f"original={original_subject[:120]!r} -> fixed={fixed[:120]!r}",
+        f"original={original_subject[:120]!r} -> fixed={tagged[:120]!r}",
         ip,
         ua,
     )
@@ -568,10 +578,12 @@ async def mail_fix_subject(
         "subject_fixed_cockpit",
         mail_id=mail_id,
         subject_original=original_subject[:120],
-        subject_fixed=fixed[:120],
+        subject_fixed=tagged[:120],
+        llm_rephrased=bool(fixed),
+        wp_tagged=(tagged != base),
     )
     return HTMLResponse(
-        f'<span class="text-green-300">{fixed}</span>'
+        f'<span class="text-green-300">{tagged}</span>'
         f'<div class="text-xs text-gray-500/70 mt-1">Sujet corrigé</div>'
     )
 

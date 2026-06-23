@@ -28,7 +28,7 @@ from app.pipeline.generator import generate_draft
 from app.pipeline.language import detect_language
 from app.pipeline.prefilter import quick_classify
 from app.pipeline.priority import assign_priority
-from app.pipeline.subject_fixer import fix_subject_llm, is_subject_suspect
+from app.pipeline.subject_fixer import fix_subject_llm, is_subject_suspect, tag_no_email
 
 # Signaux de coordonnées contact dans un body (tél belge, code postal, adresse)
 _CONTACT_SIGNALS_RE = re.compile(
@@ -1185,6 +1185,18 @@ async def _process_single_mail(
                     subject_fixed=fixed[:120],
                 )
                 subject = fixed
+
+        # v1.25.4 — tag [NO_EMAIL_IN_THE_FORM] si sender = forwarder WordPress
+        # (formulaires WP sans email client, vrai contact = téléphone, cf. Task #4).
+        tagged = tag_no_email(subject, sender)
+        if tagged != subject:
+            log.info(
+                "poller.subject_tagged_no_email",
+                mailbox=mailbox.name,
+                uid=uid,
+                sender=sender,
+            )
+            subject = tagged
 
         prefilter_category = quick_classify(msg)
         if prefilter_category:

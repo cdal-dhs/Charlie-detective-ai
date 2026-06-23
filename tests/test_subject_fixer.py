@@ -1,8 +1,10 @@
-"""Tests du correcteur de sujets illisibles (app/pipeline/subject_fixer.py).
+"""Tests du correcteur de sujets illisibles/incohérents (app/pipeline/subject_fixer.py).
 
-v1.25.3 — corrige les sujets truffés d'homoglyphes (ex: #614 itsme cyrillique)
-via LLM. Dégradation silencieuse : si le LLM échoue ou ne propose rien de
-mieux, on conserve l'original (jamais de crash).
+v1.25.4 — corrige les sujets truffés d'homoglyphes (ex: #614 itsme cyrillique)
+ET les sujets non-représentatifs (ex: #515 forwarder WP « Réinitialisation du
+mot de passe ») via LLM. Tag [NO_EMAIL_IN_THE_FORM] pour les forwarders WP.
+Dégradation silencieuse : si le LLM échoue ou ne propose rien de mieux,
+on conserve l'original (jamais de crash).
 """
 
 from __future__ import annotations
@@ -16,6 +18,8 @@ from app.pipeline.subject_fixer import (
     _clean,
     fix_subject_llm,
     is_subject_suspect,
+    is_wp_forwarder,
+    tag_no_email,
 )
 
 # --- is_subject_suspect ---
@@ -151,3 +155,52 @@ async def test_fix_subject_preserves_french_accents(monkeypatch) -> None:
     monkeypatch.setattr("app.pipeline.subject_fixer.complete", fake_complete)
     fixed = await fix_subject_llm("іtѕⅿе", "body")
     assert fixed == "Demande — suivi d'enquête"
+
+
+# --- is_wp_forwarder / tag_no_email ---
+
+
+def test_wp_forwarder_matches_wordpress_sender() -> None:
+    assert is_wp_forwarder("wordpress@detectivebelgium.com") is True
+    assert is_wp_forwarder("mail@detectivebelgique.be") is True
+    assert is_wp_forwarder("contact@detectivebelgium.com") is True
+
+
+def test_wp_forwarder_case_insensitive() -> None:
+    assert is_wp_forwarder("WordPress@DetectiveBelgium.com") is True
+
+
+def test_wp_forwarder_rejects_normal_senders() -> None:
+    """#614 = client direct, pas un forwarder WP."""
+    assert is_wp_forwarder("yashwantsharma@colorsofindiatours.com") is False
+    assert is_wp_forwarder("client@gmail.com") is False
+    # L'agent Resend (digitalhs) ne doit PAS matcher.
+    assert is_wp_forwarder("agent@digitalhs.biz") is False
+    assert is_wp_forwarder("") is False
+    assert is_wp_forwarder(None) is False  # type: ignore[arg-type]
+
+
+def test_tag_no_email_adds_tag_for_wp_forwarder() -> None:
+    """#515 — forwarder WP → suffixe [NO_EMAIL_IN_THE_FORM]."""
+    out = tag_no_email(
+        "[Privédetective België] Réinitialisation du mot de passe", "wordpress@detectivebelgium.com"
+    )
+    assert out.endswith("[NO_EMAIL_IN_THE_FORM]")
+    assert "[NO_EMAIL_IN_THE_FORM]" in out
+
+
+def test_tag_no_email_idempotent() -> None:
+    """Ne re-tag pas si déjà présent."""
+    s = "Demande [NO_EMAIL_IN_THE_FORM]"
+    assert tag_no_email(s, "wordpress@detectivebelgium.com") == s
+
+
+def test_tag_no_email_no_change_for_normal_sender() -> None:
+    """Sender normal (#614) → sujet inchangé."""
+    s = "itsme-Beveilingsmelding: uw dienst stopgezet"
+    assert tag_no_email(s, "yashwantsharma@colorsofindiatours.com") == s
+
+
+def test_tag_no_email_empty_subject() -> None:
+    out = tag_no_email("", "wordpress@detectivebelgium.com")
+    assert out == "[NO_EMAIL_IN_THE_FORM]"

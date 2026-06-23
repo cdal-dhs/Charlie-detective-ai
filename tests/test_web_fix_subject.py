@@ -1,8 +1,10 @@
 """Tests de l'endpoint cockpit POST /api/mails/{id}/fix-subject (app/web/api.py).
 
-v1.25.3 — rétrocorrection des sujets illisibles (ex: #614 itsme cyrillique).
+v1.25.4 — rétrocorrection des sujets illisibles/incohérents (ex: #614 itsme
+cyrillique, #515 forwarder WP « Réinitialisation du mot de passe ») + tag
+[NO_EMAIL_IN_THE_FORM] pour les forwarders WP (pas d'email client).
 Vérifie : UPDATE subject + audit log original + retour HTML du nouveau sujet,
-et dégradation silencieuse si le LLM ne propose rien.
+et dégradation silencieuse si le LLM ne propose rien ET pas de tag à appliquer.
 """
 
 from __future__ import annotations
@@ -28,7 +30,8 @@ def _make_db(tmp_path: Path, mail_row: tuple | None) -> Path:
         CREATE TABLE mail_processed (
             id INTEGER PRIMARY KEY,
             subject TEXT,
-            body TEXT
+            body TEXT,
+            sender TEXT
         )
         """
     )
@@ -49,7 +52,7 @@ def _make_db(tmp_path: Path, mail_row: tuple | None) -> Path:
     )
     if mail_row is not None:
         conn.execute(
-            "INSERT INTO mail_processed (id, subject, body) VALUES (?,?,?)",
+            "INSERT INTO mail_processed (id, subject, body, sender) VALUES (?,?,?,?)",
             mail_row,
         )
     conn.commit()
@@ -73,12 +76,8 @@ def operator_user():
     return {"id": 1, "email": "cdal@digitalhs.biz", "role": "super_admin", "name": "CDAL"}
 
 
-@pytest.fixture
-def client(tmp_path: Path, operator_user):
-    db_path = _make_db(
-        tmp_path,
-        (614, "іtѕⅿе-Bеvеіlіngѕmеldіng", "J'aimerais prouver l'infidélité..."),
-    )
+def _make_client(tmp_path: Path, operator_user, mail_row: tuple | None) -> TestClient:
+    db_path = _make_db(tmp_path, mail_row)
     app = make_app()
     app.dependency_overrides[get_db] = _db_path_holder(db_path)
     app.dependency_overrides[require_operator] = lambda: operator_user
@@ -87,63 +86,141 @@ def client(tmp_path: Path, operator_user):
     return client
 
 
-def test_fix_subject_updates_and_audits(client, monkeypatch) -> None:
-    """LLM propose un sujet lisible → UPDATE + audit log original + HTML du nouveau."""
+# --- #614 : homoglyphes, sender normal (pas de tag) ---
+
+
+def test_fix_subject_homoglyph_no_tag(tmp_path: Path, operator_user, monkeypatch) -> None:
+    """#614 — sender normal → reformulation LLM, AUCUN tag WP."""
+    client = _make_client(
+        tmp_path,
+        operator_user,
+        (
+            614,
+            "іtѕⅿе-Bеvеіlіngѕmеldіng",
+            "J'aimerais prouver l'infidélité...",
+            "yashwantsharma@colorsofindiatours.com",
+        ),
+    )
 
     async def fake_fix(subject, body_preview):
-        return "itsme-Bevelingsmelding"
+        return "itsme-Beveilingsmelding: uw dienst stopgezet"
 
     monkeypatch.setattr("app.web.api.fix_subject_llm", fake_fix)
 
     resp = client.post("/api/mails/614/fix-subject")
 
     assert resp.status_code == 200
-    assert "itsme-Bevelingsmelding" in resp.text
-    assert "Sujet corrigé" in resp.text
-    assert "іtѕⅿе" not in resp.text  # l'illisible n'est plus affiché
+    assert "itsme-Beveilingsmelding" in resp.text
+    assert "[NO_EMAIL_IN_THE_FORM]" not in resp.text  # pas un forwarder WP
 
-    # DB : subject remplacé par la version lisible.
     conn = sqlite3.connect(str(client._db_path))
     row = conn.execute("SELECT subject FROM mail_processed WHERE id=614").fetchone()
-    audits = conn.execute(
-        "SELECT action, details FROM audit_logs WHERE resource_id='614'"
-    ).fetchall()
+    audits = conn.execute("SELECT action FROM audit_logs WHERE resource_id='614'").fetchall()
     conn.close()
-    assert row[0] == "itsme-Bevelingsmelding"
+    assert row[0] == "itsme-Beveilingsmelding: uw dienst stopgezet"
     assert any(a[0] == "subject_fixed" for a in audits)
-    # L'audit log conserve l'original (forensic).
-    assert any("іtѕⅿе" in (a[1] or "") for a in audits)
 
 
-def test_fix_subject_no_improvement_keeps_original(client, monkeypatch) -> None:
-    """LLM ne propose rien de mieux → sujet original conservé + message d'info."""
+# --- #515 : forwarder WP, reformulation LLM + tag ---
+
+
+def test_fix_subject_wp_forwarder_rephrase_and_tag(tmp_path, operator_user, monkeypatch) -> None:
+    """#515 — forwarder WP → reformulation LLM du sujet non-représentatif + tag."""
+    client = _make_client(
+        tmp_path,
+        operator_user,
+        (
+            515,
+            "[Privédetective België] Réinitialisation du mot de passe",
+            "Hairemans Nathalie, Telefoonnummer 0468287587, infidélité...",
+            "wordpress@detectivebelgium.com",
+        ),
+    )
+
+    async def fake_fix(subject, body_preview):
+        return "Demande de suivi — Hairemans Nathalie"
+
+    monkeypatch.setattr("app.web.api.fix_subject_llm", fake_fix)
+
+    resp = client.post("/api/mails/515/fix-subject")
+
+    assert resp.status_code == 200
+    assert "Demande de suivi — Hairemans Nathalie" in resp.text
+    assert "[NO_EMAIL_IN_THE_FORM]" in resp.text  # tag ajouté
+
+    conn = sqlite3.connect(str(client._db_path))
+    row = conn.execute("SELECT subject FROM mail_processed WHERE id=515").fetchone()
+    conn.close()
+    assert row[0] == "Demande de suivi — Hairemans Nathalie [NO_EMAIL_IN_THE_FORM]"
+
+
+def test_fix_subject_wp_forwarder_tag_only_when_llm_noop(
+    tmp_path, operator_user, monkeypatch
+) -> None:
+    """#515 — si le LLM ne propose rien, on tag quand même le sujet original (forwarder WP)."""
+    client = _make_client(
+        tmp_path,
+        operator_user,
+        (
+            515,
+            "[Privédetective België] Réinitialisation du mot de passe",
+            "body",
+            "wordpress@detectivebelgium.com",
+        ),
+    )
+
+    async def fake_fix(subject, body_preview):
+        return None  # LLM ne propose rien
+
+    monkeypatch.setattr("app.web.api.fix_subject_llm", fake_fix)
+
+    resp = client.post("/api/mails/515/fix-subject")
+
+    assert resp.status_code == 200
+    assert "[NO_EMAIL_IN_THE_FORM]" in resp.text
+
+    conn = sqlite3.connect(str(client._db_path))
+    row = conn.execute("SELECT subject FROM mail_processed WHERE id=515").fetchone()
+    conn.close()
+    # Le sujet original est conservé + tag suffixé.
+    assert row[0].endswith("[NO_EMAIL_IN_THE_FORM]")
+    assert "Réinitialisation" in row[0]
+
+
+# --- Dégradation silencieuse : sender normal + LLM None → noop (rien changé) ---
+
+
+def test_fix_subject_noop_when_normal_sender_and_llm_none(
+    tmp_path, operator_user, monkeypatch
+) -> None:
+    """Sender normal + LLM ne propose rien + pas de tag → sujet inchangé, message noop."""
+    client = _make_client(
+        tmp_path,
+        operator_user,
+        (700, "Demande de devis", "body", "client@gmail.com"),
+    )
 
     async def fake_fix(subject, body_preview):
         return None
 
     monkeypatch.setattr("app.web.api.fix_subject_llm", fake_fix)
 
-    resp = client.post("/api/mails/614/fix-subject")
+    resp = client.post("/api/mails/700/fix-subject")
 
     assert resp.status_code == 200
-    assert "іtѕⅿе" in resp.text  # l'original est réaffiché
+    assert "Demande de devis" in resp.text  # original réaffiché
     assert "Aucune correction" in resp.text
+    assert "[NO_EMAIL_IN_THE_FORM]" not in resp.text
 
-    # DB : subject inchangé.
     conn = sqlite3.connect(str(client._db_path))
-    row = conn.execute("SELECT subject FROM mail_processed WHERE id=614").fetchone()
-    audits = conn.execute("SELECT action FROM audit_logs WHERE resource_id='614'").fetchall()
+    row = conn.execute("SELECT subject FROM mail_processed WHERE id=700").fetchone()
+    audits = conn.execute("SELECT action FROM audit_logs WHERE resource_id='700'").fetchall()
     conn.close()
-    assert row[0] == "іtѕⅿе-Bеvеіlіngѕmеldіng"
+    assert row[0] == "Demande de devis"  # inchangé
     assert any(a[0] == "subject_fix_noop" for a in audits)
 
 
 def test_fix_subject_not_found_returns_404(tmp_path: Path, operator_user) -> None:
-    db_path = _make_db(tmp_path, None)
-    app = make_app()
-    app.dependency_overrides[get_db] = _db_path_holder(db_path)
-    app.dependency_overrides[require_operator] = lambda: operator_user
-    client = TestClient(app)
-
+    client = _make_client(tmp_path, operator_user, None)
     resp = client.post("/api/mails/9999/fix-subject")
     assert resp.status_code == 404

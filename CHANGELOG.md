@@ -1,5 +1,23 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.25.4] — 2026-06-23 (sujets non-représentatifs #515 + tag NO_EMAIL_IN_THE_FORM pour forwarders WP)
+
+### Contexte
+#515 = formulaire WordPress avec sujet `[Privédetective België] Réinitialisation du mot de passe` (forwarder `wordpress@detectivebelgium.com`) : sujet lisible mais **totalement incohérent** avec la vraie demande (Hairemans Nathalie, suivi d'infidélité, dans le body). v1.25.3 ne gérait que les homoglyphes (détection déterministe). Deux manques : (1) les sujets non-représentatifs mais lisibles n'étaient pas reformulés, (2) les forwarders WP n'ont pas d'email client (vrai contact = téléphone, cf. Task #4) → Daniel/le brouillon doivent le savoir.
+
+### Ajouté
+- **Reformulation LLM des sujets non-représentatifs** (`app/pipeline/subject_fixer.py::fix_subject_llm`) : le prompt system couvre désormais (1) les homoglyphes illisibles ET (2) les sujets automatiques non-représentatifs (forwarders WP « Réinitialisation du mot de passe », « Contact form ») — le LLM reformule à partir du body pour refléter la demande réelle. Si le sujet est déjà représentatif, renvoie tel quel (no-op).
+- **Tag `[NO_EMAIL_IN_THE_FORM]`** pour les forwarders WordPress (`is_wp_forwarder` = sender matchant `^(mail|wordpress|contact)@.*detective`, `tag_no_email` suffixe le sujet, idempotent) : ces formulaires n'ont pas d'email client → le vrai contact est le téléphone (champ Telefoonnummer). Signal visuel immédiat pour Daniel/CDAL et le brouillon. Déterministe, zéro LLM, zéro faux positif (l'agent Resend `agent@digitalhs.biz` ne matche pas).
+- **Hook pipeline** (`app/workers/imap_poller.py`) : après la correction homoglyphe, application du tag `NO_EMAIL_IN_THE_FORM` si sender = forwarder WP. Les futurs formulaires WP seront tagués dès l'inbox.
+- **Endpoint cockpit `POST /api/mails/{id}/fix-subject`** étendu : fetch le sender, reformulation LLM + tag WP (rétrocorrection #515 = reformulation + tag, même si le LLM ne propose rien le tag est appliqué sur l'original).
+
+### Changé
+- `fix_subject_llm` prompt élargi (homoglyphes + sujets non-représentatifs). L'auto-pipeline reste sur `is_subject_suspect` (homoglyphes only, détection déterministe fiable) — la reformulation non-représentative est déclenchée manuellement via le bouton cockpit (trop risquée en auto : faux positifs sur tous les sujets « Contact »).
+
+### Tests
+- `tests/test_subject_fixer.py` : +8 tests (`is_wp_forwarder` match/reject/case, `tag_no_email` add/idempotent/normal-sender/empty) → 20 tests au total.
+- `tests/test_web_fix_subject.py` : réécrit avec sender dans le schéma + 5 tests (#614 homoglyphes sans tag, #515 reformulation+tag, #515 tag-only si LLM noop, noop sender normal + LLM None, 404).
+
 ## [1.25.3] — 2026-06-23 (correction LLM des sujets illisibles — homoglyphes itsme #614)
 
 ### Contexte
