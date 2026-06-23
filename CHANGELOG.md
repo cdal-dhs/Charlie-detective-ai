@@ -1,5 +1,24 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.25.21] — 2026-06-23 (brouillon hors-légalité : refus + qualification commerciale)
+
+### Contexte
+Suite au brief de Daniel (fichier `260623 regle legale proposition charlie.md`) : lorsqu'une demande implique une méthode illégale (piratage WhatsApp/GSM, extraction de conversations, logiciel espion, mise sur écoute, localisation ou identification via un numéro de téléphone sans consentement), Charlie ne doit pas seulement refuser. Il doit **qualifier la vraie mission** en obtenant le but ultime du client, le contexte, les éléments disponibles et proposer l'alternative légale la plus pertinente (filature, surveillance, constat d'adresse, recherche d'identité).
+
+### Ajouté
+- **`app/pipeline/qualification_builder.py`** :
+  - Nouveaux patterns `regex` dans `_ILLEGAL_REQUEST_PATTERNS` pour la localisation/identification d'une personne **via son numéro de téléphone / GSM** (FR/NL/EN) et pour savoir **avec qui une personne communique** (interception de relation privée).
+  - Liste `_ILLEGAL_QUESTION_SPECS` des 11 questions de requalification systématiques : objectif final, lien avec la personne, contexte, éléments tangibles, éléments concrets disponibles, lieux fréquentés, horaires, type d'investigation légale souhaité, délai, usage du rapport.
+  - Réécriture de `_build_illegal_refusal_draft()` : refus clair et non négociable du côté illégal, puis pivot immédiat vers la qualification de la mission et l'alternative légale. Mention tarifaire conservée en guise d'indication, sans devis hâtif.
+
+### Changé
+- **`tests/test_illegal_request.py`** :
+  - Tests de détection pour les nouveaux cas "retrouver via numéro de GSM" et "savoir avec qui elle parle" en FR/NL/EN.
+  - Test de non-régression sur la structure du brouillon : présence du refus légal, des questions de qualification et de l'alternative légale.
+
+### Procédure
+- Avant chaque deploy : `pytest tests/test_illegal_request.py tests/test_subject_fixer.py tests/test_web_inbox_render.py`.
+
 ## [1.25.20] — 2026-06-23 (fix badge brouillon HTMX + test de non-régression cockpit)
 
 ### Contexte

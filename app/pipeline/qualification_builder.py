@@ -1106,13 +1106,16 @@ def build_followup_ack_draft(
     return "\n".join(lines)
 
 
-# --- v1.24.1 — Détection des demandes hors-légalité (piratage / accès non autorisé) ----
+# --- v1.24.1+ — Détection des demandes hors-légalité (piratage / accès non autorisé)
 # Quand un client demande à pirater un téléphone/WhatsApp/compte, extraire des
-# conversations privées, installer un logiciel espion ou mettre sur écoute sans
-# consentement, on ne génère PAS le brouillon qualifiant standard : on renvoie
-# une réponse polie et ferme qui explique qu'on respecte les lois belges et qui
-# propose l'alternative légale (filature, surveillance, constat). Cf. mail #614
-# (Serge M / « faire sortir les conversations WhatsApp »).
+# conversations privées, installer un logiciel espion, mettre sur écoute sans
+# consentement, ou obtenir une adresse/localisation à partir d'un numéro de
+# téléphone, on ne génère PAS le brouillon qualifiant standard : on renvoie une
+# réponse polie et ferme qui refuse la méthode, explique le cadre légal belge,
+# puis QUALIFIE la vraie mission en posant les questions indispensables (but,
+# lien, contexte, éléments disponibles, lieux, horaires, type de preuve, urgence,
+# usage du rapport). Cf. mail #614 (Serge M / « faire sortir les conversations
+# WhatsApp ») et brief Daniel 260623.
 _ILLEGAL_REQUEST_PATTERNS: tuple[re.Pattern[str], ...] = (
     # Extraction / récupération de communications privées (FR)
     re.compile(
@@ -1150,10 +1153,31 @@ _ILLEGAL_REQUEST_PATTERNS: tuple[re.Pattern[str], ...] = (
         r"(?:t[ée]l[ée]phonique|bancaire|appels?)",
         re.IGNORECASE,
     ),
-    # Géolocalisation sans consentement
+    # Géolocalisation / localisation via GSM sans consentement
     re.compile(
-        r"(?:localiser|g[ée]olocaliser).{0,30}"
+        r"(?:localiser|g[ée]olocaliser|retrouver|trouver).{0,30}"
         r"(?:sans\s+(?:son\s+consentement|le\s+savoir|qu['e]\s*elle\s+le\s+sache))",
+        re.IGNORECASE,
+    ),
+    # Recherche d'adresse / localisation / personne à partir d'un numéro de téléphone / GSM
+    re.compile(
+        r"(?:retrouver|trouver|localiser|chercher|avoir|obtenir).{0,30}"
+        r"(?:adresse|coordonn[ée]es|localisation|personne|quelqu['u]n).{0,20}"
+        r"(?:avec|via|par|depuis|à\s+partir\s+de|grâce\s+à).{0,20}"
+        r"(?:num[ée]ro|t[ée]l[ée]phone|gsm|portable|mobile)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:num[ée]ro|t[ée]l[ée]phone|gsm|portable|mobile).{0,30}"
+        r"(?:retrouver|trouver|localiser|chercher|avoir|obtenir|savoir).{0,20}"
+        r"(?:adresse|coordonn[ée]es|localisation|personne|quelqu['u]n|où\s+(?:elle|il|elle\s+habite|il\s+habite))",
+        re.IGNORECASE,
+    ),
+    # Savoir avec qui la personne communique (interception de relation privée)
+    re.compile(
+        r"(?:savoir|conna[îi]tre|d[ée]couvrir).{0,30}"
+        r"(?:avec\s+qui|avec\s+quelle|qui|quelle\s+personne).{0,30}"
+        r"(?:parle|parlait|communique|message|conversation|appel|t[ée]l[ée]phone|whatsapp|sms)",
         re.IGNORECASE,
     ),
     # Obtention d'un mot de passe
@@ -1164,6 +1188,26 @@ _ILLEGAL_REQUEST_PATTERNS: tuple[re.Pattern[str], ...] = (
     # NL : hackeren / aftappen / afluisteren / meeluisteren / bespionneren
     re.compile(r"(?:hackeren|aftappen|afluisteren|meeluisteren|bespionneren)", re.IGNORECASE),
     re.compile(r"wachtwoord.{0,30}(?:achterhalen|krijgen|ophalen|buiten|zonder)", re.IGNORECASE),
+    # NL : opsporen/vinden/achterhalen via telefoonnummer/gsm
+    re.compile(
+        r"(?:opsporen|vinden|lokaliseren|zoeken|achterhalen).{0,30}"
+        r"(?:telefoonnummer|gsm|telefoon|mobiel).{0,20}"
+        r"(?:adres|persoon|iemand|locatie|waar)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:telefoonnummer|gsm|telefoon|mobiel).{0,30}"
+        r"(?:opsporen|vinden|lokaliseren|zoeken|achterhalen).{0,20}"
+        r"(?:adres|persoon|iemand|locatie|waar)",
+        re.IGNORECASE,
+    ),
+    # NL : weten met wie iemand praat/spreekt
+    re.compile(
+        r"(?:weten|achterhalen).{0,30}"
+        r"(?:met\s+wie|waarmee|wie).{0,30}"
+        r"(?:praat|spreekt|belt|communiceert|bericht|gesprek|whatsapp|sms)",
+        re.IGNORECASE,
+    ),
     # EN : hack into / access her phone / retrieve her messages / spy on her / tap her phone
     re.compile(
         r"(?:hack\s+into|access\s+(?:her|his|their).{0,20}"
@@ -1173,6 +1217,19 @@ _ILLEGAL_REQUEST_PATTERNS: tuple[re.Pattern[str], ...] = (
         r"spy\s+on\s+(?:her|him|my\s+(?:wife|husband))|"
         r"tap\s+(?:her|his)\s+(?:phone|line)|"
         r"install\s+(?:spyware|a\s+tracker|keylogger))",
+        re.IGNORECASE,
+    ),
+    # EN : find/locate/trace/track someone/address from a phone number
+    re.compile(
+        r"(?:find|locate|trace|track|get).{0,30}"
+        r"(?:phone\s+number|mobile\s+number|cell\s+phone|cellphone|gsm|phone).{0,20}"
+        r"(?:address|person|someone|location|where)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:phone\s+number|mobile\s+number|cell\s+phone|cellphone|gsm|phone).{0,30}"
+        r"(?:find|locate|trace|track|get).{0,20}"
+        r"(?:address|person|someone|location|where)",
         re.IGNORECASE,
     ),
 )
@@ -1190,6 +1247,58 @@ def _detect_illegal_request(body: str) -> tuple[bool, str]:
     return False, ""
 
 
+# Questions de requalification systématiques pour les demandes hors-légalité.
+# (question_texte, [clés : au moins une non-vide = déjà répondeue])
+_ILLEGAL_QUESTION_SPECS: list[tuple[str, list[str]]] = [
+    ("L'objectif final de votre démarche", ["objectif_final"]),
+    ("Votre lien avec la personne concernée", ["relation_cible"]),
+    (
+        "Le contexte succinct : depuis quand, événement déclencheur, "
+        "signalements précédents",
+        ["contexte"],
+    ),
+    ("Avez-vous déjà évoqué le problème avec la personne concernée", ["deja_evoque"]),
+    ("Avez-vous déjà réuni des éléments tangibles", ["elements_tangibles"]),
+    (
+        "Quels éléments concrets disposez-vous (nom, prénom, date de naissance, "
+        "adresse précédente, GSM, e-mail, réseaux sociaux, plaque d'immatriculation, "
+        "lieu de travail, etc.)",
+        [
+            "nom_cible",
+            "prenom_cible",
+            "nom_recherche",
+            "prenom_recherche",
+            "adresse_depart_cible",
+            "region_recherche",
+            "date_naissance",
+            "telephone_cible",
+            "email_cible",
+            "vehicule_cible",
+        ],
+    ),
+    (
+        "Derniers lieux fréquentés ou domiciles possibles de la personne concernée",
+        ["adresse_depart_cible", "region_recherche"],
+    ),
+    (
+        "Horaires et jours de présence connus",
+        ["horaires_cible", "horaire_surveillance"],
+    ),
+    (
+        "Quel type de surveillance / investigation légale envisagez-vous "
+        "(filature discrète, surveillance fixe, constat d'adresse, recherche d'identité, "
+        "enquête de passé, etc.)",
+        ["type_mission"],
+    ),
+    ("Dans quel délai souhaitez-vous une intervention", ["delai"]),
+    (
+        "À quoi va servir le rapport (juridique / contentieux, familial, "
+        "professionnel, simple information)",
+        ["usage_rapport"],
+    ),
+]
+
+
 # Alternative légale proposée selon le cas de figure sous-jacent.
 _LEGAL_ALTERNATIVE: dict[str, str] = {
     "infidelite_filature": (
@@ -1198,12 +1307,19 @@ _LEGAL_ALTERNATIVE: dict[str, str] = {
         "de ses rencontres — éléments qui restent exploitables devant un "
         "tribunal le cas échéant"
     ),
-    "recherche_personne": "rechercher la personne par des moyens d'enquête légaux et discrets",
+    "recherche_personne": (
+        "rechercher la personne par des moyens d'enquête légaux et discrets "
+        "(bases de données réglementées, filature, constat d'adresse, enquête de "
+        "voisinage)"
+    ),
     "incapacite_travail": (
         "organiser une surveillance légale pour vérifier la situation "
         "d'incapacité alléguée, dans le respect du cadre légal"
     ),
-    "securite_passé_violences": "mener une enquête de passé dans le respect du cadre légal",
+    "securite_passé_violences": (
+        "mener une enquête de passé par des sources légales dans le respect "
+        "du cadre réglementaire"
+    ),
     "contre_espionnage_micros": (
         "inspecter vos locaux pour détecter d'éventuels micros ou caméras "
         "cachés — prestation légale que nous proposons"
@@ -1213,8 +1329,9 @@ _LEGAL_ALTERNATIVE: dict[str, str] = {
         "respect du cadre légal"
     ),
     "non_determine": (
-        "mener une enquête sur le terrain par des moyens légaux, dans le "
-        "respect du cadre applicable aux détectives privés en Belgique"
+        "mener une enquête sur le terrain par des moyens légaux : surveillance, "
+        "filature, constat d'adresse, recherche d'identité ou enquête de voisinage, "
+        "dans le respect du cadre applicable aux détectives privés en Belgique"
     ),
 }
 
@@ -1227,15 +1344,32 @@ def _build_illegal_refusal_draft(
     client_info: dict[str, str | None],
     case_info: dict[str, str | None],
 ) -> list[str]:
-    """Brouillon de refus poli d'une demande hors-légalité + alternative légale.
+    """Brouillon de refus poli d'une demande hors-légalité + requalification.
 
-    v1.24.1 — répond au besoin de Daniel : expliquer qu'on respecte les lois et
-    proposer ce qu'on peut faire à la place. Cf. mail #614 (Serge M / piratage).
+    v1.24.1 — répond au besoin de Daniel : refuser la méthode illégale, expliquer
+    le cadre légal et proposer ce qu'on peut faire à la place.
+
+    v1.25.21 — transforme le refus en outil de qualification commerciale : on
+    insiste pour obtenir le but ultime et les éléments nécessaires afin que Daniel
+    puisse proposer l'alternative légale la plus adaptée (filature, surveillance,
+    constat, recherche d'identité). Cf. brief Daniel 260623.
     """
     settings = get_settings()
-    received = _format_received_info(client_info, case_info, case)
-    missing = _filter_missing_questions(case, client_info, case_info)
+    merged = {**client_info, **case_info}
     alternative = _LEGAL_ALTERNATIVE.get(case, _LEGAL_ALTERNATIVE["non_determine"])
+
+    missing: list[str] = []
+    for question, keys in _ILLEGAL_QUESTION_SPECS:
+        if not _question_is_answered(merged, keys):
+            missing.append(question)
+
+    # On garde aussi les questions spécifiques au cas si elles apportent un complément.
+    missing_case = _filter_missing_questions(case, client_info, case_info)
+    seen = set(missing)
+    for q in missing_case:
+        if q not in seen:
+            missing.append(q)
+            seen.add(q)
 
     lines = [greeting, ""]
     lines.extend([
@@ -1250,33 +1384,35 @@ def _build_illegal_refusal_draft(
         "d'une personne (WhatsApp, SMS, e-mails, comptes téléphoniques ou "
         "réseaux sociaux) sans son consentement. L'extraction de conversations, "
         "le piratage d'un téléphone ou d'un compte, l'installation d'un logiciel "
-        "espion ou la mise sur écoute sans le consentement de la personne "
-        "constituent des infractions pénales (atteinte à la vie privée, accès "
-        "frauduleux à un système informatique). En tant que détectives agréés, "
-        "nous sommes tenus de respecter scrupuleusement la loi et ne proposons "
-        "jamais ce type de prestation.",
+        "espion, la mise sur écoute ou la localisation non consentie via le "
+        "numéro de téléphone constituent des infractions pénales (atteinte à la "
+        "vie privée, accès frauduleux à un système informatique). En tant que "
+        "détectives agréés, nous sommes tenus de respecter scrupuleusement la "
+        "loi et ne proposons jamais ce type de prestation.",
         "",
     ])
     lines.extend([
-        f"Ce que nous pouvons faire en revanche, dans un cadre parfaitement "
-        f"légal et éprouvé, c'est {alternative}.",
+        "Cela ne signifie pas que nous ne pouvons pas vous aider. Ce que nous "
+        "pouvons faire en revanche, dans un cadre parfaitement légal et éprouvé, "
+        f"c'est {alternative}.",
+        "",
+        "Pour cela, je dois qualifier précisément votre dossier et comprendre "
+        "l'objectif final que vous poursuivez. Plus les éléments ci-dessous seront "
+        "complets, plus je pourrai vous proposer une intervention adaptée et un "
+        "budget réaliste.",
         "",
     ])
 
-    if received:
-        lines.extend(["Merci pour les éléments suivants :", "", *received, ""])
-
     if missing:
         lines.extend([
-            "Afin de préparer votre dossier dans les meilleures conditions, "
-            "pourriez-vous me transmettre les éléments suivants :",
+            "Pourriez-vous me transmettre les informations suivantes :",
         ])
         for i, q in enumerate(missing, 1):
             lines.append(f"{i}. {q}.")
         lines.append("")
 
     lines.extend([
-        "Sur le plan tarifaire :",
+        "Sur le plan tarifaire, en guise d'indication :",
         f"- Ouverture de dossier : {settings.dossier_opening_fee} € HTVA.",
         f"- Rapport final : {settings.report_fee} € HTVA.",
         f"- Heure de détective : {settings.hourly_rate_day} €/h HTVA "
@@ -1293,7 +1429,8 @@ def _build_illegal_refusal_draft(
     lines.extend([
         "",
         "Dès réception de ces éléments, je reprendrai contact avec vous pour "
-        "finaliser le devis et convenir d'un échange téléphonique sur ce dossier.",
+        "échanger sur la stratégie d'enquête la plus pertinente et vous adresser "
+        "un devis adapté.",
         "",
         "Bien à vous,",
         "",

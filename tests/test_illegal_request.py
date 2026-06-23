@@ -1,4 +1,4 @@
-"""Tests de la détection des demandes hors-légalité (v1.24.1).
+"""Tests de la détection des demandes hors-légalité (v1.24.1 → v1.25.21).
 
 Contexte : mail #614 (Serge M) demande de « faire sortir toutes les
 conversations WhatsApp » du téléphone de son épouse = accès non autorisé aux
@@ -6,6 +6,10 @@ communications privées = infraction pénale en Belgique. Le brouillon qualifian
 infidélité standard est inadapté : on génère une réponse polie et ferme qui
 explique qu'on respecte les lois et propose l'alternative légale (filature /
 surveillance / constat).
+
+v1.25.21 — le refus devient un outil de qualification commerciale : en plus du
+refus clair, on insiste pour obtenir le but ultime, le contexte et les éléments
+disponibles afin de proposer l'alternative légale la plus pertinente.
 """
 
 from __future__ import annotations
@@ -70,6 +74,36 @@ def test_detect_illegal_mot_de_passe():
 def test_detect_illegal_releves_telephoniques():
     match, _ = _detect_illegal_request(
         "Pouvez-vous récupérer les relevés téléphoniques de mon mari ?"
+    )
+    assert match is True
+
+
+def test_detect_illegal_via_telephone_number_fr():
+    """Retrouver une personne/adresse à partir d'un numéro de GSM = illégal."""
+    match, _ = _detect_illegal_request(
+        "J'ai son numéro de GSM, pouvez-vous m'obtenir son adresse actuelle ?"
+    )
+    assert match is True
+
+
+def test_detect_illegal_savoir_avec_qui_parle():
+    """Savoir avec qui la cible communique = interception privée illégale."""
+    match, _ = _detect_illegal_request(
+        "Je veux savoir avec qui elle parle au téléphone et sur WhatsApp."
+    )
+    assert match is True
+
+
+def test_detect_illegal_nl_telefoonnummer():
+    match, _ = _detect_illegal_request(
+        "Ik wil iemand vinden via zijn telefoonnummer, adres achterhalen."
+    )
+    assert match is True
+
+
+def test_detect_illegal_en_phone_number():
+    match, _ = _detect_illegal_request(
+        "I have her phone number, can you find her current address?"
     )
     assert match is True
 
@@ -158,3 +192,30 @@ def test_build_draft_legit_not_refusal():
         case="infidelite_filature",
     )
     assert "infractions pénales" not in draft
+
+
+@pytest.mark.asyncio
+async def test_build_draft_includes_qualification_questions():
+    """v1.25.21 : le refus illégal doit poser les questions de qualification."""
+    from app.config import get_settings
+
+    settings = get_settings()
+    mailbox = settings.mailboxes()[0]
+    draft = build_qualification_draft(
+        subject="WhatsApp",
+        body="Pouvez-vous pirater son téléphone pour lire ses messages WhatsApp ?",
+        sender="jean@example.com",
+        mailbox=mailbox,
+        case="infidelite_filature",
+    )
+    # Refus clair + cadre légal.
+    assert "infractions pénales" in draft
+    assert "piratage" in draft.lower() or "accéder" in draft.lower()
+    # Objectif final.
+    assert "objectif final" in draft.lower()
+    # Lien avec la personne.
+    assert "lien avec la personne" in draft.lower()
+    # Type d'investigation légale.
+    assert "surveillance" in draft.lower()
+    # Mention tarifaire reste présente (transparence).
+    assert "Ouverture de dossier" in draft
