@@ -59,6 +59,12 @@ class Settings(BaseSettings):
     embedding_api_base: str = "https://openrouter.ai/api/v1"
     embedding_api_key: str = ""  # utilise openrouter_api_key si vide
     rag_top_k: int = 10  # v1.22.0 : 5 → 10 — plus de cas historiques au LLM
+    # v1.24.2 : RAG mis en pause par défaut. L'approche déterministe
+    # (qualification_builder + few-shot Daniel) est plus fiable et remplace le
+    # RAG pour la génération des brouillons. Le RAG était de plus cassé sur les
+    # 3 boîtes depuis 2026-05-28 (point de vigilance #1). Réactivable via
+    # RAG_ENABLED=true (utile uniquement si on re-bootstrap pairs_vec).
+    rag_enabled: bool = False
 
     poll_interval_seconds: int = 300
 

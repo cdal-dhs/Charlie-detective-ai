@@ -26,7 +26,7 @@ L'agent surveille 3 boîtes Infomaniak (3 marques : Detective Belgique FR, Detec
     Détection langue (toutes BCP-47)
     Classification fine du cas métier (incapacité, filature, recherche personne, récupération dette, etc.)
     Brouillon qualifiant déterministe (v1.22.7+) : questions structurées + tarifs + règles métier codées
-    RAG sur paires Q/R historiques (sqlite-vec + text-embedding-3-small) pour les autres catégories
+    RAG sur paires Q/R historiques (sqlite-vec + text-embedding-3-small) — ⚠️ en pause v1.24.2 (rag_enabled=False) : remplacé par l'approche déterministe + few-shot Daniel
     Génération LLM few-shot style Daniel + personnalité
   Chat AI Charlie (cockpit + Slack) :
     Recherche SQL + archives historiques (boite1/2/3) + Cerveau2 vault + mémoire
@@ -89,7 +89,7 @@ python -m scripts.bootstrap_cerveau2     # initialise Cerveau2 (une fois)
 python -m app.main
 ```
 
-> ⚠️ **Bug latent RAG (point de vigilance #9 du HANDOVER)** : si tu n'as pas re-bootstrappé les `pairs_vec` après la bascule embedder local → OpenRouter (v1.18.0 du 2026-05-28), le RAG retournera 0 résultat sur les 3 boîtes. Voir HANDOVER §9.
+> ⚠️ **RAG en pause (v1.24.2)** : le RAG est désactivé par défaut (`rag_enabled=False`) car l'approche déterministe (`qualification_builder` + few-shot Daniel) est plus fiable. Les tables `pairs_vec` n'ont pas été réindexées depuis la bascule embedder (2026-05-28). Voir HANDOVER §9 point de vigilance #1. Réactivable via `RAG_ENABLED=true` après `python -m scripts.bootstrap_embeddings`.
 
 ---
 
@@ -132,7 +132,7 @@ docker compose up -d --build      # si requirements.txt ou Dockerfile modifiés
 
 ---
 
-## Stack technique (état v1.24.1)
+## Stack technique (état v1.24.2)
 
 | Couche | Choix |
 |---|---|
@@ -142,8 +142,8 @@ docker compose up -d --build      # si requirements.txt ou Dockerfile modifiés
 | LLM router | **LiteLLM** + post-traitement `_clean_reasoning()` (30+ patterns regex, v1.21.2) |
 | LLM principal (classifier + generator + chat) | **`openai/kimi-k2.6:cloud`** via Ollama Pro Cloud (20€/mois), `api_base=https://ollama.com/v1` — **reasoning model** (extraction `reasoning_content`) |
 | LLM fallback | **`openai/glm-5.1:cloud`** via Ollama Pro Cloud |
-| Embeddings | **`openai/text-embedding-3-small`** via OpenRouter (API stateless, image Docker ~800MB au lieu de ~4GB) |
-| Vector store | **`sqlite-vec`** (extension SQLite, vit dans les DB existantes) |
+| Embeddings | **`openai/text-embedding-3-small`** via OpenRouter (API stateless, image Docker ~800MB au lieu de ~4GB) — ⚠️ RAG en pause v1.24.2 (`rag_enabled=False`) |
+| Vector store | **`sqlite-vec`** (extension SQLite, vit dans les DB existantes) — ⚠️ `pairs_vec` non réindexées depuis 2026-05-28 |
 | Détection langue | **`langdetect`** — `Language = str` (toutes BCP-47, v1.21.0+) |
 | Aide lecture multilingue | `app/pipeline/translator.py` + `draft_renderer.py` (v1.21.0) — 4 blocs si mail ≠ FR |
 | Email outbound principal | **IMAP Drafts** (V2a) — flag `\Draft`, dossier auto-découvert via SELECT probe |
@@ -155,7 +155,7 @@ docker compose up -d --build      # si requirements.txt ou Dockerfile modifiés
 | Service prod | **Docker + Docker Compose + Traefik** (VPS Hostinger KVM8) |
 | Logs | `structlog` (JSON structuré, rotation 7j) |
 | Config | `pydantic-settings` depuis `.env` |
-| Version | Source unique `app/_version.py` (`VERSION = "1.24.1"`) — `pyproject.toml` figé en 1.9.5 (volontaire) |
+| Version | Source unique `app/_version.py` (`VERSION = "1.24.2"`) — `pyproject.toml` figé en 1.9.5 (volontaire) |
 
 **Ne PAS introduire** sans discussion : Kubernetes, Swarm, Celery, Redis, Postgres, ORM lourd, framework JS front (React/Vue/Angular). Le périmètre Docker actuel (1 service Compose + Traefik externe) est figé.
 
@@ -201,7 +201,7 @@ DETECTIVE_BE/
 │   │   ├── classifier.py        # LLM → 8 catégories avec few-shots
 │   │   ├── priority.py          # Priorité intelligente (high/normal/low)
 │   │   ├── language.py          # Détection langue (toutes BCP-47)
-│   │   ├── rag.py               # Embed + retrieve sqlite-vec
+│   │   ├── rag.py               # Embed + retrieve sqlite-vec (⚠️ en pause v1.24.2, rag_enabled=False)
 │   │   ├── generator.py         # Assemblage prompt + appel LLM + _load_daniel_fewshot()
 │   │   ├── translator.py        # Aide lecture multilingue (v1.21.0)
 │   │   └── draft_renderer.py    # Rendu brouillon enrichi 4 blocs (v1.21.0)
@@ -254,10 +254,10 @@ DETECTIVE_BE/
 
 ## Statut
 
-✅ **Production active** — `detective.digitalhs.biz` — **v1.24.1**
+✅ **Production active** — `detective.digitalhs.biz` — **v1.24.2**
 
 - **Pipeline IMAP** : polling 3 boîtes toutes les 5 min, classification 8 catégories, priorité intelligente, flag `AgentProcessed` (succès) + `AgentAttempted` (libère la queue même en cas de crash, v1.21.3).
-- **Génération brouillon** : kimi-k2.6:cloud (reasoning model), style Daniel imité via few-shot learning (v1.22.0) + personnalité Cerveau2 + RAG sqlite-vec.
+- **Génération brouillon** : kimi-k2.6:cloud (reasoning model), style Daniel imité via few-shot learning (v1.22.0) + personnalité Cerveau2. **RAG sqlite-vec en pause (v1.24.2)** — remplacé par le brouillon qualifiant déterministe (`qualification_builder`) pour les `demande_client`/`prise_contact`.
 - **Aide lecture multilingue v1.21.0** : pour mails NL/EN/DE/ES/etc., brouillon enrichi avec 4 blocs (email d'origine + traduction FR + proposition FR + traduction langue source). Réponse TOUJOURS en FR.
 - **Livraison V2a — Drafts IMAP (v1.17+)** : dépôt direct dans la boîte source, flag `\Draft`, sujet `DEMANDE D'Approbation - Reponse Demande Client : ...`. Resend conservé en fallback uniquement.
 - **Endpoint retry-draft v1.21.0** : `POST /api/drafts/{id}/retry` pour régénérer un brouillon manquant (cas deadlock poller).
@@ -279,7 +279,7 @@ Voir `docs/ROADMAP.md` pour la roadmap V2b/V2c (polishing cockpit, feedback loop
 
 ## Versions
 
-Version source de vérité : **`app/_version.py`** (`VERSION = "1.24.1"`).
+Version source de vérité : **`app/_version.py`** (`VERSION = "1.24.2"`).
 
 Le badge affiché dans le cockpit est lu dynamiquement depuis `app/_version.py`. **Tolérance zéro** sur la désynchronisation.
 

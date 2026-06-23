@@ -45,7 +45,7 @@
 
 ## 3. Stack technique
 
-État au **2026-06-22 (v1.24.1)**. La SPEC.md d'origine est désalignée sur certains points — **cette section fait foi**.
+État au **2026-06-23 (v1.24.2)**. La SPEC.md d'origine est désalignée sur certains points — **cette section fait foi**.
 
 | Couche | Choix |
 |---|---|
@@ -56,8 +56,8 @@
 | LLM principal (pipeline : classifier, generator) | **`openai/kimi-k2.6:cloud`** via Ollama Pro Cloud (20€/mois), provider `openai/` + `api_base=https://ollama.com/v1` — **raisonnement activé, voir §6 "LLM Ollama"** |
 | LLM chat Charlie (cockpit + Slack Bot) | **`openai/kimi-k2.6:cloud`** (même provider — bascule v1.19.3, gemma4:31b faisait des refus systématiques) |
 | LLM fallback | **`openai/glm-5.1:cloud`** via Ollama Pro Cloud (Claude Sonnet 4 est 404 sur OpenRouter) |
-| Embeddings | **`openai/text-embedding-3-small`** via OpenRouter (API stateless — image Docker ~800MB au lieu de ~4GB avec sentence-transformers local) |
-| Vector store | **`sqlite-vec`** (extension SQLite, vit dans les DB existantes) |
+| Embeddings | **`openai/text-embedding-3-small`** via OpenRouter (API stateless — image Docker ~800MB au lieu de ~4GB avec sentence-transformers local) — ⚠️ **RAG en pause v1.24.2** (`rag_enabled=False`) : l'approche déterministe (`qualification_builder` + few-shot Daniel) remplace le RAG pour les brouillons |
+| Vector store | **`sqlite-vec`** (extension SQLite, vit dans les DB existantes) — ⚠️ **tables `pairs_vec` non réindexées depuis 2026-05-28** (RAG en pause, voir point de vigilance #1 du HANDOVER) |
 | Détection langue | **`langdetect`** (remplace fasttext qui ne build pas sur Mac ARM) — supporte **toutes langues BCP-47** (v1.21.0+) |
 | Aide lecture multilingue | **`app/pipeline/translator.py` + `app/pipeline/draft_renderer.py`** (v1.21.0) — mail ≠ FR → 4 blocs dans brouillon (NL original + FR + proposition FR + NL traduite) |
 | Email outbound — **livraison brouillon** | **IMAP Drafts** (V2a livrée) : `app/delivery/imap_draft.py`, flag `\Draft`, auto-découverte dossier via `LIST` |
@@ -198,10 +198,10 @@ Le script `scripts/deploy-to-vps.sh` intègre ce workflow. **Ne jamais utiliser 
 
 ## 7. État courant du projet
 
-État au **2026-06-22 — v1.24.1** déployée en prod. Voir `HANDOVER.md` pour le détail complet, `CHANGELOG.md` pour l'historique, `docs/ROADMAP.md` pour la roadmap à jour.
+État au **2026-06-23 — v1.24.2** déployée en prod. Voir `HANDOVER.md` pour le détail complet, `CHANGELOG.md` pour l'historique, `docs/ROADMAP.md` pour la roadmap à jour.
 
 ### ✅ Livré
-- **S1 → S4 terminées** : infra & data, pipeline IMAP, RAG + génération, prod 24/7 sur KVM8.
+- **S1 → S4 terminées** : infra & data, pipeline IMAP, génération (RAG mis en pause v1.24.2 — approche déterministe), prod 24/7 sur KVM8.
 - **V2a — Livraison Drafts IMAP** (v1.17+) : Charlie dépose les brouillons dans `Drafts` de la boîte source, flag `\Draft`. Daniel approuve/rejette depuis sa boîte mail. Resend conservé en fallback.
 - **Cerveau2-Det** : vault + API sur `cerveau2-det.digitalhs.biz`, ingestion 100% emails + PJ, recherche sémantique + keyword, nuage de liaison YAML (frontmatter `epouse`, `mari`, etc.).
 - **Cockpit web** : `detective.digitalhs.biz` — inbox filtrable, conversation détaillée avec viewer PJ, chat AI Charlie, dashboard admin (stats, settings LLM, audit logs, télémétrie, backup Cerveau2).
@@ -212,6 +212,7 @@ Le script `scripts/deploy-to-vps.sh` intègre ce workflow. **Ne jamais utiliser 
 - **LLM kimi-k2.6:cloud stable v1.21.1+** : bascule depuis gemma4:31b (obsolète) + claude-sonnet-4 (404). Extraction `reasoning_content` + post-traitement `_clean_reasoning()` v1.21.2 (filtre 30+ patterns de traces de raisonnement).
 - **Hardening classifier v1.24.0** (meeting Daniel 2026-06-22) : 3 règles déterministes où le body l'emporte sur le sujet — `_is_wp_contact_form()` (formulaires WordPress toutes boîtes), `_is_reply_to_daniel()` (Re:+citation signée Daniel), `_has_strong_human_demand()` (exception au « jamais remonter depuis phishing »). Rattrape #515 (formulaire WP classé facture), #606 (Re:+devis classé facture), #614 (homoglyphes itsme classé phishing). #515 + #606 reclassés et livrés en prod. Règle d'or : faux positifs acceptables, faux négatifs intolérables.
 - **Brouillon hors-légalité v1.24.1** : `_detect_illegal_request()` (11 regex FR/NL/EN) court-circuite le brouillon qualifiant si le client demande un piratage / accès non autorisé aux communications (WhatsApp, téléphone, compte, logiciel espion) → `_build_illegal_refusal_draft()` = refus poli + cadre légal belge (infractions pénales) + alternative légale (filature/surveillance/constat). Pour #614 (Serge M / « faire sortir les conversations WhatsApp »).
+- **RAG mis en pause v1.24.2** : `rag_enabled: bool = False` dans `config.py` (env `RAG_ENABLED`). `retrieve()` court-circuite avant tout appel embedding. L'approche déterministe (`qualification_builder` + few-shot Daniel) est plus fiable et remplace le RAG pour les brouillons `demande_client`/`prise_contact`. Le RAG était de plus cassé sur les 3 boîtes depuis 2026-05-28 (`pairs_vec` vide/missing). Code conservé intact pour réactivation. Voir point de vigilance #1 du HANDOVER.
 
 ### ⏳ En cours
 - **V2b — Polishing cockpit** : filtres inbox (3 boîtes cochées par défaut), latence Charlie < 5s (parallélisation Cerveau2 + SQL déjà faite).
@@ -222,7 +223,7 @@ Le script `scripts/deploy-to-vps.sh` intègre ce workflow. **Ne jamais utiliser 
 
 ### ⬜ À venir
 - **V3** : module factures (extraction montant/échéance/fournisseur), bot WhatsApp client, dashboard web supervision dédié, suppression mails > 28 jours, architecture multi-sub-agents avec LLM différencié par tâche.
-- **Bug connu** : `pairs_vec` table missing sur `boite2.sqlite` — RAG retrieval échoue (rag=0) sur cette boîte. À investiguer hors-scope v1.21.x.
+- **Bug connu → RAG mis en pause (v1.24.2)** : `pairs_vec` était missing/vide sur les boîtes (RAG cassé depuis 2026-05-28). Décision v1.24.2 : le RAG est désactivé par défaut (`rag_enabled=False` dans `config.py`) car l'approche déterministe (`qualification_builder` + few-shot Daniel) est plus fiable et le remplace pour les brouillons. Réactivable via `RAG_ENABLED=true` après `python -m scripts.bootstrap_embeddings`. Voir point de vigilance #1 du HANDOVER.
 
 ---
 

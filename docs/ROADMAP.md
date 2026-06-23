@@ -71,6 +71,8 @@ Les 3 DB indexées avec embeddings, le guide de style validé, l'environnement l
 
 **Objectif** : pour chaque `demande_client` détecté, générer un brouillon de qualité et l'envoyer à CDAL via Resend.
 
+> ⚠️ **v1.24.2 — RAG mis en pause** : `pipeline.rag.retrieve` est désactivé par défaut (`rag_enabled=False`). L'approche déterministe (`qualification_builder` + few-shot Daniel) remplace le RAG pour les brouillons `demande_client`/`prise_contact`. Le RAG n'est plus un chantier ouvert — réactivable via `RAG_ENABLED=true` après `python -m scripts.bootstrap_embeddings`. Voir HANDOVER §9 point de vigilance #1.
+
 ### Tâches
 - [x] Brancher `pipeline.language.detect_language` sur les mails entrants
 - [x] Brancher `pipeline.rag.retrieve` (déjà codé, validé sur vraie DB — 2042 paires)
@@ -278,7 +280,7 @@ Resend reste actif **uniquement** pour :
 ## ⬜ V3 — Extensions
 
 - [ ] Module factures : extraction montant/échéance/fournisseur, création tâche comptable
-- [ ] Bot WhatsApp client (Twilio ou WhatsApp Business API) — réutilise pipeline RAG
+- [ ] Bot WhatsApp client (Twilio ou WhatsApp Business API) — réutilise le brouillon qualifiant déterministe (RAG en pause depuis v1.24.2)
 - [ ] Dashboard web supervision (FastAPI + HTMX, accessible via SSH tunnel ou réseau privé)
 - [ ] Suppression mails > 28 jours (politique de rétention)
 - [ ] Architecture multi-sub-agents : router orchestrateur qui dispatch par tâche, chaque agent sa config LLM

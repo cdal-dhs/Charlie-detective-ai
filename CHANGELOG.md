@@ -1,5 +1,40 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.24.2] — 2026-06-23 (RAG mis en pause — l'approche déterministe le remplace)
+
+### Contexte
+Le RAG (retrieval sur ~2042 paires Q/R historiques via `sqlite-vec`) est **mis en pause** par défaut. La nouvelle approche de génération de brouillons — brouillon qualifiant **déterministe** par code (`qualification_builder.py`, v1.22.7+) avec questions structurées par cas de figure + récupération des informations déjà fournies par le client + few-shot Daniel (v1.22.4) — est **plus fiable** que le RAG et le remplace pour la génération des brouillons `demande_client` / `prise_contact`.
+
+Ce constat est confirmé par deux faits :
+1. Le RAG était de toute façon **cassé sur les 3 boîtes** depuis le 2026-05-28 (point de vigilance #1 du HANDOVER : `boite1` = table `pairs` vide, `boite2`/`boite3` = table inexistante). Le bootstrap n'a jamais été ré-exécuté après la bascule embedder local → OpenRouter (v1.18.0). Tous les brouillons générés depuis avaient RAG=0.
+2. Pour les `demande_client` / `prise_contact`, le résultat du RAG (`pairs`) **n'était de toute façon pas utilisé** : la branche `build_qualification_draft` (déterministe) ignore `pairs`. Le RAG n'était exploité que dans la branche `else` (catégories hors `draft_categories`), qui ne correspond pas aux brouillons clients.
+
+Mettre le RAG en pause supprime donc un appel embedding inutile (coût + latence) sans aucune perte de qualité sur les brouillons clients.
+
+### Changé — `app/config.py`
+- Nouveau setting `rag_enabled: bool = False` (env `RAG_ENABLED`). Désactivé par défaut. Réactivable via `RAG_ENABLED=true` — utile uniquement si on re-bootstrappe `pairs_vec` et qu'on décide de réinjecter des exemples historiques dans la branche `else` du générateur.
+
+### Changé — `app/pipeline/rag.py`
+- `retrieve()` court-circuite immédiatement (retourne `[]`) si `rag_enabled=False`, **avant** tout appel à l'API embedding. Log `rag.disabled_skip`. Le reste du code (embed, `_connect`, query sqlite-vec) est conservé intact pour réactivation ultérieure. La dégradation silencieuse d'origine (table manquante / API échoue) reste en place.
+
+### Inchangé — `app/pipeline/generator.py`
+- L'appel `retrieve()` reste en place ; il retourne désormais `[]` sans IO ni appel API. Le log `generator.retrieved rag=0` reflète l'état. Aucune branche du générateur ne régressait (la branche `demande_client`/`prise_contact` n'utilisait pas `pairs`).
+
+### Config — `.env.example`
+- Section `# --- RAG ---` mise à jour : commentaire explicatif + `RAG_ENABLED=false`.
+
+### Documentation
+- `CLAUDE.md` (§3 stack, §7 état courant) : RAG marqué « en pause (v1.24.2) — remplacé par l'approche déterministe ».
+- `README.md` (architecture, stack, statut) : idem.
+- `HANDOVER.md` (fichiers clés, point de vigilance #1) : point #1 reformulé — le RAG n'est plus un bug à corriger en urgence mais une fonctionnalité mise en pause par choix, réactivable.
+- `docs/ROADMAP.md` : item RAG marqué en pause.
+
+### Tests
+- **137/137 tests verts** (aucune régression — les tests mockaient déjà `retrieve → []`).
+
+### À venir
+- Si on souhaite réactiver le RAG un jour : `python -m scripts.bootstrap_embeddings` (re-indexer `pairs_vec` sur les 3 boîtes) + `RAG_ENABLED=true` + vérifier que la branche `else` du générateur en tire bénéfice. Hors-scope tant que l'approche déterministe donne satisfaction.
+
 ## [1.24.1] — 2026-06-22 (brouillon hors-légalité — refus poli + alternative légale)
 
 ### Contexte

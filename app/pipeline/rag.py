@@ -55,7 +55,22 @@ def _connect(db_path: Path) -> sqlite3.Connection:
 
 
 def retrieve(db_path: Path, query_text: str, top_k: int = 5) -> list[RetrievedPair]:
-    """Dégradation silencieuse si la table n'existe pas ou si l'API embedding échoue."""
+    """Récupère les paires Q/R historiques les plus similaires.
+
+    v1.24.2 : RAG mis en pause par défaut (settings.rag_enabled = False).
+    L'approche déterministe (qualification_builder + few-shot Daniel, v1.22.4)
+    est plus fiable que le RAG et remplace celui-ci pour la génération des
+    brouillons. Le RAG était de plus cassé sur les 3 boîtes depuis le
+    2026-05-28 (table pairs vide / inexistante, point de vigilance #1). On
+    court-circuite donc l'appel embedding (coût + latence) tant qu'on n'a pas
+    re-bootstrappé pairs_vec ET décidé de réactiver le RAG.
+
+    Dégradation silencieuse si la table n'existe pas ou si l'API embedding
+    échoue (comportement d'origine conservé).
+    """
+    if not get_settings().rag_enabled:
+        log.info("rag.disabled_skip")
+        return []
     try:
         qvec = embed(query_text)
         conn = _connect(db_path)
