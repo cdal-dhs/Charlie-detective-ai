@@ -1,5 +1,32 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.25.1] — 2026-06-23 (sujet de brouillon lisible + brouillon pour demande floue — #515)
+
+### Contexte
+Deux irritants remontés sur les brouillons `demande_client` livrés dans les Drafts IMAP (V2a) :
+
+1. **Sujet de brouillon illisible** (#515) : les formulaires WordPress relaient le mail du client avec un sujet template sans rapport avec la vraie demande (« Réinitialisation du mot de passe », « Nouveau Message De Détective privé Belgique - Prenons contact », « Contactformulier », « Uw bericht »…), expédié par un forwarder (`wordpress@`/`contactform@`/`no-reply@`/`mail@`). Le sujet du brouillon IMAP (`DEMANDE D'Approbation - Reponse Demande Client : {sujet}`) devenait alors absurde et illisible pour Daniel dans sa boîte.
+2. **Demande floue** (#515 Nathalie / #615 douane) : un client raconte sa situation sans formuler de demande opérationnelle claire (pas de cible/horaires/lieu) ni poser de question de tarif. Le brouillon qualifiant standard alignait alors une batterie de questions opérationnelles (cible, adresse de départ, horaires, véhicule…) décalées et inadaptées tant que la demande n'est pas clarifiée.
+
+### Ajouté
+- **`suggested_subject_for_draft()`** (`app/pipeline/qualification_builder.py`) : détecte un sujet « absurde » (sujet matchant un template WP **ou** expéditeur = forwarder) et retourne un libellé lisible `"{cas_label} — {Prénom NOM}"` (ou juste le libellé si aucun nom n'est extrait du body). Retourne `None` si le sujet original est pertinent (on le garde). Le résultat est propagé via `GenerationResult.suggested_subject` (`app/pipeline/generator.py`) jusqu'à la livraison IMAP (`app/delivery/imap_draft.py`) qui l'utilise à la place du sujet original quand il est défini.
+- **Détection des demandes floues** (`_is_vague_request()`) : la dette a sa propre logique (jamais floue) ; une question de tarif explicite désactive la détection (le client sait ce qu'il veut → brouillon standard) ; `non_determine` lapidaire (< 200 chars, sans tarif) = flou ; cas classé = flou si **aucune** info opérationnelle extraite (questions d'index ≥ 3 dans `_CASE_QUESTION_SPECS`).
+- **Brouillon de clarification** (`_build_vague_request_draft()`) : accuse réception, restitue les infos déjà reçues (nom, prénom, GSM… via `_format_received_info`), demande poliment ce que le client souhaite obtenir concrètement, donne les tarifs (transparence), propose un échange téléphonique au numéro fourni le cas échéant (Task #4 partielle : vrai contact = téléphone pour les formulaires WP), et signe au nom de Daniel. **Pas de questions opérationnelles** numérotées.
+
+### Changé
+- `app/pipeline/qualification_builder.py` : `build_qualification_draft()` gagne une branche « demande floue » (après le refus hors-légalité v1.24.1, avant la dette/standard) qui court-circuite vers le brouillon de clarification.
+- `app/pipeline/generator.py` : `GenerationResult` gagne le champ `suggested_subject` ; la branche `demande_client` calcule et logge le `suggested_subject`.
+- `app/delivery/imap_draft.py` : le `Subject` du brouillon IMAP utilise `gen.suggested_subject or incoming.subject`.
+- `_TARIFF_QUESTION_PATTERNS` : pattern élargi pour matcher « quel est votre tarif » / « quel est le tarif » (trop restrictif auparavant).
+
+### Tests
+- `tests/test_qualification_builder.py` : 13 nouveaux tests (suggested_subject ×4, _is_vague_request ×6, _build_vague_request_draft ×2, build_qualification_draft flou ×1). Les 3 tests existants du brouillon standard ont été enrichis d'une question de tarif au body (sans quoi le body lapidaire est désormais correctement détecté comme flou — le changement de comportement est voulu). **150 tests verts** (137 + 13).
+
+### Point de vigilance
+La détection floue repose sur l'extraction d'infos opérationnelles (`_extract_case_info` + `_extract_client_info`). Un cas classé avec une info op extraite à tort (faux positif d'extraction) ne sera **pas** détecté comme flou et recevra le brouillon standard. Règle d'or conservée : faux positifs acceptables, faux négatifs intolérables.
+
+---
+
 ## [1.25.0] — 2026-06-23 (bascule des modèles LLM — gemma4:31b principal + glm-5.2:cloud fallback)
 
 ### Contexte

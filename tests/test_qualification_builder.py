@@ -8,9 +8,12 @@ import pytest
 
 from app.config import MailboxConfig
 from app.pipeline.qualification_builder import (
+    _build_vague_request_draft,
     _extract_first_name,
+    _is_vague_request,
     build_followup_ack_draft,
     build_qualification_draft,
+    suggested_subject_for_draft,
 )
 
 
@@ -42,9 +45,11 @@ def test_extract_first_name_rejects_single_word() -> None:
 
 
 def test_build_draft_contains_base_questions(mailbox: MailboxConfig) -> None:
+    # Une question de tarif rend la demande non-floue (le client sait ce qu'il
+    # veut) → brouillon standard avec toutes les questions manquantes.
     draft = build_qualification_draft(
         subject="Demande",
-        body="Bonjour,\n\nCordialement,\nPierre Martin\n",
+        body="Bonjour,\n\nQuel est votre tarif pour une filature ?\n\nCordialement,\nPierre Martin\n",
         sender="pierre@example.com",
         mailbox=mailbox,
         case="infidelite_filature",
@@ -63,7 +68,7 @@ def test_build_draft_contains_base_questions(mailbox: MailboxConfig) -> None:
 def test_build_draft_for_incapacite_travail(mailbox: MailboxConfig) -> None:
     draft = build_qualification_draft(
         subject="Arrêt maladie",
-        body="Bonjour,\n\nCordialement,\nPierre Martin\n",
+        body="Bonjour,\n\nCombien coûte votre intervention ?\n\nCordialement,\nPierre Martin\n",
         sender="pierre@example.com",
         mailbox=mailbox,
         case="incapacite_travail",
@@ -75,7 +80,7 @@ def test_build_draft_for_incapacite_travail(mailbox: MailboxConfig) -> None:
 def test_build_draft_for_recherche_personne(mailbox: MailboxConfig) -> None:
     draft = build_qualification_draft(
         subject="Disparu",
-        body="Bonjour,\n\nCordialement,\nSophie Dubois\n",
+        body="Bonjour,\n\nQuel est le tarif ?\n\nCordialement,\nSophie Dubois\n",
         sender="sophie@example.com",
         mailbox=mailbox,
         case="recherche_personne",
@@ -190,3 +195,146 @@ Le jeu. 18 juin 2026, 08:30, Soso Sb <sososb2810@gmail.com> a écrit :
         case="infidelite_filature",
     )
     assert "Bonjour Sophie," in draft
+
+
+# --- v1.25.1 — #515 : sujet de brouillon lisible + demande floue -----------------
+
+
+def test_suggested_subject_none_for_pertinent_subject() -> None:
+    # Sujet client normal, expéditeur direct → on garde le sujet original.
+    assert (
+        suggested_subject_for_draft(
+            subject="Demande de filature sur mon conjoint",
+            body="Bonjour,\n\nmon nom est Jean Dupont\n",
+            sender="jean.dupont@gmail.com",
+            case="infidelite_filature",
+        )
+        is None
+    )
+
+
+def test_suggested_subject_for_wp_template_subject() -> None:
+    # Sujet template WP absurde relayé par forwarder → libellé cas + nom client.
+    subject = "Nouveau Message De Détective privé Belgique - Prenons contact"
+    result = suggested_subject_for_draft(
+        subject=subject,
+        body="Bonjour,\n\nmon nom est Jean Dupont\n",
+        sender="contact@detectivebelgique.be",
+        case="infidelite_filature",
+    )
+    assert result == "Filature / surveillance — Jean Dupont"
+
+
+def test_suggested_subject_for_forwarder_sender_without_template() -> None:
+    # Pas de template dans le sujet, mais expéditeur = forwarder WP → sujet absurde.
+    result = suggested_subject_for_draft(
+        subject="Demande",
+        body="Bonjour,\n\nmon nom est Jean Dupont\n",
+        sender="WordPress <wordpress@detectivebelgique.be>",
+        case="recherche_personne",
+    )
+    assert result is not None
+    assert result.startswith("Recherche de personne — ")
+
+
+def test_suggested_subject_label_only_when_no_name() -> None:
+    # Sujet absurde mais aucun nom extrait du body → libellé seul, sans « — ».
+    result = suggested_subject_for_draft(
+        subject="Contactformulier",
+        body="Bonjour,\n\nQuel est le tarif ?\n",
+        sender="contactform@detectivebelgique.be",
+        case="incapacite_travail",
+    )
+    assert result == "Incapacité de travail"
+    assert "—" not in (result or "")
+
+
+def test_is_vague_request_dette_always_false() -> None:
+    # La dette a sa propre structure de brouillon, jamais floue.
+    assert _is_vague_request("Bonjour", "recuperation_dette", {}, {}) is False
+
+
+def test_is_vague_request_tariff_question_is_not_vague() -> None:
+    assert _is_vague_request(
+        "Combien coûte votre intervention ?", "infidelite_filature", {}, {}
+    ) is False
+
+
+def test_is_vague_request_nondetermine_short_is_vague() -> None:
+    assert _is_vague_request("Bonjour", "non_determine", {}, {}) is True
+
+
+def test_is_vague_request_nondetermine_long_is_not_vague() -> None:
+    long_body = "Bonjour,\n\n" + ("Je vous contacte pour une affaire délicate. " * 20)
+    assert len(long_body) >= 200
+    assert _is_vague_request(long_body, "non_determine", {}, {}) is False
+
+
+def test_is_vague_request_classified_without_op_info_is_vague() -> None:
+    # Cas classé mais aucune info opérationnelle (cible, adresse, horaires…).
+    assert _is_vague_request("Bonjour", "infidelite_filature", {}, {}) is True
+
+
+def test_is_vague_request_classified_with_op_info_is_not_vague() -> None:
+    # Une info opérationnelle (nom de la cible) suffit à sortir du flou.
+    assert (
+        _is_vague_request(
+            "Bonjour",
+            "infidelite_filature",
+            {"nom_cible": "Grégory Segers"},
+            {},
+        )
+        is False
+    )
+
+
+def test_build_vague_request_draft_has_clarification_and_tariffs(
+    mailbox: MailboxConfig,
+) -> None:
+    draft = "\n".join(
+        _build_vague_request_draft(
+            greeting="Bonjour Pierre,",
+            first_name="Pierre",
+            mailbox=mailbox,
+            case="infidelite_filature",
+            client_info={},
+            case_info={},
+        )
+    )
+    assert "souhaitez obtenir" in draft
+    assert "Ouverture de dossier" in draft
+    assert "Daniel Hurchon" in draft
+    # Pas de questions opérationnelles numérotées tant que la demande est floue.
+    assert "1. Vos nom et prénom complets" not in draft
+    assert "2." not in draft
+
+
+def test_build_vague_request_draft_mentions_phone_if_provided(
+    mailbox: MailboxConfig,
+) -> None:
+    # Task #4 : si un téléphone est extrait du body, on propose un rappel.
+    draft = "\n".join(
+        _build_vague_request_draft(
+            greeting="Bonjour,",
+            first_name=None,
+            mailbox=mailbox,
+            case="non_determine",
+            client_info={"telephone": "0491502786"},
+            case_info={},
+        )
+    )
+    assert "0491502786" in draft
+    assert "de vive voix" in draft
+
+
+def test_build_qualification_draft_vague_request_path(mailbox: MailboxConfig) -> None:
+    # Mail lapidaire sans demande opérationnelle ni question de tarif → brouillon flou.
+    draft = build_qualification_draft(
+        subject="Demande",
+        body="Bonjour,\n\nCordialement,\nPierre Martin\n",
+        sender="pierre@example.com",
+        mailbox=mailbox,
+        case="infidelite_filature",
+    )
+    assert "souhaitez obtenir" in draft
+    assert "1. Vos nom et prénom complets" not in draft

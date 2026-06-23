@@ -1320,8 +1320,20 @@ def build_qualification_draft(
     client_info = _extract_client_info(body, sender)
     case_info = _extract_case_info(body, case)
     first_name = client_info.get("prenom") or _extract_first_name(body)
-    need = _rephrase_need(subject, body, case)
     greeting = f"Bonjour {first_name}," if first_name else "Bonjour,"
+
+    # v1.25.1 — demande floue : le client raconte sa situation sans exprimer une
+    # demande opérationnelle claire (pas de cible/horaires/lieu, pas de question
+    # tarif). On n'aligne pas les questions opérationnelles (inadaptées) ; on
+    # accuse réception, on restitue les infos reçues et on demande poliment ce
+    # qu'il souhaite obtenir concrètement. Cf. #515 (Nathalie) / #615 (douane).
+    if _is_vague_request(body, case, case_info, client_info):
+        log.info("qualification.vague_request_detected", case=case)
+        return "\n".join(_build_vague_request_draft(
+            greeting, first_name, mailbox, case, client_info, case_info,
+        ))
+
+    need = _rephrase_need(subject, body, case)
 
     # Pour le cas dette, on conserve la structure spécifique de Daniel.
     if case == "recuperation_dette":
@@ -1338,6 +1350,193 @@ def build_qualification_draft(
             case_info=case_info,
         )
     return "\n".join(lines)
+
+
+# --- v1.25.1 — Sujet de brouillon quand le sujet original est absurde -----------
+# Les formulaires WordPress relaient le mail avec un sujet template sans rapport
+# avec la vraie demande client (« Réinitialisation du mot de passe », « Nouveau
+# Message De Détective privé Belgique - Prenons contact », « Contactformulier »,
+# « Uw bericht »…), expédié par un forwarder (wordpress@/contactform@/no-reply@).
+# Le sujet du brouillon IMAP devient alors illisible pour Daniel. On le remplace
+# par un libellé court du cas + le nom du client extrait du body. Cf. #515.
+_WP_TEMPLATE_SUBJECT_PATTERNS = re.compile(
+    r"(?:"
+    r"r[ée]initialis(?:ation|er)\s+(?:du\s+)?(?:mot\s+de\s+passe|wachtwoord)"
+    r"|wachtwoord\s+reset|password\s+reset"
+    r"|nouveau\s+message(?:\s+de)?|new\s+message(?:\s+from)?"
+    r"|prenons\s+contact|contactformulier|contact\s+form(?:ulaire)?"
+    r"|uw\s+bericht|votre\s+message|bericht\s+van|message\s+from\s+"
+    r"|website\s+contact|form\s+submission"
+    r")",
+    re.IGNORECASE,
+)
+
+# Forwarders de formulaires WordPress / notifications automatiques.
+_FORWARDER_PATTERNS = re.compile(
+    r"(?:wordpress|contactform|no-?reply|noreply|mail)@",
+    re.IGNORECASE,
+)
+
+# Libellés courts pour le sujet du brouillon (plus lisibles que _CASE_LABELS).
+_CASE_LABELS_SHORT: dict[str, str] = {
+    "incapacite_travail": "Incapacité de travail",
+    "infidelite_filature": "Filature / surveillance",
+    "recherche_personne": "Recherche de personne",
+    "recuperation_dette": "Récupération de dette",
+    "securite_passé_violences": "Enquête de passé",
+    "contre_espionnage_micros": "Détection micros / caméras",
+    "non_determine": "Demande d'enquête",
+}
+
+
+def _extract_sender_email(sender: str) -> str:
+    """Retourne l'adresse email nue depuis un header From (ex: 'WordPress <x@y>')."""
+    m = re.search(r"[^\s<>]+@[^\s<>]+", sender or "")
+    return m.group(0) if m else (sender or "")
+
+
+def suggested_subject_for_draft(
+    subject: str,
+    body: str,
+    sender: str,
+    case: str,
+) -> str | None:
+    """Sujet de brouillon lisible quand le sujet original est un template WP absurde.
+
+    Retourne ``None`` si le sujet original est pertinent (on le garde tel quel).
+    Sinon retourne ``"{cas_label} — {Prénom NOM}"`` (ou juste le libellé si pas de
+    nom extrait). Cf. v1.25.1 — #515.
+    """
+    is_absurd = (
+        bool(_WP_TEMPLATE_SUBJECT_PATTERNS.search(subject or ""))
+        or bool(_FORWARDER_PATTERNS.search(_extract_sender_email(sender)))
+    )
+    if not is_absurd:
+        return None
+
+    label = _CASE_LABELS_SHORT.get(case, "Demande d'enquête")
+    client_info = _extract_client_info(body, sender)
+    prenom = _capitalize_name(client_info.get("prenom"))
+    nom = _capitalize_name(client_info.get("nom"))
+    nom_complet = _capitalize_name(client_info.get("nom_complet"))
+    full = nom_complet or " ".join(p for p in [prenom, nom] if p)
+    if full:
+        return f"{label} — {full}"
+    return label
+
+
+# --- v1.25.1 — Détection des demandes floues ---------------------------------
+# Une demande est "floue" quand le client raconte sa situation sans formuler une
+# demande opérationnelle claire (pas de cible/horaires/lieu précis) ET ne pose pas
+# de question de tarif. Pour les cas classés : aucune question opérationnelle
+# (index ≥ 3 dans les specs, après nom/adresse/tel client) n'est répondue. Pour
+# non_determine : body court (< 200 chars) sans tarif = manifestement lapidaire.
+# La dette a sa propre logique (exclue). Cf. #515 (Nathalie) / #615 (douane).
+_TARIFF_QUESTION_PATTERNS = re.compile(
+    r"(?:"
+    r"combien\s+(?:ça\s+)?co[ûu]t|"
+    r"quel(?:le)?\s+(?:est\s+)?(?:le\s+|votre\s+|vos\s+|du\s+|de\s+)?(?:prix|tarif|co[ûu]t)"
+    r"|prix\s+[:?]|tarif\s+[:?]|co[ûu]t\s+de\s+(?:votre|vos|une|un)"
+    r"|what\s+(?:is\s+)?(?:the\s+)?(?:price|cost|rate)|how\s+(?:much|many)"
+    r"|wat\s+kost|hoeveel|prijs|tarieven"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _is_vague_request(
+    body: str,
+    case: str,
+    case_info: dict[str, str | None],
+    client_info: dict[str, str | None],
+) -> bool:
+    """Vrai si la demande est floue (clarification nécessaire avant devis)."""
+    if case == "recuperation_dette":
+        return False
+    # Une question de tarif explicite = le client sait ce qu'il veut, on répond
+    # avec le brouillon standard (qui contient déjà les tarifs + questions).
+    if _TARIFF_QUESTION_PATTERNS.search(body or ""):
+        return False
+    if case == "non_determine":
+        # Atypique et lapidaire, sans demande de prix → demande manifestement floue.
+        return len((body or "").strip()) < 200
+    # Cas classé : flou si AUCUNE info opérationnelle extraite (questions d'index
+    # ≥ 3, i.e. tout sauf nom/adresse/GSM du client).
+    specs = _CASE_QUESTION_SPECS.get(case, [])
+    merged = {**client_info, **case_info}
+    for i, (_q, keys) in enumerate(specs):
+        if i < 3:
+            continue
+        if any(merged.get(k) for k in keys):
+            return False  # au moins une info opérationnelle → pas flou
+    return True
+
+
+def _build_vague_request_draft(
+    greeting: str,
+    first_name: str | None,
+    mailbox: MailboxConfig,
+    case: str,
+    client_info: dict[str, str | None],
+    case_info: dict[str, str | None],
+) -> list[str]:
+    """Brouillon de clarification pour une demande floue.
+
+    Accuse réception, restitue les infos déjà reçues (nom, prénom, GSM…), demande
+    poliment ce que le client souhaite obtenir concrètement, donne les tarifs
+    (transparence) et propose un échange téléphonique au numéro fourni le cas
+    échéant. PAS de questions opérationnelles (inadaptées tant que la demande
+    n'est pas clarifiée). Cf. v1.25.1 — #515 / #615.
+    """
+    settings = get_settings()
+    received = _format_received_info(client_info, case_info, case)
+
+    lines = [greeting, ""]
+    lines.extend([
+        "Je vous remercie pour votre message et accuse bonne réception de "
+        "votre demande. Je prends le temps de vous lire avec attention.",
+        "",
+    ])
+
+    if received:
+        lines.extend(["Vous m'avez déjà communiqué les éléments suivants :", "", *received, ""])
+
+    lines.extend([
+        "Afin de bien comprendre votre demande et de pouvoir vous proposer un "
+        "devis adapté, pourriez-vous me préciser ce que vous souhaitez obtenir "
+        "concrètement de notre intervention ?",
+        "",
+    ])
+
+    # Task #4 (partiel) : pour les formulaires WP relayés par un forwarder, le
+    # vrai contact du client est le téléphone extrait du body. On propose un
+    # échange au numéro fourni plutôt que de répondre au forwarder email.
+    tel = client_info.get("telephone")
+    if tel:
+        lines.extend([
+            f"Je me permets également de vous recontacter au {tel} pour en "
+            f"discuter de vive voix, si vous le souhaitez.",
+            "",
+        ])
+
+    lines.extend([
+        "Sur le plan tarifaire :",
+        f"- Ouverture de dossier : {settings.dossier_opening_fee} € HTVA.",
+        f"- Rapport final : {settings.report_fee} € HTVA.",
+        f"- Heure de détective : {settings.hourly_rate_day} €/h HTVA "
+        f"({settings.hourly_rate_night_weekend} €/h nuit/week-end).",
+        "",
+        "Dès que vous m'aurez précisé votre demande, je reprendrai contact avec "
+        "vous pour finaliser le devis et convenir d'un échange téléphonique.",
+        "",
+        "Bien à vous,",
+        "",
+        "Daniel Hurchon",
+        f"{mailbox.brand}",
+        "GSM 0471/31.81.20",
+        "contact@detectivebelgique.be",
+    ])
+    return lines
 
 
 # --- Brouillon récupération de dette (conservé tel quel) ---------------------

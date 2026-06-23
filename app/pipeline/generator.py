@@ -9,7 +9,11 @@ from app.config import MailboxConfig, get_settings
 from app.llm.router import complete
 from app.pipeline.case_classifier import classify_case
 from app.pipeline.language import Language
-from app.pipeline.qualification_builder import build_followup_ack_draft, build_qualification_draft
+from app.pipeline.qualification_builder import (
+    build_followup_ack_draft,
+    build_qualification_draft,
+    suggested_subject_for_draft,
+)
 from app.pipeline.rag import RetrievedPair, retrieve
 from app.settings_store import get_llm_models
 
@@ -38,6 +42,9 @@ class GenerationResult:
     model_used: str
     category: str
     vault_notes: list[VaultNote] = field(default_factory=list)
+    # v1.25.1 : sujet de brouillon lisible quand le sujet original est un template
+    # WP absurde (formulaire relayé par forwarder). None = garder le sujet original.
+    suggested_subject: str | None = None
 
 
 def _load_personality() -> str:
@@ -334,6 +341,7 @@ async def generate_draft(
     draft_categories = {
         c.strip().lower() for c in settings.draft_categories.split(",") if c.strip()
     }
+    suggested_subject: str | None = None
     if is_followup_response:
         # Réponse client à un échange récent : on n'envoie pas le brouillon
         # qualifiant standard, juste un accusé de réception professionnel.
@@ -352,10 +360,15 @@ async def generate_draft(
         raw_draft = build_qualification_draft(
             incoming_subject, incoming_body, sender, mailbox, case_type
         )
+        # v1.25.1 : sujet lisible si le sujet original est un template WP absurde.
+        suggested_subject = suggested_subject_for_draft(
+            incoming_subject, incoming_body, sender, case_type
+        )
         log.info(
             "generator.qualification_draft",
             case=case_type,
             length=len(raw_draft),
+            suggested_subject=bool(suggested_subject),
         )
     else:
         messages = _build_messages(
@@ -418,6 +431,7 @@ async def generate_draft(
         model_used=llm_default,
         category=category,
         vault_notes=vault_notes,
+        suggested_subject=suggested_subject,
     )
 
 

@@ -195,7 +195,10 @@ async def append_draft(
     msg = EmailMessage()
     msg["From"] = mailbox.user
     msg["To"] = incoming.sender
-    msg["Subject"] = f"DEMANDE D'Approbation - Reponse Demande Client : {incoming.subject}"
+    # v1.25.1 : si le sujet original est un template WP absurde (formulaire relayé
+    # par forwarder), on le remplace par un libellé lisible (cas + nom du client).
+    draft_subject = gen.suggested_subject or incoming.subject
+    msg["Subject"] = f"DEMANDE D'Approbation - Reponse Demande Client : {draft_subject}"
     msg.set_content(body_text)
     message_bytes = msg.as_bytes()
 
