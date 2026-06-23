@@ -1,5 +1,29 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.25.12] — 2026-06-23 (tolérance zéro formulaires WordPress — #520, #590, #600)
+
+### Contexte
+Scan des forwarders `wordpress@detective*` / `mail@detective*` depuis le 01/06/2026 a révélé **3 demandes client passées à travers les mailles** :
+- **#520** (`detective_belgique`, `mail@detectivebelgique.be`) — garde exclusive, ex-mari alcool → classé `newsletter`.
+- **#590** (`detective_belgique`, `mail@detectivebelgique.be`) — infidélité / cohabitation RDC/Liège → classé `newsletter`.
+- **#600** (`detective_belgique`, `mail@detectivebelgique.be`) — recouvrement créance >100 K€, solvabilité → classé `autre`.
+
+Ces formulaires WP contenaient bien les champs structurés `Nom/Prénom/Téléphone/Votre profil`, mais le **pré-filtre rapide** les capturait d'abord via des règles génériques (`newsletter` sur le sujet template, `autre` sur les mentions légales, `facture` sur les mots « devis »/« créance »). Ils ne passaient jamais devant le classifier LLM et son post-traitement `_enforce_recall_over_precision`.
+
+### Ajouté
+- **`_is_wp_contact_form()`** déplacé dans `app/pipeline/prefilter.py` et enrichi d'un wrapper `is_wordpress_contact_form(msg)` qui scanne le corps complet (jusqu'à 8000 caractères).
+- **`_get_body_text()`** dans `prefilter.py` : extraction du corps texte/HTML pour analyse, contrairement à `_get_body_snippet()` qui était limité à 1000 caractères.
+- **Priorité absolue dans `quick_classify()`** : un formulaire WP structuré retourne `demande_client` **avant** toute règle `phishing`/`newsletter`/`autre`/`facture`/`rappel`. Tolérance zéro : aucun formulaire WP ne doit plus être raté.
+- **Ceinture + bretelles dans `_bypass_prefilter_for_followup()`** : si un formulaire WP passe malgré tout dans `autre`/`newsletter`/`rappel`/`facture`, le poller le renvoie au classifier LLM.
+- **Backfill + livraison** des 3 mails manquants (#520, #590, #600) et livraison du brouillon #615 qui était généré mais non livré.
+
+### Changé
+- `app/pipeline/classifier.py` importe `_is_wp_contact_form` depuis `app.pipeline.prefilter` (single source of truth). Les tests existants continuent de fonctionner grâce au ré-export.
+
+### Tests
+- `tests/test_prefilter_wp_forms.py` : 15 tests (formulaires FR/NL, sujet trompeur reset password, connexion WP non-détectée, tous les forwarders acceptés).
+- 268 tests au total, 0 régression.
+
 ## [1.25.11] — 2026-06-23 (réponses clients format Outlook + forwarder WP — #513 Toon Breyne)
 
 ### Contexte

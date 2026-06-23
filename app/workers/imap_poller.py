@@ -26,7 +26,7 @@ from app.pipeline.classifier import _is_human_followup, _is_reply_to_daniel, cla
 from app.pipeline.document_extract import extract_text_bytes, is_supported
 from app.pipeline.generator import generate_draft
 from app.pipeline.language import detect_language
-from app.pipeline.prefilter import quick_classify
+from app.pipeline.prefilter import _is_wp_contact_form, quick_classify
 from app.pipeline.priority import assign_priority
 from app.pipeline.subject_fixer import fix_subject_llm, is_subject_suspect, tag_no_email
 
@@ -1114,12 +1114,15 @@ def _bypass_prefilter_for_followup(
     body: str,
     sender: str,
 ) -> bool:
-    """v1.25.10 — retourne True si le pré-filtre doit être ignoré car le mail
-    est visiblement une relance/réponse humaine. Le pré-filtre rapide est trop
-    rugueux sur les réponses clients (bannières de sécurité, keywords génériques).
+    """v1.25.12 — retourne True si le pré-filtre doit être ignoré car le mail
+    est visiblement une relance/réponse humaine OU un formulaire WP. Le pré-filtre
+    rapide est trop rugueux sur les réponses clients (bannières de sécurité,
+    keywords génériques) et sur les formulaires WordPress (sujets trompeurs).
     """
     if prefilter_category not in {"autre", "newsletter", "rappel", "facture"}:
         return False
+    if _is_wp_contact_form(body):
+        return True
     return _is_reply_to_daniel(body, sender) or _is_human_followup(subject, body, sender)
 
 

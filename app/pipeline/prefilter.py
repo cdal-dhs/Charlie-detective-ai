@@ -125,6 +125,15 @@ FORM_SUBJECTS = (
     "demande de contact", "prise de contact",
 )
 
+# ── WordPress contact form (detectivebelgium.com / detectivebelgique.be) ──
+# v1.25.12 — tolérance zéro : un formulaire WP avec champs structurés est
+# TOUJOURS une demande_client, avant toute autre règle du pré-filtre.
+_WP_FORM_NL_FIELDS = ("achternaam:", "voornaam:", "telefoonnummer:")
+_WP_FORM_FR_FIELDS = ("nom:", "prénom:", "téléphone:", "prenom:", "telephone:")
+_WP_FORM_FR_MARKER = "votre profil"
+_WP_FORM_NL_MARKER = "hoe kunnen wij u helpen"
+
+
 # ── Facture ──────────────────────────────────────────────────
 FACTURE_KEYWORDS = (
     "facture", "invoice", "vat", "tva", "acompte",
@@ -212,6 +221,49 @@ def _is_own_domain(sender: str) -> bool:
     """Vérifie si l'expéditeur appartient à un des domaines de Detective.be."""
     own_domains = ("detectivebelgique.be", "detectivebelgium.com", "dpdhuinvestigations.be")
     return any(d in sender.lower() for d in own_domains)
+
+
+def _is_wp_contact_form(body: str) -> bool:
+    """Détecte un formulaire de contact WordPress (detectivebelgium.com NL ou
+    detectivebelgique.be FR). Ces mails arrivent via un expéditeur technique
+    (mail@/wordpress@/contact@detective*) avec un sujet parfois trompeur, mais
+    le body structuré en champs est la signature fiable d'une vraie demande client.
+    """
+    b = body.lower()
+    nl_hits = sum(1 for f in _WP_FORM_NL_FIELDS if f in b)
+    if nl_hits >= 2 and _WP_FORM_NL_MARKER in b:
+        return True
+    fr_hits = sum(1 for f in _WP_FORM_FR_FIELDS if f in b)
+    if fr_hits >= 2 and _WP_FORM_FR_MARKER in b:
+        return True
+    # Cas robuste : 3 champs NL sans le marker (formulaire variant)
+    if nl_hits >= 3:
+        return True
+    return False
+
+
+def _get_body_text(msg: Message, max_chars: int = 8000) -> str:
+    """Extrait le corps texte complet (jusqu'à max_chars) pour analyse."""
+    if msg.is_multipart():
+        for part in msg.walk():
+            if part.get_content_type() == "text/plain":
+                payload = part.get_payload(decode=True)
+                if payload:
+                    return payload.decode("utf-8", errors="replace")[:max_chars]
+        for part in msg.walk():
+            if part.get_content_type() == "text/html":
+                payload = part.get_payload(decode=True)
+                if payload:
+                    text = re.sub(r"<[^>]+>", " ", payload.decode("utf-8", errors="replace"))
+                    return text[:max_chars]
+    else:
+        payload = msg.get_payload(decode=True)
+        if payload:
+            text = payload.decode("utf-8", errors="replace")
+            if msg.get_content_type() == "text/html":
+                text = re.sub(r"<[^>]+>", " ", text)
+            return text[:max_chars]
+    return ""
 
 
 # Domaines d'outils métiers connus (compta, banque, logiciels internes)
@@ -334,15 +386,27 @@ def is_demande_client(msg: Message) -> bool:
     return bool(any(fs in subject for fs in FORM_SUBJECTS))
 
 
+def is_wordpress_contact_form(msg: Message) -> bool:
+    """True si le body contient les champs structurés d'un formulaire WP
+    detectivebelgium.com (NL) ou detectivebelgique.be (FR).
+    """
+    return _is_wp_contact_form(_get_body_text(msg, max_chars=8000))
+
+
 def quick_classify(msg: Message) -> str | None:
     """Retourne une catégorie si une règle ÉVIDENTE s'applique, sinon None
     (→ on délègue au LLM classifier qui a un vrai cerveau).
 
     ORDRE : du plus spécifique/dangereux au plus général.
+    WordPress contact form EN PREMIER — c'est une demande_client incontestable
+    et son sujet/body peuvent matcher newsletter/service/facture à tort.
     Newsletter AVANT service_email car les newsletters (SendGrid, etc.)
     peuvent matcher des mots-clés service dans leur corps.
-    demande_client est EXCLU du pré-filtre rapide (trop de faux positifs).
+    demande_client est EXCLU du pré-filtre rapide (trop de faux positifs),
+    sauf les formulaires WordPress du propre site.
     """
+    if is_wordpress_contact_form(msg):
+        return "demande_client"
     if is_phishing(msg):
         return "phishing"
     if is_newsletter(msg):

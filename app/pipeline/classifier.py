@@ -6,6 +6,7 @@ import structlog
 
 from app.config import get_settings
 from app.llm.router import complete
+from app.pipeline.prefilter import _is_wp_contact_form
 from app.settings_store import get_llm_model_classifier
 
 log = structlog.get_logger()
@@ -198,10 +199,7 @@ _HUMAN_HINTS_IN_BODY = (
 # (mail@/wordpress@/contact@detective*) et un sujet parfois trompeur (template WP
 # « Réinitialisation du mot de passe »). Le body structuré en champs est la seule
 # signature fiable. Voir mails #515 (Nathalie Hairemans), #555, #503, #615.
-_WP_FORM_NL_FIELDS = ("achternaam:", "voornaam:", "telefoonnummer:")
-_WP_FORM_FR_FIELDS = ("nom:", "prénom:", "téléphone:", "prenom:", "telephone:")
-_WP_FORM_FR_MARKER = "votre profil"
-_WP_FORM_NL_MARKER = "hoe kunnen wij u helpen"
+# v1.25.12 — importé depuis app.pipeline.prefilter pour centraliser la détection.
 
 # v1.24.0 — marqueurs d'un phishing ACTIF dans le body. Si présents, on ne remonte
 # JAMAIS depuis phishing même si le body ressemble à une demande. Permet de
@@ -303,25 +301,6 @@ _SIGNED_NAME_RE = re.compile(
 )
 # Fallback : juste un prénom + nom en toute fin de body (sans formule de politesse).
 _TRAILING_NAME_RE = re.compile(r"\n\s*([A-ZÀ-Ý][\wà-ÿ\-]+(?:\s+[A-ZÀ-Ý\w][\wà-ÿ\-]*){0,3})\s*$")
-
-
-def _is_wp_contact_form(body: str) -> bool:
-    """Détecte un formulaire de contact WordPress (detectivebelgium.com NL ou
-    detectivebelgique.be FR). Ces mails arrivent via un expéditeur technique
-    (mail@/wordpress@/contact@detective*) avec un sujet parfois trompeur, mais
-    le body structuré en champs est la signature fiable d'une vraie demande client.
-    """
-    b = body.lower()
-    nl_hits = sum(1 for f in _WP_FORM_NL_FIELDS if f in b)
-    if nl_hits >= 2 and _WP_FORM_NL_MARKER in b:
-        return True
-    fr_hits = sum(1 for f in _WP_FORM_FR_FIELDS if f in b)
-    if fr_hits >= 2 and _WP_FORM_FR_MARKER in b:
-        return True
-    # Cas robuste : 3 champs NL sans le marker (formulaire variant)
-    if nl_hits >= 3:
-        return True
-    return False
 
 
 def _has_strong_human_demand(body: str) -> tuple[bool, str]:
