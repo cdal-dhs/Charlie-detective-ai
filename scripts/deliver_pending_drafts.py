@@ -49,9 +49,7 @@ async def _ensure_column(db_path: Path) -> None:
             cols = [row[1] for row in await cur.fetchall()]
         if "delivered_at" not in cols:
             log.info("deliver.add_column", column="delivered_at")
-            await db.execute(
-                "ALTER TABLE mail_processed ADD COLUMN delivered_at TEXT"
-            )
+            await db.execute("ALTER TABLE mail_processed ADD COLUMN delivered_at TEXT")
             await db.commit()
 
 
@@ -62,7 +60,7 @@ async def _fetch_pending(
         db.row_factory = aiosqlite.Row
         sql = """
             SELECT id, imap_uid, mailbox_name, subject, sender, received_at,
-                   ai_draft
+                   ai_draft, body
             FROM mail_processed
             WHERE category = 'demande_client'
               AND draft_generated = 1
@@ -120,9 +118,7 @@ async def main(apply: bool, limit: int | None, only_id: int | None) -> None:
 
     await _ensure_column(settings.db_agent_state)
 
-    pending = await _fetch_pending(
-        settings.db_agent_state, only_id=only_id, limit=limit
-    )
+    pending = await _fetch_pending(settings.db_agent_state, only_id=only_id, limit=limit)
     log.info("deliver.candidates", count=len(pending))
 
     if not apply:
@@ -149,7 +145,8 @@ async def main(apply: bool, limit: int | None, only_id: int | None) -> None:
         incoming = IncomingMail(
             sender=mail["sender"] or "",
             subject=_sanitize_subject(mail["subject"] or ""),
-            body="",  # Le brouillon ne dépend pas du body — déjà tout dans ai_draft
+            body=mail.get("body")
+            or "",  # v1.25.9 — passe le body original pour qu'il apparaisse dans le brouillon IMAP
             received_at=mail["received_at"] or "",
             message_id=mail.get("imap_uid") or "",  # fallback sur imap_uid
         )
@@ -175,9 +172,7 @@ async def main(apply: bool, limit: int | None, only_id: int | None) -> None:
         try:
             ok = await append_draft(incoming, mailbox, gen, mail_id=mail["id"])
         except Exception as exc:
-            log.error(
-                "deliver.exception", mail_id=mail["id"], error=str(exc)
-            )
+            log.error("deliver.exception", mail_id=mail["id"], error=str(exc))
             ok = False
 
         if ok:

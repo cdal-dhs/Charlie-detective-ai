@@ -1,5 +1,22 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.25.9] — 2026-06-23 (brouillon IMAP : EMAIL #xxx + mail original visibles)
+
+### Contexte
+Daniel ne voyait pas assez rapidement, en haut du brouillon IMAP, **l'adresse email du client final** et **le mail original**. Problème particulier avec les formulaires WordPress relayés par des forwarders (`mail@detectivebelgique.be`, `no-reply@zupee.in`) : le champ "To" du brouillon pointait sur le forwarder, pas sur le vrai client. Daniel doit pouvoir relire le contexte et vérifier la destination en un coup d'œil avant d'approuver.
+
+### Ajouté
+- **`_build_draft_body()`** (`app/delivery/imap_draft.py`) : ligne immédiatement sous le bandeau "⚠️ BROUILLON IA" affichant **`EMAIL #xxx — email_client`** + lien cockpit.
+- **Mail original garanti** : si `gen.draft` (via `draft_renderer.py`) ne contient pas déjà le message original, `incoming.body` est injecté explicitement au-dessus du brouillon proposé avec les headers `De` / `Sujet`. Si `gen.draft` le contient déjà, on évite la duplication.
+- **`deliver_pending_drafts.py`** : la requête SQL récupère désormais aussi la colonne `body` et la passe dans `IncomingMail`, pour que les brouillons historiques re-livrés contiennent le contexte complet.
+
+### Changé
+- Format text/plain du corps des brouillons IMAP : plus lisible pour Daniel, contexte client en premier.
+
+### Tests
+- `tests/test_imap_draft.py` : 3 tests (EMAIL #id visible, mail original injecté quand absent du draft, pas de duplication quand présent).
+- 230 tests au total, 0 régression.
+
 ## [1.25.8] — 2026-06-23 (relance humaine + candidature spontanée — #Vacature Xavier Plaghki)
 
 ### Contexte

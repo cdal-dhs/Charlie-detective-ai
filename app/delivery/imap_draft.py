@@ -158,14 +158,38 @@ def _build_draft_body(
 ) -> str:
     """Assemble le corps text/plain du brouillon avec bandeau contextuel.
 
-    Le message original du client est déjà inclus dans gen.draft (via
-    draft_renderer.py), on ne le duplique pas ici.
+    v1.25.9 — Daniel doit voir immédiatement l'EMAIL #id et l'adresse du client
+    en haut du brouillon. Le message original est normalement déjà présent dans
+    gen.draft (via draft_renderer.py) ; s'il manque (brouillon legacy), on
+    l'injecte depuis incoming.body pour garantir le contexte complet.
     """
     lines = ["⚠️  BROUILLON IA — À RELIRE AVANT ENVOI"]
+    if mail_id:
+        lines.append(f"EMAIL #{mail_id} — {incoming.sender}")
+    else:
+        lines.append(f"EMAIL CLIENT — {incoming.sender}")
     if mail_id and base_url:
         lines.append(f"Dossier cockpit : {base_url.rstrip('/')}/app/conversation/{mail_id}")
     lines.append("────────────────────────────────────────")
     lines.append("")
+
+    draft_has_original = "=== MESSAGE ORIGINAL DU CLIENT ===" in (gen.draft or "")
+    original_body = (incoming.body or "").strip()
+
+    # Si le draft ne contient pas déjà le message original, on l'affiche explicitement
+    # avant le brouillon proposé. Sinon on laisse draft_renderer le gérer (en fin
+    # de draft) pour éviter la duplication.
+    if original_body and not draft_has_original:
+        lines.append("📧 MAIL ORIGINAL DU CLIENT")
+        lines.append(f"De : {incoming.sender}")
+        lines.append(f"Sujet : {incoming.subject}")
+        lines.append("────────────────────────────────────────")
+        lines.append(original_body)
+        lines.append("")
+        lines.append("════════════════════════════════════════")
+        lines.append("💬 BROUILLON DE RÉPONSE PROPOSÉ")
+        lines.append("")
+
     lines.append(gen.draft)
     return "\n".join(lines)
 
@@ -188,9 +212,7 @@ async def append_draft(
     """
     settings = get_settings()
 
-    body_text = _build_draft_body(
-        incoming, gen, mail_id, settings.public_base_url or ""
-    )
+    body_text = _build_draft_body(incoming, gen, mail_id, settings.public_base_url or "")
 
     msg = EmailMessage()
     msg["From"] = mailbox.user
@@ -241,9 +263,7 @@ async def append_draft(
             return False
 
         # Vérification post-dépôt : confirmer que le brouillon est indexé dans Drafts
-        verified = await _verify_draft_present(
-            client, drafts_folder, msg["Subject"]
-        )
+        verified = await _verify_draft_present(client, drafts_folder, msg["Subject"])
         if verified:
             log.info(
                 "imap_draft.ok",
