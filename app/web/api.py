@@ -202,8 +202,8 @@ async def _fetch_mails_partial(
         "priority",
         "processed_at",
         "body_preview",
-        "attachment_count",
         "body",
+        "attachment_count",
     ]
 
     def _mask_sender(row_dict: dict) -> dict:

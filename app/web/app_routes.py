@@ -133,7 +133,7 @@ async def _fetch_mails(
     cols = [
         "id", "mailbox_name", "subject", "sender", "received_at",
         "category", "status", "priority", "processed_at", "body_preview",
-        "attachment_count", "ai_draft", "body",
+        "body", "attachment_count", "ai_draft",
     ]
 
     def _mask_sender(row_dict: dict) -> dict:

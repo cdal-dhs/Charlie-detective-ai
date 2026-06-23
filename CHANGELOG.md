@@ -1,5 +1,19 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.25.19] — 2026-06-23 (fix P0 cockpit 500 après v1.25.18)
+
+### Contexte
+Déploiement de v1.25.18 a rendu le cockpit `/app/` inaccessible avec une **erreur 500**. Cause : désalignement entre les colonnes du `SELECT SQL` et la liste `cols` utilisée par `dict(zip(..., strict=True))` dans `_fetch_mails()` et `_fetch_mails_partial()`. `ai_draft` recevait la valeur entière de `attachment_count`, ce qui provoquait `TypeError: object of type 'int' has no len()` dans le template Jinja2 (`inbox_rows.html` line 7).
+
+### Fixé
+- **`app/web/app_routes.py`** : réalignement de `cols` avec le `SELECT` (ordre correct : `body`, `attachment_count`, `ai_draft`).
+- **`app/web/api.py`** : même correction pour la route `/api/inbox` (HTMX) afin d'éviter un crash silencieux ou un second 500 au rechargement de la liste.
+
+### Vérification
+- Healthcheck HTTP 200.
+- Cockpit `/app/` accessible.
+- `/api/inbox` retourne les lignes sans erreur.
+
 ## [1.25.18] — 2026-06-23 (masque d'expéditeur NO_EMAIL_IN_THE_FORM pour forwarders WP)
 
 ### Contexte
