@@ -1,5 +1,27 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.25.16] — 2026-06-23 (nettoyage + régénération 100% des drafts IMAP existants)
+
+### Contexte
+Suite aux garde-fous v1.25.15, audit de tous les brouillons IMAP existants dans les 3 boîtes a révélé :
+- 34 drafts au total.
+- 12 drafts à supprimer (tests CDAL, notifications non-client).
+- 14 drafts legacy (vieux format sans `EMAIL #xxx` ou avec ancien bandeau) à régénérer au format v1.25.15+.
+- 1 draft EN (#202) incomplet sur les 4 blocs multilingues.
+- Plusieurs doublons suite aux régénérations.
+
+### Ajouté
+- **`scripts/audit_nl_drafts_v3.py`** : audit intelligent des drafts IMAP — vérifie `EMAIL #xxx`, les 4 blocs pour les mails non-FR, et la présence de la proposition FR. Supporte le fallback `conversation/{id}` quand `EMAIL #` manque.
+- **`scripts/cleanup_drafts_by_uid.py`** : suppression ciblée de brouillons par boîte + UID.
+- **`scripts/cleanup_drafts_without_email_id.py`** : suppression automatique de tous les drafts qui ne contiennent pas `EMAIL #xxx`.
+- **`scripts/dedup_drafts_by_email_id.py`** : dédoublonnage des drafts par `EMAIL #id` (garde l'UID le plus élevé).
+- **`scripts/regenerate_and_deliver_drafts.py`** : régénère + relivre un batch de IDs au format actuel, avec détection langue + follow-up.
+
+### Résultat
+- **21/21 drafts OK** après nettoyage, régénération et dédoublonnage.
+- **0 draft NL incomplet**, **0 draft FR incomplet**.
+- 100% des brouillons IMAP respectent désormais le format attendu.
+
 ## [1.25.15] — 2026-06-23 (garde-fou 100% qualité brouillons multilingues)
 
 ### Ajouté
