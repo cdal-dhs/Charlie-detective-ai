@@ -1,5 +1,20 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.25.17] — 2026-06-23 (hotfix audit faux négatifs WP NL — #519)
+
+### Contexte
+Mail **#519** (`detective_belgium`, 10 juin 2026) classé `autre` alors que c'est un **formulaire WordPress NL** du site (`Achternaam`, `Voornaam`, `Telefoonnummer`, demande de tarif pour recherche sur GSM). Urgence absolue : ce type de faux négatif ne doit plus passer.
+
+### Fixé
+- **`scripts/review_missed_demande_client.py`** : la détection de **formulaire WordPress (`_is_wp_contact_form`) est désormais effectuée AVANT le filtre `_is_service_sender`**. Explication : les formulaires WP du propre site arrivent via des expéditeurs techniques (`noreply@detectivebelgium.com`, `wordpress@...`, `mail@...`) qui matchaient la liste `_SERVICE_SENDERS` et étaient rejetés trop tôt. Désormais, un body structuré en champs WP est considéré comme un signal INCONTESTABLE de demande client, quel que soit l'expéditeur.
+- **Lint** : corrections mineures (RUF005, B905, E501) dans le script.
+
+### Actions immédiates
+- Reclassificaton de #519 en `demande_client`.
+- Génération du brouillon NL avec les 4 blocs (`📩 EMAIL D'ORIGINE`, `🇫🇷 TRADUCTION FR`, `✉️ PROPOSITION DE RÉPONSE`, `🌍 TRADUCTION DE LA PROPOSITION`) + `EMAIL #519`.
+- Livraison IMAP Drafts `detective_belgium` vérifiée.
+- Audit périodique 14j relancé en `--apply` : **0 autre faux négatif détecté**.
+
 ## [1.25.16] — 2026-06-23 (nettoyage + régénération 100% des drafts IMAP existants)
 
 ### Contexte

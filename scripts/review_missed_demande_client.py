@@ -20,19 +20,19 @@ import argparse
 import asyncio
 import re
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import structlog
 
-from app.config import get_settings, MailboxConfig
+from app.config import MailboxConfig, get_settings
 from app.delivery.imap_draft import append_draft
 from app.delivery.resend_notifier import IncomingMail
-from app.pipeline.classifier import classify, _is_human_followup, _is_reply_to_daniel
+from app.delivery.slack_notifier import send_slack_message
+from app.pipeline.classifier import _is_human_followup, _is_reply_to_daniel, classify
 from app.pipeline.generator import GenerationResult, generate_draft
 from app.pipeline.language import detect_language
 from app.pipeline.prefilter import _is_wp_contact_form
-from app.delivery.slack_notifier import send_slack_message
 
 log = structlog.get_logger()
 
@@ -152,13 +152,13 @@ def _fetch_candidates(db_path: Path, since: str, limit: int | None) -> list[dict
               AND (ai_draft IS NULL OR ai_draft = '')
             ORDER BY received_at ASC
         """
-        params = list(_REVIEW_CATEGORIES) + [since]
+        params = [*list(_REVIEW_CATEGORIES), since]
         if limit is not None:
             sql += " LIMIT ?"
             params.append(limit)
         cur = conn.execute(sql, params)
         cols = [c[0] for c in cur.description]
-        return [dict(zip(cols, row)) for row in cur.fetchall()]
+        return [dict(zip(cols, row, strict=True)) for row in cur.fetchall()]
     finally:
         conn.close()
 
@@ -185,7 +185,13 @@ def _has_strong_recall_signal(subject: str, body: str, sender: str) -> tuple[boo
 
     Exclusions dures : senders de service, senders internes/connus, sujets calendrier,
     sujets transactionnels, body avec opt-out spam.
+
+    IMPORTANT : le formulaire WordPress du propre site est INCONTESTABLE, même s'il
+    arrive via un expéditeur technique type noreply/wordpress/mail/contact. On le
+    détecte AVANT tout filtre sur l'expéditeur.
     """
+    if _is_wp_contact_form(body):
+        return True, "wp_contact_form"
     if _is_service_sender(sender):
         return False, "service_sender"
     if _is_internal_or_known_sender(sender):
@@ -194,8 +200,6 @@ def _has_strong_recall_signal(subject: str, body: str, sender: str) -> tuple[boo
         return False, "auto_subject"
     if _has_unsubscribe_marker(body):
         return False, "unsubscribe_marker"
-    if _is_wp_contact_form(body):
-        return True, "wp_contact_form"
     if _is_transactional_subject(subject):
         return False, "transactional_subject"
     if _is_human_followup(subject, body, sender):
@@ -279,7 +283,7 @@ def _update_db(db_path: Path, mail_id: int, new_category: str, draft: str, apply
                     delivered_at = ?
                 WHERE id = ?
                 """,
-                (new_category, draft, datetime.now(timezone.utc).isoformat(), mail_id),
+                (new_category, draft, datetime.now(UTC).isoformat(), mail_id),
             )
         else:
             conn.execute(
@@ -368,7 +372,11 @@ async def main(apply: bool, since: str, limit: int | None) -> None:
         if new_cat == "demande_client":
             mailbox = _find_mailbox(mail["mailbox_name"])
             if mailbox is None:
-                log.warning("review.no_mailbox", mail_id=mail["id"], mailbox_name=mail["mailbox_name"])
+                log.warning(
+                    "review.no_mailbox",
+                    mail_id=mail["id"],
+                    mailbox_name=mail["mailbox_name"],
+                )
                 skipped += 1
                 continue
 
@@ -450,9 +458,9 @@ if __name__ == "__main__":
 
     # Normalise la date since.
     if args.since:
-        since_dt = datetime.strptime(args.since, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        since_dt = datetime.strptime(args.since, "%Y-%m-%d").replace(tzinfo=UTC)
     else:
-        since_dt = datetime.now(timezone.utc) - timedelta(days=args.lookback_days)
+        since_dt = datetime.now(UTC) - timedelta(days=args.lookback_days)
     since_rfc = since_dt.strftime("%a, %d %b %Y %H:%M:%S %z")
 
     asyncio.run(main(apply=args.apply, since=since_rfc, limit=args.limit))
