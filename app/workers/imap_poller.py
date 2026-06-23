@@ -28,7 +28,12 @@ from app.pipeline.generator import generate_draft
 from app.pipeline.language import detect_language
 from app.pipeline.prefilter import _is_wp_contact_form, quick_classify
 from app.pipeline.priority import assign_priority
-from app.pipeline.subject_fixer import fix_subject_llm, is_subject_suspect, tag_no_email
+from app.pipeline.subject_fixer import (
+    fix_subject_llm,
+    is_subject_suspect,
+    mask_forwarder_sender,
+    tag_no_email,
+)
 
 # Signaux de coordonnées contact dans un body (tél belge, code postal, adresse)
 _CONTACT_SIGNALS_RE = re.compile(
@@ -1223,7 +1228,7 @@ async def _process_single_mail(
 
         # v1.25.4 — tag [NO_EMAIL_IN_THE_FORM] si sender = forwarder WordPress
         # (formulaires WP sans email client, vrai contact = téléphone, cf. Task #4).
-        tagged = tag_no_email(subject, sender)
+        tagged = tag_no_email(subject, sender, body)
         if tagged != subject:
             log.info(
                 "poller.subject_tagged_no_email",
@@ -1547,8 +1552,12 @@ async def _process_single_mail(
             c.strip().lower() for c in settings.draft_categories.split(",") if c.strip()
         }
         if category.lower() in draft_categories and is_new and not settings.dry_run:
+            # v1.25.18 — masque d'expéditeur pour forwarders WP sans email client visible.
+            # Le vrai sender reste en DB ; c'est l'affichage du brouillon/notification qui
+            # indique NO_EMAIL_IN_THE_FORM pour éviter que Daniel réponde à un forwarder.
+            display_sender = mask_forwarder_sender(sender, body)
             incoming = IncomingMail(
-                sender=sender,
+                sender=display_sender,
                 subject=subject,
                 body=body,
                 received_at=received_at,
@@ -1568,14 +1577,14 @@ async def _process_single_mail(
                 await alert_imap_draft_failure(
                     mailbox_name=mailbox.name,
                     mail_id=mail_id,
-                    sender=sender,
+                    sender=display_sender,
                     subject=subject,
                     error_hint="Connexion IMAP secondaire rejetée (probable) ou LIST/APPEND échoué",
                 )
             if verified_draft:
                 await notify_slack_draft(
                     draft_id=mail_id,
-                    sender=sender,
+                    sender=display_sender,
                     subject=subject,
                     category=category,
                     body_preview=body_preview,

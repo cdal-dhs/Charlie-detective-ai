@@ -19,7 +19,7 @@ from app.config import get_settings
 from app.pipeline.classifier import _is_human_followup, _is_reply_to_daniel, classify
 from app.pipeline.generator import generate_draft
 from app.pipeline.language import detect_language
-from app.pipeline.subject_fixer import fix_subject_llm, tag_no_email
+from app.pipeline.subject_fixer import fix_subject_llm, mask_forwarder_sender, tag_no_email
 from app.web.deps import get_db, require_operator
 from app.web.utils import audit_log
 
@@ -203,7 +203,15 @@ async def _fetch_mails_partial(
         "processed_at",
         "body_preview",
         "attachment_count",
+        "body",
     ]
+
+    def _mask_sender(row_dict: dict) -> dict:
+        """Affiche NO_EMAIL_IN_THE_FORM pour les forwarders WP sans email client."""
+        row_dict["sender"] = mask_forwarder_sender(
+            row_dict.get("sender", ""), row_dict.get("body", "")
+        )
+        return row_dict
 
     # ── Requête 1 : HOT (demande_client + high + pending) ──
     hot_where = where + [
@@ -213,7 +221,7 @@ async def _fetch_mails_partial(
     ]
     hot_sql = (
         "SELECT m.id, m.mailbox_name, m.subject, m.sender, m.received_at, m.category, "
-        "m.status, m.priority, m.processed_at, m.body_preview, "
+        "m.status, m.priority, m.processed_at, m.body_preview, m.body, "
         "(SELECT COUNT(*) FROM email_attachment WHERE mail_processed_id = m.id) AS attachment_count "
         "FROM mail_processed m WHERE " + " AND ".join(hot_where) + " "
         f"ORDER BY {col} {order} LIMIT ?"
@@ -222,7 +230,7 @@ async def _fetch_mails_partial(
     hot_params.append(limit)
     async with db.execute(hot_sql, hot_params) as cursor:
         hot_rows = await cursor.fetchall()
-    hot_mails = [dict(zip(cols, row, strict=True)) for row in hot_rows]
+    hot_mails = [_mask_sender(dict(zip(cols, row, strict=True))) for row in hot_rows]
 
     # ── Requête 2 : OTHER (tout sauf hot) ──
     other_where = where + [
@@ -230,7 +238,7 @@ async def _fetch_mails_partial(
     ]
     other_sql = (
         "SELECT m.id, m.mailbox_name, m.subject, m.sender, m.received_at, m.category, "
-        "m.status, m.priority, m.processed_at, m.body_preview, "
+        "m.status, m.priority, m.processed_at, m.body_preview, m.body, "
         "(SELECT COUNT(*) FROM email_attachment WHERE mail_processed_id = m.id) AS attachment_count "
         "FROM mail_processed m WHERE " + " AND ".join(other_where) + " "
         f"ORDER BY (m.status = 'pending') DESC, (m.priority = 'high') DESC, {col} {order} LIMIT ?"
@@ -239,7 +247,7 @@ async def _fetch_mails_partial(
     other_params.append(limit)
     async with db.execute(other_sql, other_params) as cursor:
         other_rows = await cursor.fetchall()
-    other_mails = [dict(zip(cols, row, strict=True)) for row in other_rows]
+    other_mails = [_mask_sender(dict(zip(cols, row, strict=True))) for row in other_rows]
 
     return hot_mails, other_mails
 
@@ -553,7 +561,7 @@ async def mail_fix_subject(
     fixed = await fix_subject_llm(original_subject, body_preview)
     base = fixed if fixed else original_subject
     # 2) Tag [NO_EMAIL_IN_THE_FORM] si forwarder WP (déterministe, sans LLM).
-    tagged = tag_no_email(base, sender)
+    tagged = tag_no_email(base, sender, body)
 
     if tagged == original_subject:
         # Ni LLM ni tag n'ont rien changé → noop.

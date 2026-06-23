@@ -16,6 +16,7 @@ from aioimaplib import aioimaplib
 from app.config import MailboxConfig, get_settings
 from app.delivery.resend_notifier import IncomingMail
 from app.pipeline.generator import GenerationResult
+from app.pipeline.subject_fixer import mask_forwarder_sender
 
 log = structlog.get_logger()
 
@@ -163,11 +164,15 @@ def _build_draft_body(
     gen.draft (via draft_renderer.py) ; s'il manque (brouillon legacy), on
     l'injecte depuis incoming.body pour garantir le contexte complet.
     """
+    # v1.25.18 — si c'est un forwarder WP sans email client visible, on affiche
+    # NO_EMAIL_IN_THE_FORM dans le brouillon pour éviter une réponse au mauvais contact.
+    display_sender = mask_forwarder_sender(incoming.sender, incoming.body)
+
     lines = ["⚠️  BROUILLON IA — À RELIRE AVANT ENVOI"]
     if mail_id:
-        lines.append(f"EMAIL #{mail_id} — {incoming.sender}")
+        lines.append(f"EMAIL #{mail_id} — {display_sender}")
     else:
-        lines.append(f"EMAIL CLIENT — {incoming.sender}")
+        lines.append(f"EMAIL CLIENT — {display_sender}")
     if mail_id and base_url:
         lines.append(f"Dossier cockpit : {base_url.rstrip('/')}/app/conversation/{mail_id}")
     lines.append("────────────────────────────────────────")
@@ -181,7 +186,7 @@ def _build_draft_body(
     # de draft) pour éviter la duplication.
     if original_body and not draft_has_original:
         lines.append("📧 MAIL ORIGINAL DU CLIENT")
-        lines.append(f"De : {incoming.sender}")
+        lines.append(f"De : {display_sender}")
         lines.append(f"Sujet : {incoming.subject}")
         lines.append("────────────────────────────────────────")
         lines.append(original_body)
@@ -216,7 +221,10 @@ async def append_draft(
 
     msg = EmailMessage()
     msg["From"] = mailbox.user
-    msg["To"] = incoming.sender
+    # v1.25.18 — si le sender a été masqué en NO_EMAIL_IN_THE_FORM (forwarder WP sans
+    # email client), on ne peut pas mettre cette valeur dans le header To. On fallback
+    # sur la boîte elle-même ; c'est un brouillon non envoyé de toute façon.
+    msg["To"] = incoming.sender if "@" in incoming.sender else mailbox.user
     # v1.25.1 : si le sujet original est un template WP absurde (formulaire relayé
     # par forwarder), on le remplace par un libellé lisible (cas + nom du client).
     draft_subject = gen.suggested_subject or incoming.subject

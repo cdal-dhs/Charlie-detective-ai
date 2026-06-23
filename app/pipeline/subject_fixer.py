@@ -71,7 +71,33 @@ def is_wp_forwarder(sender: str) -> bool:
     return bool(_WP_FORWARDER_RE.match((sender or "").strip()))
 
 
-def tag_no_email(subject: str, sender: str) -> str:
+def has_client_email_in_body(body: str) -> bool:
+    """True si le body contient un email client (pas un forwarder WP interne).
+
+    Les formulaires WP ne demandent jamais l'email ; quand un body contient
+    quand même un @, c'est souvent une signature, un footer ou un forwarder.
+    On considère qu'il y a un vrai email client si le domaine n'appartient pas
+    à Detective.be et si ce n'est pas un no-reply/service.
+    """
+    body = body or ""
+    own_domains = ("detectivebelgique.be", "detectivebelgium.com", "dpdhuinvestigations.be")
+    for match in re.finditer(r"[^\s<]+@[^\s>\n,]+", body):
+        email = match.group(0).strip("<>")
+        if "@" not in email:
+            continue
+        local, _, domain = email.rpartition("@")
+        domain = domain.lower()
+        local = local.lower()
+        if any(d in domain for d in own_domains):
+            continue
+        no_reply_local = ("no-reply", "noreply", "donotreply")
+        if domain.startswith(no_reply_local) or local in no_reply_local:
+            continue
+        return True
+    return False
+
+
+def tag_no_email(subject: str, sender: str, body: str = "") -> str:
     """Suffixe le sujet avec [NO_EMAIL_IN_THE_FORM] si sender = forwarder WP.
 
     Idempotent : ne re-tag pas si le tag est déjà présent. Ne modifie pas les
@@ -83,7 +109,25 @@ def tag_no_email(subject: str, sender: str) -> str:
         return subject
     if _NO_EMAIL_TAG in subject:
         return subject
+    # Si un vrai email client est présent dans le body, le forwarder devient moins
+    # critique ; on ne tagge pas pour ne pas surcharger le sujet.
+    if has_client_email_in_body(body):
+        return subject
     return f"{subject} {_NO_EMAIL_TAG}".strip()
+
+
+def mask_forwarder_sender(sender: str, body: str = "") -> str:
+    """Retourne l'expéditeur affiché pour le brouillon/notification.
+
+    Si c'est un forwarder WP sans email client visible, on remplace par
+    NO_EMAIL_IN_THE_FORM pour que Daniel comprenne immédiatement qu'il ne doit
+    PAS répondre à cette adresse technique.
+    """
+    if not is_wp_forwarder(sender):
+        return sender or ""
+    if has_client_email_in_body(body):
+        return sender or ""
+    return "NO_EMAIL_IN_THE_FORM"
 
 
 async def fix_subject_llm(subject: str, body_preview: str) -> str | None:

@@ -17,8 +17,10 @@ import pytest
 from app.pipeline.subject_fixer import (
     _clean,
     fix_subject_llm,
+    has_client_email_in_body,
     is_subject_suspect,
     is_wp_forwarder,
+    mask_forwarder_sender,
     tag_no_email,
 )
 
@@ -204,3 +206,42 @@ def test_tag_no_email_no_change_for_normal_sender() -> None:
 def test_tag_no_email_empty_subject() -> None:
     out = tag_no_email("", "wordpress@detectivebelgium.com")
     assert out == "[NO_EMAIL_IN_THE_FORM]"
+
+
+def test_tag_no_email_no_tag_when_client_email_in_body() -> None:
+    """Si le body contient un vrai email client, on ne tagge pas le sujet."""
+    body = "Voornaam: John\nTelefoonnummer: 0477/123456\nEmail: john@client.be"
+    out = tag_no_email(
+        "[Privédetective België] Nieuwe aanvraag", "wordpress@detectivebelgium.com", body
+    )
+    assert "[NO_EMAIL_IN_THE_FORM]" not in out
+
+
+def test_has_client_email_detects_real_email() -> None:
+    body = "Contact : client@example.com"
+    assert has_client_email_in_body(body) is True
+
+
+def test_has_client_email_ignores_own_domains_and_no_reply() -> None:
+    body = "From: wordpress@detectivebelgium.com\nnoreply@service.com"
+    assert has_client_email_in_body(body) is False
+
+
+def test_mask_forwarder_sender_masks_without_client_email() -> None:
+    body = "Achternaam: Dupont\nTelefoonnummer: 0477/123456"
+    assert (
+        mask_forwarder_sender("wordpress@detectivebelgium.com", body)
+        == "NO_EMAIL_IN_THE_FORM"
+    )
+
+
+def test_mask_forwarder_sender_keeps_real_sender_when_client_email_present() -> None:
+    body = "Email: client@example.com\nTelefoonnummer: 0477/123456"
+    assert (
+        mask_forwarder_sender("wordpress@detectivebelgium.com", body)
+        == "wordpress@detectivebelgium.com"
+    )
+
+
+def test_mask_forwarder_sender_no_change_for_normal_sender() -> None:
+    assert mask_forwarder_sender("client@gmail.com", "") == "client@gmail.com"

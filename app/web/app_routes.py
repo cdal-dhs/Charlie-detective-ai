@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import aiosqlite
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pathlib import Path
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from app import __version__
 from app.config import get_settings
+from app.pipeline.subject_fixer import mask_forwarder_sender
 from app.web.deps import get_db, require_operator
 
 log = structlog.get_logger()
@@ -131,8 +133,15 @@ async def _fetch_mails(
     cols = [
         "id", "mailbox_name", "subject", "sender", "received_at",
         "category", "status", "priority", "processed_at", "body_preview",
-        "attachment_count", "ai_draft",
+        "attachment_count", "ai_draft", "body",
     ]
+
+    def _mask_sender(row_dict: dict) -> dict:
+        """Affiche NO_EMAIL_IN_THE_FORM pour les forwarders WP sans email client."""
+        row_dict["sender"] = mask_forwarder_sender(
+            row_dict.get("sender", ""), row_dict.get("body", "")
+        )
+        return row_dict
 
     # ── Requête 1 : HOT (demande_client + high + pending) ──
     hot_where = where + [
@@ -142,7 +151,7 @@ async def _fetch_mails(
     ]
     hot_sql = (
         "SELECT m.id, m.mailbox_name, m.subject, m.sender, m.received_at, m.category, "
-        "m.status, m.priority, m.processed_at, m.body_preview, "
+        "m.status, m.priority, m.processed_at, m.body_preview, m.body, "
         "(SELECT COUNT(*) FROM email_attachment WHERE mail_processed_id = m.id) AS attachment_count, "
         "ai_draft "
         "FROM mail_processed m WHERE " + " AND ".join(hot_where) + " "
@@ -152,7 +161,7 @@ async def _fetch_mails(
     hot_params.append(limit)
     async with db.execute(hot_sql, hot_params) as cursor:
         hot_rows = await cursor.fetchall()
-    hot_mails = [dict(zip(cols, row, strict=True)) for row in hot_rows]
+    hot_mails = [_mask_sender(dict(zip(cols, row, strict=True))) for row in hot_rows]
 
     # ── Requête 2 : OTHER (tout sauf hot) ──
     other_where = where + [
@@ -160,7 +169,7 @@ async def _fetch_mails(
     ]
     other_sql = (
         "SELECT m.id, m.mailbox_name, m.subject, m.sender, m.received_at, m.category, "
-        "m.status, m.priority, m.processed_at, m.body_preview, "
+        "m.status, m.priority, m.processed_at, m.body_preview, m.body, "
         "(SELECT COUNT(*) FROM email_attachment WHERE mail_processed_id = m.id) AS attachment_count, "
         "ai_draft "
         "FROM mail_processed m WHERE " + " AND ".join(other_where) + " "
@@ -170,7 +179,7 @@ async def _fetch_mails(
     other_params.append(limit)
     async with db.execute(other_sql, other_params) as cursor:
         other_rows = await cursor.fetchall()
-    other_mails = [dict(zip(cols, row, strict=True)) for row in other_rows]
+    other_mails = [_mask_sender(dict(zip(cols, row, strict=True))) for row in other_rows]
 
     return hot_mails, other_mails
 
@@ -197,7 +206,10 @@ async def _fetch_mail(db: aiosqlite.Connection, mail_id: int) -> dict | None:
         "status", "priority", "ai_draft", "human_draft", "reviewed_by",
         "reviewed_at", "sent_at", "sent_by", "body_preview", "body",
     ]
-    return dict(zip(cols, row, strict=True))
+    mail = dict(zip(cols, row, strict=True))
+    # v1.25.18 — affiche NO_EMAIL_IN_THE_FORM pour les forwarders WP sans email client.
+    mail["sender"] = mask_forwarder_sender(mail.get("sender", ""), mail.get("body", ""))
+    return mail
 
 
 async def _fetch_attachments(db: aiosqlite.Connection, mail_id: int) -> list[dict]:

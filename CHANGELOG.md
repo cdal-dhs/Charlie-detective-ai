@@ -1,9 +1,28 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.25.18] — 2026-06-23 (masque d'expéditeur NO_EMAIL_IN_THE_FORM pour forwarders WP)
+
+### Contexte
+Les formulaires WordPress arrivent via des expéditeurs techniques (`mail@detective*`, `wordpress@detective*`, `contact@detective*`) et **ne contiennent pas l'email du client final**. Daniel doit immédiatement comprendre, dans toutes les interfaces, qu'il ne faut pas répondre à cette adresse technique mais utiliser le téléphone (`Telefoonnummer`) extrait du body.
+
+### Ajouté
+- **`app/pipeline/subject_fixer.py`** :
+  - `has_client_email_in_body(body)` : détecte un vrai email client dans le body (exclut les domaines Detective.be et les no-reply).
+  - `mask_forwarder_sender(sender, body)` : retourne `NO_EMAIL_IN_THE_FORM` quand l'expéditeur est un forwarder WP **et** qu'aucun email client n'est visible dans le body.
+- **Brouillons IMAP** (`app/delivery/imap_draft.py`) : le bandeau `EMAIL #xxx — {expéditeur}` affiche `NO_EMAIL_IN_THE_FORM` pour ces cas.
+- **Poller** (`app/workers/imap_poller.py`) : le `IncomingMail` envoyé à `append_draft`, à la notification Slack et à l'alerte Resend fallback utilise l'expéditeur masqué. Le vrai sender technique reste stocké en DB pour traçabilité.
+- **Cockpit web** (`app/web/api.py` + `app/web/app_routes.py`) : les listes d'inbox et la page conversation affichent `NO_EMAIL_IN_THE_FORM` comme expéditeur pour les forwarders WP sans email client.
+
+### Changé
+- `tag_no_email(subject, sender, body="")` prend désormais le body en paramètre : si un email client est présent, le tag `[NO_EMAIL_IN_THE_FORM]` n'est pas ajouté au sujet (évite le bruit inutile).
+
+### Fixé
+- **`tests/test_subject_fixer.py`** : ajout de tests pour `has_client_email_in_body`, `mask_forwarder_sender` et le comportement "pas de tag si email client présent".
+
 ## [1.25.17] — 2026-06-23 (hotfix audit faux négatifs WP NL — #519)
 
 ### Contexte
-Mail **#519** (`detective_belgium`, 10 juin 2026) classé `autre` alors que c'est un **formulaire WordPress NL** du site (`Achternaam`, `Voornaam`, `Telefoonnummer`, demande de tarif pour recherche sur GSM). Urgence absolue : ce type de faux négatif ne doit plus passer.
+Mail **#519** (`detective_belgium`, 10 juin 2026) classé `autre` alors que c'est un **formulaire WordPress NL** du site (`Achternaom`, `Voornaam`, `Telefoonnummer`, demande de tarif pour recherche sur GSM). Urgence absolue : ce type de faux négatif ne doit plus passer.
 
 ### Fixé
 - **`scripts/review_missed_demande_client.py`** : la détection de **formulaire WordPress (`_is_wp_contact_form`) est désormais effectuée AVANT le filtre `_is_service_sender`**. Explication : les formulaires WP du propre site arrivent via des expéditeurs techniques (`noreply@detectivebelgium.com`, `wordpress@...`, `mail@...`) qui matchaient la liste `_SERVICE_SENDERS` et étaient rejetés trop tôt. Désormais, un body structuré en champs WP est considéré comme un signal INCONTESTABLE de demande client, quel que soit l'expéditeur.
