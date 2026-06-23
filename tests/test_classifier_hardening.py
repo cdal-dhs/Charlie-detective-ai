@@ -303,9 +303,15 @@ def test_is_reply_to_daniel_606():
     assert _is_reply_to_daniel(_BODY_606, "etsvanhoutte@gmail.com") is True
 
 
-def test_is_reply_to_daniel_negative_service_sender():
-    """Un forwarder wordpress@/mail@detective* n'est pas une réponse humaine."""
-    assert _is_reply_to_daniel(_BODY_606, "mail@detectivebelgium.com") is False
+def test_is_reply_to_daniel_wp_forwarder_with_daniel_signature():
+    """v1.25.11 - forwarder WP avec citation Daniel = réponse humaine (#513)."""
+    assert _is_reply_to_daniel(_BODY_606, "mail@detectivebelgium.com") is True
+
+
+def test_is_reply_to_daniel_wp_forwarder_no_daniel_signature():
+    """Forwarder WP sans citation Daniel → pas une réponse humaine."""
+    body = "Beste, ik wens een offerte. Met vriendelijke groeten, Toon"
+    assert _is_reply_to_daniel(body, "wordpress@detectivebelgium.com") is False
 
 
 def test_is_reply_to_daniel_negative_no_daniel_signature():

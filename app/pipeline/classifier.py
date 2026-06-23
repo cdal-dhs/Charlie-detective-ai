@@ -367,6 +367,32 @@ _DANIEL_SIGNATURE_PATTERNS = (
     "chaussÃ©e bara 213",
 )
 
+# v1.25.11 — citations Outlook dans les réponses clients (format texte, pas `>`).
+# Le body de #513 contient une réponse de Toon Breyne avec la citation du mail
+# de Daniel en format NL (Van:/Verzonden:/Aan:/Onderwerp:) et FR (De:/Date:/À:/Objet:).
+_OUTLOOK_CITATION_HEADERS_NL = ("van:", "verzonden:", "aan:", "onderwerp:")
+_OUTLOOK_CITATION_HEADERS_FR = ("de :", "date :", "à :", "objet :")
+_OUTLOOK_CITATION_HEADERS_EN = ("from:", "sent:", "to:", "subject:")
+
+
+def _body_quotes_daniel(body: str) -> bool:
+    """True si le body contient une citation d'un mail de Daniel, quel que soit
+    le format (préfixe `>` classique ou entêtes Outlook NL/FR/EN).
+    """
+    b = body.lower()
+    has_daniel_sig = any(sig in b for sig in _DANIEL_SIGNATURE_PATTERNS)
+    if not has_daniel_sig:
+        return False
+    if ">" in b:
+        return True
+    if all(h in b for h in _OUTLOOK_CITATION_HEADERS_NL):
+        return True
+    if all(h in b for h in _OUTLOOK_CITATION_HEADERS_FR):
+        return True
+    if all(h in b for h in _OUTLOOK_CITATION_HEADERS_EN):
+        return True
+    return False
+
 
 # v1.25.8 — réponse/relance humaine sans citation Daniel (#Vacature).
 # Préfixes de réponse multilingues (FR/NL/EN/DE).
@@ -488,26 +514,30 @@ _FOLLOWUP_SERVICE_SENDERS = (
 
 
 def _is_reply_to_daniel(body: str, sender: str) -> bool:
-    """Re: + body cite un mail de Daniel (préfixe > + signature cabinet) +
-    expéditeur humain (pas un service/no-reply)."""
+    """Re: + body cite un mail de Daniel (préfixe > ou citation Outlook) +
+    expéditeur humain (pas un service/no-reply).
+
+    v1.25.11 — exception pour les forwarders WordPress (wordpress@detective* /
+    mail@detective* / contact@detective*) : une réponse dans le thread du
+    formulaire conserve ce sender technique, mais si elle cite Daniel c'est bien
+    un suivi client (#513 Toon Breyne).
+    """
     sender_l = sender.lower()
+    wp_forwarders = ("wordpress@", "mail@detective", "contact@detective")
     service_hints = (
         "noreply",
         "no-reply",
         "ne-pas-repondre",
+        "donotreply",
         "mailer-daemon",
         "infomaniak",
-        "wordpress@",
-        "mail@detective",
-        "contact@detective",
     )
-    # mail@/contact@detective* = forwarder formulaire (pas une réponse humaine à Daniel)
+    # Forwarder WP : on autorise SI le body cite un mail de Daniel.
+    if any(h in sender_l for h in wp_forwarders):
+        return _body_quotes_daniel(body)
     if any(h in sender_l for h in service_hints):
         return False
-    if ">" not in body:
-        return False
-    b = body.lower()
-    return any(sig in b for sig in _DANIEL_SIGNATURE_PATTERNS)
+    return _body_quotes_daniel(body)
 
 
 def _is_human_followup(subject: str, body: str, sender: str) -> bool:

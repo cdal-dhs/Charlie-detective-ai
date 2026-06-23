@@ -33,7 +33,7 @@ import structlog
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.config import MailboxConfig, get_settings
-from app.pipeline.classifier import classify
+from app.pipeline.classifier import _is_human_followup, _is_reply_to_daniel, classify
 from app.pipeline.generator import generate_draft
 from app.pipeline.language import detect_language
 
@@ -94,6 +94,16 @@ def _find_mailbox(name: str, mailboxes: list[MailboxConfig]) -> MailboxConfig | 
     return None
 
 
+def _is_backfill_followup(subject: str, body: str, sender: str) -> bool:
+    """v1.25.11 — détecte un suivi client dans le backfill.
+
+    Même logique que le poller/cockpit : citation d'un mail de Daniel OU
+    relance humaine (Re: + signé + marqueur). Le backfill historique n'a pas
+    d'objet Message, on utilise les heuristiques sur les champs bruts.
+    """
+    return _is_reply_to_daniel(body, sender) or _is_human_followup(subject, body, sender)
+
+
 async def _regenerate_draft(
     mail: dict, mailbox: MailboxConfig, apply: bool
 ) -> tuple[str, str, str]:
@@ -107,6 +117,10 @@ async def _regenerate_draft(
     draft = ""
     if new_cat == "demande_client" and apply:
         language = detect_language(body, default=mailbox.default_lang)
+        # v1.25.11 — si c'est un suivi client, générer un ack court au lieu du
+        # brouillon qualifiant standard (évite de redemander nom/prénom/GSM
+        # quand Daniel a déjà répondu, ex: #513).
+        is_followup = _is_backfill_followup(subject, body, sender)
         result = await generate_draft(
             incoming_subject=subject,
             incoming_body=body,
@@ -114,6 +128,7 @@ async def _regenerate_draft(
             mailbox=mailbox,
             language=language,
             category=new_cat,
+            is_followup_response=is_followup,
         )
         draft = result.draft
 

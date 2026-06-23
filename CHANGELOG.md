@@ -1,5 +1,23 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.25.11] — 2026-06-23 (réponses clients format Outlook + forwarder WP — #513 Toon Breyne)
+
+### Contexte
+#513 (`detective_belgium`, imap_uid 392) : mail de Toon Breyne (`wordpress@detectivebelgium.com`) avec sujet template WP `[Privédetective België] Réinitialisation du mot de passe`. Classé `facture` par le pré-filtre car le corps cite "offerte", "facturatie", "€ 3.470,28", etc. En réalité c'est un **suivi client** : Toon Breyne répond au mail de Daniel du 19 juin, transmet à M. Forrez et indique que ce dernier contactera. Le brouillon n'avait pas été généré (draft_generated=0).
+
+### Ajouté
+- **`_body_quotes_daniel()`** (`app/pipeline/classifier.py`) : détecte une citation d'un mail de Daniel indépendamment du format — préfixe `>` classique **ou** entêtes Outlook NL (`Van:/Verzonden:/Aan:/Onderwerp:`), FR (`De:/Date:/À:/Objet:`), EN (`From:/Sent:/To:/Subject:`).
+- **Exception forwarder WP dans `_is_reply_to_daniel()`** : `wordpress@detective*` / `mail@detective*` / `contact@detective*` sont maintenant acceptés comme expéditeur d'une réponse **si et seulement si** le body cite un mail de Daniel. Les forwarders sans citation restent des formulaires WP (pas une réponse humaine).
+- **`backfill_reclassify.py` v1.25.11** : détecte les suivi client (`_is_reply_to_daniel` / `_is_human_followup`) et passe `is_followup_response=True` à `generate_draft` → brouillon **ack** court au lieu du qualifiant standard.
+
+### Changé
+- `_is_reply_to_daniel()` utilise `_body_quotes_daniel()` ; les senders de service stricts (noreply/no-reply/mailer-daemon/infomaniak) restent rejetés.
+- Test mis à jour dans `test_classifier_hardening.py` : forwarder WP + citation Daniel = True.
+
+### Tests
+- `tests/test_reply_to_daniel_outlook.py` : 8 tests (citation Outlook NL/FR, classique `>`, forwarder WP avec/sans citation, noreply rejeté).
+- 247 tests au total, 0 régression.
+
 ## [1.25.10] — 2026-06-23 (garde anti-faux-négatif post-pré-filtre — #625 réponse à #621)
 
 ### Contexte
