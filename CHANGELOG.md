@@ -1,5 +1,21 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.25.13] — 2026-06-23 (audit automatique des faux négatfs demande_client)
+
+### Contexte
+Suite au durcissement v1.25.12, il reste un risque résiduel : un formulaire WP ou une vraie relance/réponse humaine peut encore être classé `newsletter`/`autre`/`facture`/`rappel` à tort. L'objectif est de détecter et corriger automatiquement ces faux négatifs **avant** que Daniel ne les découvre.
+
+### Ajouté
+- **`scripts/review_missed_demande_client.py`** : scan périodique des catégories hors `demande_client`.
+  - Heuristiques très conservatives : formulaire WP, relance humaine, réponse à Daniel.
+  - Exclusions dures : senders de service/internes/connus, sujets calendrier/transactionnels, body avec opt-out spam.
+  - Mode dry-run par défaut ; `--apply` pour reclassifier, générer et livrer le brouillon IMAP.
+  - `--lookback-days` (défaut 7j) pour limiter le coût LLM.
+  - Alerte Slack récapitulative si des mails sont rattrapés.
+
+### Planification
+- Exécution 2x/jour via cron session Claude (08h17 et 18h43) en mode `--apply`.
+
 ## [1.25.12] — 2026-06-23 (tolérance zéro formulaires WordPress — #520, #590, #600)
 
 ### Contexte
