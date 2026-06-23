@@ -9,6 +9,7 @@ from app.config import MailboxConfig, get_settings
 from app.llm.router import complete
 from app.pipeline.case_classifier import classify_case
 from app.pipeline.language import Language
+from app.pipeline.objective_check import assess_objective_clarity, extract_free_message
 from app.pipeline.qualification_builder import (
     build_followup_ack_draft,
     build_qualification_draft,
@@ -357,8 +358,23 @@ async def generate_draft(
         # Brouillon qualifiant déterministe : les LLM ne suivent pas de façon
         # fiable une consigne de liste numérotée, on construit donc le squelette
         # par code et on garde la main sur les questions/tarifs.
+        # v1.25.6 — pour non_determine, on évalue en amont si le client a exprimé
+        # un objectif final clair (heuristique + LLM gemma4 sur le message libre).
+        # Sans objectif précis (#615 « faire une petite enquête »), on bascule sur
+        # le brouillon flou qui demande l'objectif avant d'établir un devis.
+        objective_clear = None
+        if case_type == "non_determine":
+            free_msg = extract_free_message(incoming_body)
+            objective_clear = await assess_objective_clarity(free_msg)
+            log.info(
+                "generator.objective_check",
+                case=case_type,
+                objective_clear=objective_clear,
+                free_len=len(free_msg),
+            )
         raw_draft = build_qualification_draft(
-            incoming_subject, incoming_body, sender, mailbox, case_type
+            incoming_subject, incoming_body, sender, mailbox, case_type,
+            objective_clear=objective_clear,
         )
         # v1.25.1 : sujet lisible si le sujet original est un template WP absurde.
         suggested_subject = suggested_subject_for_draft(

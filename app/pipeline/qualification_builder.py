@@ -1297,6 +1297,7 @@ def build_qualification_draft(
     sender: str,
     mailbox: MailboxConfig,
     case: str,
+    objective_clear: bool | None = None,
 ) -> str:
     """Génère un brouillon qualifiant structuré et déterministe."""
     # v1.24.1 — refus poli d'une demande hors-légalité (piratage, extraction de
@@ -1327,8 +1328,8 @@ def build_qualification_draft(
     # tarif). On n'aligne pas les questions opérationnelles (inadaptées) ; on
     # accuse réception, on restitue les infos reçues et on demande poliment ce
     # qu'il souhaite obtenir concrètement. Cf. #515 (Nathalie) / #615 (douane).
-    if _is_vague_request(body, case, case_info, client_info):
-        log.info("qualification.vague_request_detected", case=case)
+    if _is_vague_request(body, case, case_info, client_info, objective_clear):
+        log.info("qualification.vague_request_detected", case=case, objective_clear=objective_clear)
         return "\n".join(_build_vague_request_draft(
             greeting, first_name, mailbox, case, client_info, case_info,
         ))
@@ -1449,6 +1450,7 @@ def _is_vague_request(
     case: str,
     case_info: dict[str, str | None],
     client_info: dict[str, str | None],
+    objective_clear: bool | None = None,
 ) -> bool:
     """Vrai si la demande est floue (clarification nécessaire avant devis)."""
     if case == "recuperation_dette":
@@ -1458,6 +1460,12 @@ def _is_vague_request(
     if _TARIFF_QUESTION_PATTERNS.search(body or ""):
         return False
     if case == "non_determine":
+        # v1.25.6 — verdict du check objectif amont (heuristique + LLM gemma4)
+        # sur le message libre du client (hors champs formulaire). Cf. #615 :
+        # le body gonflé par les champs formulaire faisait rater l'ancien critère
+        # `len(body) < 200`. `objective_clear=None` = legacy (pas de check amont).
+        if objective_clear is not None:
+            return not objective_clear
         # Atypique et lapidaire, sans demande de prix → demande manifestement floue.
         return len((body or "").strip()) < 200
     # Cas classé : flou si AUCUNE info opérationnelle extraite (questions d'index

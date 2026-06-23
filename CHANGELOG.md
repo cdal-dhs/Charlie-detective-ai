@@ -1,5 +1,25 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.25.6] — 2026-06-23 (demande de l'objectif final — #615 douane Kaiserslautern)
+
+### Contexte
+#615 (Andree Marie Scurbecq) = « faire une petite enquete au bureau de douane de Kaiserslautern » : demande d'enquête **sans objectif final précis** (prouver quoi ? vérifier quoi ?). Le brouillon qualifiant standard sautait directement aux tarifs sans demander l'objectif, or sans objectif on ne peut pas établir un devis. Le brouillon « demande floue » (v1.25.1, qui demande l'objectif + restitue les infos + tarifs + rappel tel) existait déjà mais n'était pas déclenché : la détection `_is_vague_request` pour `non_determine` se basait sur `len(body) < 200`, or le body de #615 = 542 chars (gonflé par les champs formulaire `Nom:/Prénom:/Téléphone:/Mentions légales:`). Le vrai message du client (~100 chars) était noyé.
+
+### Ajouté
+- **Module `app/pipeline/objective_check.py`** : verdict amont « objectif clair vs flou » basé sur le **message LIBRE du client** (body avant les champs formulaire, via `extract_free_message`), par un HYBRIDE :
+  1. **Heuristique déterministe** (rapide, zéro LLM) : question de tarif explicite → clair ; objectif final évident (filature, infidélité, surveillance, recherche, dette, micros, incapacité, harcèlement, constat, fraude…) → clair ; message vide/lapidaire (< 60 chars) → flou ; sinon → incertain.
+  2. **LLM gemma4 si incertain** : « le client a-t-il exprimé un objectif final précis et actionnable ? » → `OBJECTIF_CLAIR`/`OBJECTIF_FLOU`. Multilingue (NL/EN/DE/ES…).
+  3. **Dégradation** : si le LLM échoue ou répond de façon inattendue → flou (règle d'or du projet : faux positifs acceptables — demander l'objectif inutilement —, faux négatifs intolérables — rater une demande floue et livrer un devis sans objectif).
+- **Branchement generator** (`generate_draft`) : pour `non_determine` uniquement, appel à `assess_objective_clarity` avant `build_qualification_draft` ; le verdict est passé au builder via `objective_clear`. Les cas classés (infidélité, recherche, dette…) gardent leur logique existante (blast radius limité à `non_determine`).
+
+### Changé
+- `build_qualification_draft` + `_is_vague_request` (qualification_builder) : nouveau paramètre `objective_clear: bool | None = None`. Pour `non_determine`, le verdict amont override l'ancien critère `len(body) < 200`. `None` = legacy préservé (tests existants inchangés). Le brouillon flou existant (`_build_vague_request_draft`) est réutilisé tel quel : il demande déjà « pourriez-vous me préciser ce que vous souhaitez obtenir concrètement de notre intervention ? » + tarifs + rappel au téléphone fourni.
+- L'heuristique exclut volontairement le terme générique « enquête » (trop large : « faire une petite enquête » ≠ objectif précis). Seuls les objectifs FINAUX déclenchent le shortcut déterministe.
+
+### Tests
+- `tests/test_objective_check.py` (14 tests) : `extract_free_message` (isole le message libre des champs formulaire, #615), heuristique (objectifs clairs filature/tarif/recherche, #615 vague → None, empty/lapidaire → flou), `assess_objective_clarity` (clair skip LLM, #615 LLM FLOU, LLM CLAIR, échec LLM → flou, empty → flou sans LLM).
+- 168 tests au total, 0 régression (builder legacy avec `objective_clear=None` préservé).
+
 ## [1.25.5] — 2026-06-23 (détection newsletter durcie — #619 Arval via Eloqua)
 
 ### Contexte
