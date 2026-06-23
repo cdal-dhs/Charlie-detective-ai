@@ -1,7 +1,7 @@
 # HANDOVER — Detective.be Agent IA (Charlie)
 
 > Document de transfert pour tout agent (Claude Sonnet/Opus 4.X, GPT, etc.).
-> **Dernière mise à jour**: 2026-06-23 · **Version courante**: v1.25.0 · **Déployé sur** : `detective.digitalhs.biz`
+> **Dernière mise à jour**: 2026-06-23 · **Version courante**: v1.25.21 · **Déployé sur** : `detective.digitalhs.biz`
 
 ---
 
@@ -63,7 +63,7 @@
 
 | Fichier | Rôle critique | À savoir |
 |---|---|---|
-| `app/_version.py` | **Source unique de vérité** version | `VERSION = "1.25.0` — tolérance zéro, ne JAMAIS utiliser `importlib.metadata`. |
+| `app/_version.py` | **Source unique de vérité** version | `VERSION = "1.25.21` — tolérance zéro, ne JAMAIS utiliser `importlib.metadata`. |
 | `app/charlie.py` | **Cœur intelligent Charlie AI** | `ask_charlie()` : extraction entités → SQL programmatique (bypass LLM) + vault Cerveau2 (fallback direct GET) + archives + corrections + mémoire → nuage de liaison familial → **résumé de dossier narratif LLM** (v1.19.1) → garde anti-vide + garde anti-"pas trouvé" |
 | `app/charlie_memory.py` | **Mémoire persistante** | Table `charlie_memory` (feedback good/bad, corrections, auto-save) |
 | `app/cerveau_client.py` | **Client HTTP Cerveau2** | `query_vault()`, `get_vault_note()` (fallback direct), `feed_correspondance()`, `feed_document()`. Bearer Token statique. **Dégradation silencieuse** (retourne `[]` si Cerveau2 down) |
@@ -73,22 +73,41 @@
 | `app/pipeline/draft_renderer.py` | **Rendu brouillon enrichi (v1.21.0 → v1.24.1)** | Compose 4 blocs pour langues étrangères ; pour le FR, proposition FR + message original du client en dessous |
 | `app/pipeline/generator.py` | **Génération brouillon** | Pour `demande_client`/`prise_contact` : branche `app/pipeline/qualification_builder.py` (brouillon déterministe, v1.22.8). Pour les autres catégories : flux LLM few-shot + Cerveau2 + RAG (⚠️ RAG en pause v1.24.2, `pairs` retourné vide). Appelle `translate_to_fr` + `translate_from_fr` en parallèle. **`_load_daniel_fewshot()` (v1.22.4)** : récupère 200 candidats SQL, parse date RFC 2822 en Python, garde top 4 dans fenêtre 30j |
 | `app/pipeline/rag.py` | **RAG retrieval (sqlite-vec)** — ⚠️ **en pause v1.24.2** | `retrieve()` court-circuite (retourne `[]`) si `settings.rag_enabled=False`, **avant** tout appel embedding. Code (embed, `_connect`, query sqlite-vec) conservé intact pour réactivation. Tables `pairs_vec` non réindexées depuis 2026-05-28. Voir point de vigilance #1. |
-| `app/pipeline/qualification_builder.py` | **Brouillon qualifiant intelligent (v1.22.16, + hors-légalité v1.24.1)** | Détection des informations client + spécifiques au cas déjà fournies dans le mail, section "Merci pour les éléments suivants", filtrage des questions redondantes, closing adapté. Gère les cas filature, recherche personne, incapacité, dette, passé violences, micros. **v1.24.1** : `_detect_illegal_request()` (11 regex FR/NL/EN) court-circuite le brouillon standard si le client demande un piratage / accès non autorisé aux communications (WhatsApp, téléphone, compte, logiciel espion) → `_build_illegal_refusal_draft()` = refus poli + cadre légal belge + alternative légale. Cf. mail #614 (Serge M). |
+| `app/pipeline/qualification_builder.py` | **Brouillon qualifiant intelligent (v1.22.16, + hors-légalité v1.24.1 → v1.25.21)** | Détection des informations client + spécifiques au cas déjà fournies dans le mail, section "Merci pour les éléments suivants", filtrage des questions redondantes, closing adapté. Gère les cas filature, recherche personne, incapacité, dette, passé violences, micros. **v1.24.1** : `_detect_illegal_request()` (11 regex FR/NL/EN) court-circuite le brouillon standard si le client demande un piratage / accès non autorisé aux communications. **v1.25.21** : refus transformé en outil de qualification commerciale — détection élargie aux localisations via numéro de téléphone/GSM et « savoir avec qui elle/il parle », 11 questions de requalification systématiques, alternative légale détaillée. Cf. mail #614 (Serge M). |
 | `app/web/admin.py` | **Simulateur brouillon** (v1.22.9) | `GET /admin/draft-simulator` + `POST /admin/api/draft-simulator/run` : permet à CDAL de coller sujet/corps d'un email simulé et de voir le brouillon généré sans envoyer de vrai mail. RAG/Cerveau2 mockés, classifier LLM réel. |
 | `app/web/templates/admin/draft_simulator.html` | **UI Simulateur brouillon** | Formulaire HTMX super-admin : boîte, catégorie, sujet, corps, affichage du résultat. |
 | `app/pipeline/classifier.py` | **Classification LLM** (v1.24.0 hardened) | 8 catégories avec few-shots. **`_enforce_recall_over_precision`** : post-traitement qui force `demande_client` en cas de doute. **v1.24.0** — 3 règles déterministes prioritaires où le body l'emporte sur le sujet : (1) `_is_wp_contact_form()` (formulaires WordPress toutes boîtes, force depuis toute catégorie), (2) `_is_reply_to_daniel()` (Re: + citation signée Daniel + expéditeur humain), (3) `_has_strong_human_demand()` (prénom signé + vocabulaire enquête + question tarif, sans marqueur phishing actif — exception au « jamais remonter depuis phishing »). Règle d'or : faux positifs acceptables, faux négatifs intolérables. Cf. mails #515, #606, #614. |
 | `app/pipeline/language.py` | **Détection langue** | `Language = str` (toutes BCP-47), `language_label()` pour affichage humain |
 | `app/web/api.py` | **Endpoints HTMX + Charlie** | `charlie_ask()`, `charlie_feedback()`, `draft_generate()`, **`POST /api/drafts/{id}/retry`** (régénération manuelle) |
 | `app/workers/imap_poller.py` | **Polling IMAP** | 1 task asyncio par boîte, flag `AgentProcessed` (sans `$`) + flag `AgentAttempted` (libère la queue même en cas de crash, v1.21.3). Appelle `generate_draft()` pour `demande_client` → brouillon enrichi |
-| `app/delivery/imap_draft.py` | **Dépôt brouillon IMAP** (V2a) | `append_draft()` : flag `\Draft`, SELECT probe pour auto-découverte dossier Drafts (v1.21.9 fix Infomaniak) |
+| `app/delivery/imap_draft.py` | **Dépôt brouillon IMAP** (V2a) | `append_draft()` : flag `\Draft`, SELECT probe pour auto-découverte dossier Drafts (v1.21.9 fix Infomaniak). Affiche `NO_EMAIL_IN_THE_FORM` dans le bandeau quand l'expéditeur est un forwarder WP sans email client (v1.25.18) |
+| `app/pipeline/subject_fixer.py` | **Nettoyage sujet + détection forwarders WP** (v1.25.7 / v1.25.18) | Nettoie les sujets pollués par des caractères homoglyphes (`itsme` cyrillique). Détecte les expéditeurs WordPress (`mail@/wordpress@/contact@detective*`), masque l'expéditeur affiché par `NO_EMAIL_IN_THE_FORM` quand aucun email client n'est présent dans le body. |
+| `app/pipeline/case_classifier.py` | **Classification fine du cas métier** | Détermine le cas métier (`infidelite_filature`, `recherche_personne`, `incapacite_travail`, etc.) pour orienter le `qualification_builder`. |
+| `app/pipeline/priority.py` | **Priorité intelligente** | `HIGH` pour les demandes client chaudes (prénom signé, question tarif, vocabulaire enquête), `LOW` pour les newsletters/factures. |
+| `app/pipeline/prefilter.py` | **Pré-filtre règles** | Règles headers/expéditeurs : newsletters, factures, phishing, rappels, demandes évidentes. |
+| `app/settings_store.py` | **Overrides runtime** | Persistance/lecture des `app_settings` en DB (LLM model, etc.). ⚠️ purge obligatoire si modification des défauts dans `app/config.py`. |
+| `app/cerveau_dossier.py` | **Helpers dossiers Cerveau2** | Fonctions utilitaires pour interroger la liste des dossiers Cerveau2. |
+| `app/workers/disk_watcher.py` | **Surveillance disque VPS** | Alerte si espace disque > 75% (niveau anti-crash silencieux). |
+| `app/web/db_migrate.py` | **Migrations DB cockpit** | Crée/met à jour le schéma SQLite au boot. |
+| `app/web/models.py` | **Schémas Pydantic web** | Modèles de requête/réponse pour le cockpit. |
+| `app/telegram_bot.py` | **Module Telegram conservé inactif** | Code présent pour fallback/futur, mais non utilisé en prod (Slack suffit). |
 | `scripts/deploy-to-vps.sh` | **Déploiement one-shot** | Pre-flight checks, sync data (exclut `agent_state.db`), build, healthcheck |
 | `scripts/backfill_demande_client.py` | **(v1.22.1)** Re-classifie + génère brouillons pour les mails historiques manqués | |
 | `scripts/deliver_pending_drafts.py` | **(v1.22.2)** Livre les brouillons existants en IMAP Drafts (idempotent via `delivered_at`) | |
 | `scripts/cleanup_old_drafts.py` | **(v1.22.3)** Supprime vieux brouillons IMAP Drafts (SELECT probe + SEARCH SUBJECT) | |
+| `scripts/review_missed_demande_client.py` | **(v1.25.17)** Audit périodique des faux négatifs `demande_client` | Lance le pré-filtre et le classifier sur les mails non-`demande_client` des 7 derniers jours pour détecter ceux qui devraient l'être. |
+| `scripts/backfill_reclassify.py` | **Re-classement d'un mail spécifique** | Permet de reclassifier et régénérer un brouillon pour un ID donné (ex: #614 phishing → demande_client). |
+| `scripts/regenerate_and_deliver_drafts.py` | **Régénération + livraison groupée** | Pour backfill : régénère les brouillons et les dépose en IMAP Drafts. |
+| `scripts/test_draft_qualification.py` | **Simulateur CLI brouillon** (v1.22.9) | Teste le brouillon qualifiant en local sans envoyer de vrai mail. |
+| `scripts/test_pipeline.py` | **Smoke test pipeline complet** | Mock IMAP, teste pré-filtre → classifier → génération end-to-end. |
+| `scripts/smoke_test_llm.py` | **Smoke test connectivité LLM** | Vérifie que le LLM principal et fallback répondent. |
+| `scripts/smoke_test_sqlite_vec.py` | **Smoke test sqlite-vec** | Vérifie l'extension sqlite-vec. |
+| `scripts/bootstrap_embeddings.py` | **Indexation RAG** | 2042 paires Q/R → `pairs_vec` (sqlite-vec). ⚠️ RAG en pause v1.24.2. |
+| `scripts/extract_personality.py` | **Extraction personnalité Daniel** | Génère `app/prompts/personality_daniel.txt` depuis `sent_emails`. |
 
 ---
 
-## 3. Le pipeline Charlie AI (état v1.25.0)
+## 3. Le pipeline Charlie AI (état v1.25.21)
 
 Le fichier `app/charlie.py` contient `ask_charlie()`. Flow exact :
 
@@ -173,7 +192,7 @@ if not response and rows:
 
 ---
 
-## 4. Stack technique détaillée (v1.25.0)
+## 4. Stack technique détaillée (v1.25.21)
 
 | Couche | Outil | Version / Détail |
 |---|---|---|
@@ -412,7 +431,10 @@ Le poller IMAP ne traite que les mails reçus depuis cette date. Les archives hi
 | 17 | **Wording brouillon déterministe pas assez "Daniel"** — premier test prod du simulateur : intro et closing trop génériques. | ✅ **Corrigé v1.22.10** | `app/pipeline/qualification_builder.py` | Intro : "Afin de préparer votre dossier dans les meilleures conditions, et pouvoir vous donner une estimation de devis fiable...". Closing : "Dès réception de ces éléments, je reprendrai contact avec vous pour finaliser le devis et convenir d'un échange téléphonique sur ce nouveau dossier." |
 | 18 | **Nouveau cas métier : récupération de dette** — CDAL partage une vraie demande client (Eunice, membre d'entourage devant une somme). Besoin d'un brouillon spécifique. | ✅ **Corrigé v1.22.11 → v1.22.13** | `app/pipeline/case_classifier.py` + `app/pipeline/qualification_builder.py` | Ajout du cas `recuperation_dette`. Brouillon structuré : intro dette, question créance, infos sur la personne concernée, closing légal. **v1.22.13** : extraction auto des infos client déjà reçues (nom, prénom, GSM, email, heure, profil) pour ne plus les redemander. **94/94 tests verts**. |
 | 19 | **3 clients ratés par le classifier (body ignoré au profit du sujet)** — meeting Daniel 2026-06-22. #515 (Nathalie Hairemans, formulaire WP classé facture à cause sujet « Réinitialisation mot de passe »), #606 (Van Houtte, Re:+citation devis classé facture), #614 (Serge M, homoglyphes itsme classé phishing). | ✅ **Corrigé v1.24.0** | `app/pipeline/classifier.py` + `tests/test_classifier_hardening.py` | 3 règles déterministes prioritaires où le body l'emporte sur le sujet : `_is_wp_contact_form()` (formulaires WordPress toutes boîtes), `_is_reply_to_daniel()` (Re:+citation signée Daniel), `_has_strong_human_demand()` (exception au « jamais remonter depuis phishing » si prénom signé + vocabulaire enquête + question tarif, sans marqueur phishing actif). Règle d'or : faux positifs acceptables, faux négatifs intolérables. **#515 et #606 reclassés + brouillons livrés en prod** (IMAP Drafts). **136/136 tests hardening verts, 123/123 suite complète**. |
-| 20 | **Demande hors-légalité sans réponse adaptée** — #614 (Serge M) demande de « faire sortir les conversations WhatsApp » du téléphone de son épouse = accès non autorisé = infraction pénale en BE. Le brouillon qualifiant infidélité standard est inadapté. Daniel demande une réponse polie expliquant le cadre légal. | ✅ **Corrigé v1.24.1** | `app/pipeline/qualification_builder.py` + `scripts/backfill_reclassify.py` + `tests/test_illegal_request.py` | `_detect_illegal_request()` (11 regex FR/NL/EN : piratage, extraction conversations, logiciel espion, mise sur écoute, relevés, mot de passe) court-circuite le brouillon standard → `_build_illegal_refusal_draft()` = refus poli + cadre légal belge (infractions pénales, détectives agréés tenus de respecter la loi) + alternative légale selon le cas (filature/surveillance/constat) + questions de collecte + tarifs + signature Daniel. `backfill_reclassify.py --only-id` ne filtre plus par catégorie (permet de remonter #614 phishing → demande_client). **14 tests, 137/137 suite verte**. #614 en attente de backfill (validation brouillon avec CDAL). |
+| 20 | **Demande hors-légalité sans réponse adaptée** — #614 (Serge M) demande de « faire sortir les conversations WhatsApp » du téléphone de son épouse = accès non autorisé = infraction pénale en BE. Le brouillon qualifiant infidélité standard est inadapté. Daniel demande une réponse polie expliquant le cadre légal. | ✅ **Corrigé v1.24.1 → v1.25.21** | `app/pipeline/qualification_builder.py` + `scripts/backfill_reclassify.py` + `tests/test_illegal_request.py` | v1.24.1 : `_detect_illegal_request()` (11 regex FR/NL/EN : piratage, extraction conversations, logiciel espion, mise sur écoute, relevés, mot de passe) court-circuite le brouillon standard → `_build_illegal_refusal_draft()` = refus poli + cadre légal belge + alternative légale. **v1.25.21** : refus transformé en outil de qualification commerciale (brief Daniel 260623) — détection élargie aux localisations via numéro de téléphone/GSM et « savoir avec qui elle/il parle », 11 questions de requalification systématiques (but, lien, contexte, éléments, type d'investigation légale, délai, usage du rapport), alternative légale détaillée, tarifs en indication. `backfill_reclassify.py --only-id` ne filtre plus par catégorie (permet de remonter #614 phishing → demande_client). **19 tests, 278 suite verte**. |
+| 21 | **Audit périodique des faux négatifs demande_client** — #519 (formulaire WP NL classé `autre`) a passé entre les mailles car `_is_wp_contact_form` était exécuté APRÈS le filtre `_is_service_sender`. | ✅ **Corrigé v1.25.17** | `scripts/review_missed_demande_client.py` | Détection WP faite AVANT le filtre service sender. Si le body est structuré en champs WordPress (`Voornaam`, `Achternaom`, `Telefoonnummer`), c'est un signal INCONTESTABLE de `demande_client` quel que soit l'expéditeur. |
+| 22 | **Forwarders WordPress sans email client visible** — les formulaires WP arrivent via des expéditeurs techniques (`mail@/wordpress@/contact@detective*`) et ne contiennent pas l'email du client final. Risque : Daniel répondrait à l'adresse technique au lieu d'appeler le client. | ✅ **Corrigé v1.25.18 → v1.25.20** | `app/pipeline/subject_fixer.py` + `app/delivery/imap_draft.py` + `app/workers/imap_poller.py` + `app/web/api.py` + `app/web/app_routes.py` + `tests/test_subject_fixer.py` + `tests/test_web_inbox_render.py` | v1.25.18 : `is_wp_forwarder()`, `has_client_email_in_body()`, `mask_forwarder_sender()` → affichage `NO_EMAIL_IN_THE_FORM` dans les brouillons IMAP, notifications Slack, cockpit. Tag `[NO_EMAIL_IN_THE_FORM]` dans le sujet si pas d'email client. v1.25.19/20 : fix P0 cockpit 500 (désalignement SQL `cols` après ajout de `body`/`ai_draft`) + fix badge brouillon HTMX + test de non-régression cockpit. **54 tests ciblés verts**. |
+| 23 | **Brouillon hors-légalité trop sec** — brief Daniel 260623 : au lieu d'un simple refus, il faut qualifier la vraie mission (but ultime, contexte, éléments disponibles) et proposer une alternative légale adaptée. | ✅ **Corrigé v1.25.21** | `app/pipeline/qualification_builder.py` + `tests/test_illegal_request.py` | `_build_illegal_refusal_draft()` réécrit : refus clair et non négociable, pivot vers qualification, 11 questions systématiques, alternative légale détaillée, tarifs en indication. **19 tests illégaux, 278 suite verte**. |
 | 2 | **76 mails `demande_client` manqués** par classifier v1.21.5 (trop conservateur sur les cas ambigus) | ✅ **Corrigé v1.22.1** | `app/pipeline/classifier.py` + `scripts/backfill_demande_client.py` | Prompt classifier durci. Backfill script one-shot re-classifie + génère brouillons pour les 76 mails historiques ratés. |
 | 3 | **153 brouillons en DB mais 0 dans Drafts IMAP** — poller ne re-livre pas les brouillons existants (`is_new` condition) | ✅ **Corrigé v1.22.2** | `scripts/deliver_pending_drafts.py` + colonne `delivered_at` | Script one-shot livre les brouillons existants en IMAP Drafts. Bilan : 153/154 livrés. 14 échecs dus à CRLF dans sujets (Google Calendar invitations) → corrigé via `_sanitize_subject()`. |
 | 4 | **127 vieux brouillons accumulés dans Drafts IMAP** (avant 2026-06-02) | ✅ **Corrigé v1.22.3** | `scripts/cleanup_old_drafts.py` | Script one-shot avec dry-run par défaut, SELECT probe (v1.21.9 fix), SEARCH SUBJECT, store +FLAGS \Deleted + EXPUNGE. Deux passes : 80 supprimés (cutoff 2026-01-02) + 47 supprimés (cutoff 2026-06-02). |
@@ -611,7 +633,7 @@ Avant de modifier quoi que ce soit :
 
 - [ ] **Lire `CLAUDE.md`** (conventions, garde-fous, stack)
 - [ ] **Lire ce `HANDOVER.md`** (contexte actuel, bugs résolus, points de vigilance, procédures urgence)
-- [ ] **Vérifier `app/_version.py`** — est-ce bien `1.22.14` ?
+- [ ] **Vérifier `app/_version.py`** — est-ce bien `1.25.21` ?
 - [ ] **Vérifier `CHANGELOG.md`** — la dernière version est-elle documentée avec bilan déploiement ?
 - [ ] **Vérifier `docs/ROADMAP.md`** — quelle phase est en cours (V2b/V2c) ?
 - [ ] **Tester le healthcheck** : `curl -s https://detective.digitalhs.biz/health` → `{"ok":true}`

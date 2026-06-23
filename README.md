@@ -132,7 +132,7 @@ docker compose up -d --build      # si requirements.txt ou Dockerfile modifiés
 
 ---
 
-## Stack technique (état v1.25.0)
+## Stack technique (état v1.25.21)
 
 | Couche | Choix |
 |---|---|
@@ -155,7 +155,7 @@ docker compose up -d --build      # si requirements.txt ou Dockerfile modifiés
 | Service prod | **Docker + Docker Compose + Traefik** (VPS Hostinger KVM8) |
 | Logs | `structlog` (JSON structuré, rotation 7j) |
 | Config | `pydantic-settings` depuis `.env` |
-| Version | Source unique `app/_version.py` (`VERSION = "1.25.0"`) — `pyproject.toml` figé en 1.9.5 (volontaire) |
+| Version | Source unique `app/_version.py` (`VERSION = "1.25.21"`) — `pyproject.toml` figé en 1.9.5 (volontaire) |
 
 **Ne PAS introduire** sans discussion : Kubernetes, Swarm, Celery, Redis, Postgres, ORM lourd, framework JS front (React/Vue/Angular). Le périmètre Docker actuel (1 service Compose + Traefik externe) est figé.
 
@@ -191,18 +191,27 @@ DETECTIVE_BE/
 │   ├── charlie.py               # Cœur intelligent Charlie AI (ask_charlie)
 │   ├── charlie_memory.py        # Mémoire persistante (charlie_memory table)
 │   ├── cerveau_client.py        # Client HTTP Cerveau2 (dégradation silencieuse)
+│   ├── cerveau_dossier.py       # Helpers liste dossiers Cerveau2
+│   ├── settings_store.py        # Overrides runtime (app_settings)
+│   ├── telegram_bot.py          # Module Telegram (conservé inactif en prod)
 │   ├── alerts.py                # Notifications Slack + Resend
 │   ├── healthcheck.py           # FastAPI /health + startup/shutdown hooks
 │   ├── workers/
 │   │   ├── imap_poller.py       # 1 task asyncio par boîte (5 min)
-│   │   └── newsletter_digest.py # Digest quotidien Slack
+│   │   ├── newsletter_digest.py # Digest quotidien Slack
+│   │   └── disk_watcher.py      # Surveillance espace disque VPS
 │   ├── pipeline/
 │   │   ├── prefilter.py         # Règles headers/expéditeurs
 │   │   ├── classifier.py        # LLM → 8 catégories avec few-shots
+│   │   ├── case_classifier.py   # Classification fine du cas métier
 │   │   ├── priority.py          # Priorité intelligente (high/normal/low)
 │   │   ├── language.py          # Détection langue (toutes BCP-47)
+│   │   ├── objective_check.py   # Vérification objectif clair (utilisé par generator)
+│   │   ├── document_extract.py  # Extraction texte pièces jointes
 │   │   ├── rag.py               # Embed + retrieve sqlite-vec (⚠️ en pause v1.24.2, rag_enabled=False)
 │   │   ├── generator.py         # Assemblage prompt + appel LLM + _load_daniel_fewshot()
+│   │   ├── qualification_builder.py  # Brouillon qualifiant déterministe + refus illégal v1.25.21
+│   │   ├── subject_fixer.py     # Nettoyage sujet + masque forwarders WP v1.25.18
 │   │   ├── translator.py        # Aide lecture multilingue (v1.21.0)
 │   │   └── draft_renderer.py    # Rendu brouillon enrichi 4 blocs (v1.21.0)
 │   ├── delivery/
@@ -216,10 +225,11 @@ DETECTIVE_BE/
 │   │   ├── auth.py              # Magic link login
 │   │   ├── app_routes.py        # Inbox + conversation
 │   │   ├── api.py               # Endpoints HTMX + Charlie AI + /api/drafts/{id}/retry
-│   │   ├── admin.py             # Dashboard + settings
+│   │   ├── admin.py             # Dashboard + settings + simulateur brouillon
 │   │   ├── deps.py              # Dependencies auth + DB
 │   │   ├── utils.py             # Audit log
-│   │   ├── models.py            # Schéma SQLite
+│   │   ├── models.py            # Modèles Pydantic web
+│   │   ├── db_migrate.py        # Migrations/création schéma SQLite
 │   │   ├── static/              # CSS/JS
 │   │   └── templates/           # Jinja2
 │   └── prompts/
@@ -233,9 +243,22 @@ DETECTIVE_BE/
 │   ├── cleanup_old_drafts.py              # (v1.22.3) Supprime vieux brouillons IMAP Drafts
 │   ├── manual_draft_deposit.py            # Dépôt manuel brouillon IMAP (V2a)
 │   ├── backfill_demande_client.py         # (v1.22.1) Re-classifie + génère brouillons ratés
+│   ├── backfill_reclassify.py             # Re-classement + régénération d'un mail donné
+│   ├── regenerate_and_deliver_drafts.py   # Régénération + livraison groupée de brouillons
+│   ├── review_missed_demande_client.py   # (v1.25.17) Audit périodique faux négatifs demande_client
+│   ├── cleanup_drafts_by_uid.py           # Nettoyage brouillons par UID IMAP
+│   ├── cleanup_drafts_without_email_id.py # Nettoyage brouillons orphelins
+│   ├── dedup_drafts_by_email_id.py        # Dédoublonnage brouillons par Message-ID
 │   ├── test_pipeline.py                   # Smoke test pipeline complet (mock IMAP)
+│   ├── test_draft_qualification.py        # Simulateur CLI brouillon qualifiant
 │   ├── smoke_test_llm.py                  # Vérifie connectivité LLM
 │   ├── smoke_test_sqlite_vec.py           # Vérifie sqlite-vec
+│   ├── check_imap.py                      # Diagnostic connexion IMAP brute
+│   ├── ingest_sent_to_cerveau2.py         # Ingestion manuelle dossier Sent vers Cerveau2
+│   ├── backfill_historical_to_cerveau2.py # Backfill historique vers Cerveau2
+│   ├── fix_charlie_memory.py              # Outils maintenance mémoire Charlie
+│   ├── fix_prompts.py                     # Maintenance prompts
+│   ├── build_bible_pdf.py                 # Génération PDF bible projet
 │   ├── detective-healthcheck.sh           # Watchdog cron niveau 3 (anti-crash silencieux)
 │   ├── detective-docker-clean.sh          # Cleanup Docker hebdo dim 4h
 │   └── deploy-to-vps.sh                   # Deploy one-shot Mac → VPS
@@ -254,7 +277,7 @@ DETECTIVE_BE/
 
 ## Statut
 
-✅ **Production active** — `detective.digitalhs.biz` — **v1.25.0**
+✅ **Production active** — `detective.digitalhs.biz` — **v1.25.21**
 
 - **Pipeline IMAP** : polling 3 boîtes toutes les 5 min, classification 8 catégories, priorité intelligente, flag `AgentProcessed` (succès) + `AgentAttempted` (libère la queue même en cas de crash, v1.21.3).
 - **Génération brouillon** : gemma4:31b (non-reasoning), style Daniel imité via few-shot learning (v1.22.0) + personnalité Cerveau2. **RAG sqlite-vec en pause (v1.24.2)** — remplacé par le brouillon qualifiant déterministe (`qualification_builder`) pour les `demande_client`/`prise_contact`.
@@ -270,6 +293,10 @@ DETECTIVE_BE/
 - **Slack Bot Charlie AI** : @mention + DM sur #detective.
 - **Cerveau2 vault** : ingestion 100% emails + PJ, recherche sans troncation, insensible aux accents, blindé injection, mapping priorité high→urgent/low→faible (v1.18.6), timeout 120s.
 - **LLM gemma4:31b principal + glm-5.2:cloud fallback (v1.25.0)** : bascule depuis kimi-k2.6:cloud (v1.21.1→v1.24.x) vers gemma4:31b (non-reasoning) comme modèle principal sur toutes les tâches. glm-5.2:cloud remplace glm-5.1:cloud comme fallback (reasoning model). Extraction `reasoning_content` + post-traitement `_clean_reasoning()` v1.21.2 (filtre 30+ patterns, utile pour le fallback reasoning glm-5.2:cloud).
+- **Hardening classifier v1.24.0** : 3 règles déterministes où le body l'emporte sur le sujet (#515, #606, #614).
+- **Brouillon hors-légalité v1.24.1 → v1.25.21** : refus clair des méthodes illégales (piratage, extraction WhatsApp, localisation via GSM) + qualification commerciale (but ultime, contexte, éléments, alternative légale). 19 tests illégaux, 278 tests verts.
+- **Masque forwarders WP v1.25.18 → v1.25.20** : `NO_EMAIL_IN_THE_FORM` affiché dans brouillons IMAP, cockpit et Slack quand un formulaire WordPress n'expose pas l'email client. Fix P0 cockpit 500 + badge brouillon HTMX + test de non-régression cockpit.
+- **Audit périodique faux négatifs v1.25.17** : `scripts/review_missed_demande_client.py` détecte les formulaires WP passés à travers (#519).
 - **Dashboard admin** : stats, settings LLM, audit logs, télémétrie poller, backup Cerveau2.
 - **4 niveaux anti-crash silencieux** : Slack + Resend in-app + cron watchdog externe + Healthchecks.io.
 
@@ -279,7 +306,7 @@ Voir `docs/ROADMAP.md` pour la roadmap V2b/V2c (polishing cockpit, feedback loop
 
 ## Versions
 
-Version source de vérité : **`app/_version.py`** (`VERSION = "1.25.0"`).
+Version source de vérité : **`app/_version.py`** (`VERSION = "1.25.21"`).
 
 Le badge affiché dans le cockpit est lu dynamiquement depuis `app/_version.py`. **Tolérance zéro** sur la désynchronisation.
 
