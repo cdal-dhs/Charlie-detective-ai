@@ -177,19 +177,35 @@ python -m scripts.run_telegram_bot.py
 ⚠️ **Détection langue étendue** (v1.21.0+) : `Language = str` au lieu de `Literal["fr","nl","en"]` — toutes langues BCP-47 supportées (allemand, espagnol, italien, portugais, etc.). Libellé humain via `language_label()`.
 
 ### Déploiement
-⚠️ **JAMAIS builder l'image Docker sur le VPS de production.** Le VPS (`69.62.110.165`) est un VPS de PROD — un build Docker consomme tout le CPU/RAM et le site devient inaccessible pendant 10-30 min. Toujours builder en local (Mac CDAL, M4 Max 48 GB) puis pousser l'image compilée vers le VPS :
+⚠️ **JAMAIS builder l'image Docker sur le VPS de production.** Le VPS (`69.62.110.165`) est un VPS de PROD — un build Docker consomme tout le CPU/RAM et le site devient inaccessible pendant 10-30 min. Toujours builder en local (Mac CDAL, M4 Max 48 GB) puis pousser l'image compilée vers le VPS.
+
+⚠️ **VPS = x86_64 (amd64), Mac CDAL = ARM (Apple Silicon).** Une image buildée avec `docker build` simple sur le Mac produit une image **ARM** que le VPS x86_64 ne peut PAS exécuter (ou via QEMU émulé = très lent). Pour livrer une image compatible VPS, il FAUT cross-builder avec `buildx --platform linux/amd64` (QEMU émule l'amd64 pendant le build sur le Mac, lent mais one-shot, puis l'image tourne nativement sur le VPS).
+
+⚠️ **Déploiement léger vs rebuild image.** Sur le VPS, `app/` ET `scripts/` sont montés en volume **ro** dans le conteneur (`docker inspect` pour vérifier). Conséquence : un `git pull` sur le VPS propage **tout le code Python** (app + scripts) → `docker compose restart` suffit pour le recharger. **Rebuild image = uniquement si** `pyproject.toml`, `Dockerfile*`, ou des packages système changent. Pour un fix pure-Python, ne pas rebuild.
+
+⚠️ **`docker compose up -d` seul NE recharge PAS le code Python.** Si la config compose est inchangée, `up -d` affiche « Container Running » sans recréer → le process Python garde l'ancien code en mémoire. Après un `git pull`, TOUJOURS `docker compose restart` (ou `up -d --force-recreate`).
+
+⚠️ **Nom image compose = `detective-detective:latest` (TIRET)**, pas `detective_detective` (underscore). Le service `detective:` + `build: .` génère `detective-detective:latest`. Le script `scripts/deploy-to-vps.sh` tagge à tort en `detective_detective` → le conteneur ne l'utilise pas. Bug latent à corriger dans le script.
+
 ```bash
-# 1. Builder en local (rapide sur M4 Max)
-docker build -f Dockerfile.base -t detective-agent:base .
-docker build -t detective_detective .
+# --- Déploiement LÉGER (code Python uniquement : app/*.py, scripts/*.py) ---
+# Pas de rebuild. Le code est monté en volume.
+ssh root@69.62.110.165 'cd /opt/DETECTIVE && git pull origin main && docker compose restart'
+# + healthcheck
+curl -s -o /dev/null -w "%{http_code}\n" https://detective.digitalhs.biz/health
+# + version conteneur (doit match app/_version.py)
+ssh root@69.62.110.165 'docker exec detective-agent python -c "from app._version import VERSION; print(VERSION)"'
 
-# 2. Pousser l'image vers le VPS sans rebuild distant
-docker save detective_detective | ssh root@69.62.110.165 'docker load'
-
-# 3. Redémarrer le service sur le VPS (utilise l'image locale chargée)
-ssh root@69.62.110.165 'cd /opt/DETECTIVE && docker compose up -d'
+# --- Déploiement FULL (deps / Dockerfile / packages système changent) ---
+# Cross-build amd64 sur le Mac ARM via buildx + Dockerfile.full (one-shot amd64)
+docker buildx build --platform linux/amd64 -f Dockerfile.full \
+  -t detective-detective:latest --load .
+# Push de l'image compilée vers le VPS (pas de rebuild distant)
+docker save detective-detective:latest | ssh root@69.62.110.165 'docker load'
+# Redémarrage avec la nouvelle image (git pull au cas où + restart)
+ssh root@69.62.110.165 'cd /opt/DETECTIVE && git pull origin main && docker compose up -d && docker compose restart'
 ```
-Le script `scripts/deploy-to-vps.sh` intègre ce workflow. **Ne jamais utiliser `docker compose up -d --build` directement sur le VPS.**
+`Dockerfile.full` = build one-shot linux/amd64 (le multi-stage Dockerfile.base + Dockerfile ne se résout pas en buildx docker-container, le builder ne voit pas l'image base du daemon local). Fichier local de build, **non commité**. **Ne jamais utiliser `docker compose up -d --build` directement sur le VPS.**
 
 ⚠️ **Pas d'ajout de nouveaux services d'orchestration** (Kubernetes, Swarm, Nomad). Le périmètre Docker actuel (1 service Compose + Traefik externe `root_default`) est figé.
 

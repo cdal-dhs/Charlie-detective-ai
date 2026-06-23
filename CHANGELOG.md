@@ -1,5 +1,22 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.25.3] — 2026-06-23 (correction LLM des sujets illisibles — homoglyphes itsme #614)
+
+### Contexte
+Le mail #614 (Serge M) a un sujet `іtѕⅿе-Bеvеіlіngѕmеldіng` — homoglyphes cyrilliques + chiffre romain `ⅿ` ressemblant à `itsme-Bevelingsmelding`. Ce sujet illisible pollue l'inbox et le sujet du brouillon V2a (`DEMANDE D'Approbation - ... : {sujet}`). Daniel a demandé que Charlie corrige ces sujets (le VPS est x86_64 ≠ Mac ARM, doc mis à jour).
+
+### Ajouté
+- **Module `app/pipeline/subject_fixer.py`** : détection déterministe des sujets suspects (`is_subject_suspect` = présence de confusables cyrillique U+0400–U+04FF / grec U+0370–U+03FF / chiffres romains U+2160–U+2188 ; les accents Latin `é è à ç` ne sont PAS des confusables) + correction LLM (`fix_subject_llm` : prompt court, gemma4:31b, max 120 tokens, nettoyage guillemets/préfixes « Sujet : »/première ligne, rejet si >200 chars). Dégradation silencieuse : si le LLM échoue ou ne propose rien de mieux, on conserve l'original (jamais de crash).
+- **Hook pipeline** (`app/workers/imap_poller.py`) : après les skips (date avant 2026-06-01, system email) et AVANT `classify`, si le sujet est suspect → correction LLM → le sujet corrigé bénéficie à `classify`, `assign_priority`, `generate_draft` (sujet lisible du brouillon V2a) et la persistance. Coût LLM nul (forfait Ollama Pro). Les mails suspects (homoglyphes) sont rares → impact sur la cadence 5 min négligeable.
+- **Endpoint cockpit `POST /api/mails/{mail_id}/fix-subject`** (`app/web/api.py`) : rétrocorrection des anciens mails (#614). UPDATE `subject` + audit log de l'original (forensic). Dégradation silencieuse (message d'info si le LLM ne propose rien). Bouton `✨ Corriger le sujet` ajouté dans `conversation.html` (HTMX, cible `#mail-subject`).
+
+### Documentation
+- **`CLAUDE.md` section Déploiement** réécrite : note explicite **VPS x86_64 ≠ Mac ARM** (cross-build `buildx --platform linux/amd64` obligatoire, `docker build` simple produit une image ARM inutilisable sur le VPS), distinction déploiement léger (code Python via volumes `app/`+`scripts/` ro + `docker compose restart`) vs rebuild image (seulement si `pyproject.toml`/`Dockerfile*`/packages système changent), correction du tag image (`detective-detective:latest` tiret, pas underscore), et `docker compose up -d` seul ne recharge pas le code Python → `restart` obligatoire.
+
+### Tests
+- `tests/test_subject_fixer.py` (12 tests) : détection suspect (cyrillique/grec/chiffre romain/accents FR exclus/empty) + `_clean` (guillemets, préfixe, première ligne) + `fix_subject_llm` mocké (succès, guillemets, no-improvement→None, échec LLM→None, empty→None, trop long→None, accents préservés).
+- `tests/test_web_fix_subject.py` (3 tests) : endpoint UPDATE + audit log original + HTML nouveau sujet ; no-improvement conserve l'original + audit `subject_fix_noop` ; 404 si mail absent.
+
 ## [1.25.2] — 2026-06-23 (reclassify avant (re)génération + backfill --only-id robuste — #614)
 
 ### Contexte

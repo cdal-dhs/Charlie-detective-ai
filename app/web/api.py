@@ -19,6 +19,7 @@ from app.config import get_settings
 from app.pipeline.classifier import classify
 from app.pipeline.generator import generate_draft
 from app.pipeline.language import detect_language
+from app.pipeline.subject_fixer import fix_subject_llm
 from app.web.deps import get_db, require_operator
 from app.web.utils import audit_log
 
@@ -32,10 +33,24 @@ _CUTOFF_DATE = "2026-05-20"
 # Marqueurs indiquant qu'un mail est une réponse client
 _FOLLOWUP_SUBJECT_RE = re.compile(r"^re\s*:\s*", re.IGNORECASE)
 _FOLLOWUP_BODY_MARKERS = (
-    "voici", "en réponse à", "comme demandé", "comme convenu", "cf. ci-joint",
-    "vous trouverez ci-joint", "re-bonjour", "pour compléter", "suite à",
-    "ci-joint", "merci de bien vouloir", "je vous transmets", "je vous envoie",
-    "je joins", "en pièce jointe", "pj", "piece jointe", "ci-dessous",
+    "voici",
+    "en réponse à",
+    "comme demandé",
+    "comme convenu",
+    "cf. ci-joint",
+    "vous trouverez ci-joint",
+    "re-bonjour",
+    "pour compléter",
+    "suite à",
+    "ci-joint",
+    "merci de bien vouloir",
+    "je vous transmets",
+    "je vous envoie",
+    "je joins",
+    "en pièce jointe",
+    "pj",
+    "piece jointe",
+    "ci-dessous",
 )
 
 
@@ -64,8 +79,18 @@ async def _is_web_followup(
     cutoff = datetime.now(UTC) - timedelta(days=30)
     rfc_re = re.compile(r"[A-Za-z]{3},\s+(\d+)\s+(\w+)\s+(\d{4})\s+(\d{2}):(\d{2}):(\d{2})")
     months = {
-        "Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6,
-        "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12,
+        "Jan": 1,
+        "Feb": 2,
+        "Mar": 3,
+        "Apr": 4,
+        "May": 5,
+        "Jun": 6,
+        "Jul": 7,
+        "Aug": 8,
+        "Sep": 9,
+        "Oct": 10,
+        "Nov": 11,
+        "Dec": 12,
     }
 
     try:
@@ -94,7 +119,9 @@ async def _is_web_followup(
             continue
         day, mon_s, year, hh, mm, ss = m.groups()
         try:
-            dt = datetime(int(year), months[mon_s], int(day), int(hh), int(mm), int(ss), tzinfo=None)
+            dt = datetime(
+                int(year), months[mon_s], int(day), int(hh), int(mm), int(ss), tzinfo=None
+            )
         except (KeyError, ValueError):
             continue
         if dt >= cutoff.replace(tzinfo=None):
@@ -145,15 +172,26 @@ async def _fetch_mails_partial(
         where.append("priority = ?")
         params.append(priority)
     if q:
-        where.append("(LOWER(subject) LIKE ? OR LOWER(sender) LIKE ? OR LOWER(body_preview) LIKE ?)")
+        where.append(
+            "(LOWER(subject) LIKE ? OR LOWER(sender) LIKE ? OR LOWER(body_preview) LIKE ?)"
+        )
         like = f"%{q.lower()}%"
         params.extend([like, like, like])
 
     col = _SORTABLE_COLS.get(sort_col, "processed_at")
     order = "DESC" if sort_order.lower() == "desc" else "ASC"
     cols = [
-        "id", "mailbox_name", "subject", "sender", "received_at",
-        "category", "status", "priority", "processed_at", "body_preview", "attachment_count",
+        "id",
+        "mailbox_name",
+        "subject",
+        "sender",
+        "received_at",
+        "category",
+        "status",
+        "priority",
+        "processed_at",
+        "body_preview",
+        "attachment_count",
     ]
 
     # ── Requête 1 : HOT (demande_client + high + pending) ──
@@ -225,8 +263,13 @@ async def inbox_partial(
             "hot_mails": hot_mails,
             "other_mails": other_mails,
             "filters": {
-                "box": box_raw, "category": category, "status": status,
-                "priority": priority, "q": q, "sort": sort_col, "order": sort_order,
+                "box": box_raw,
+                "category": category,
+                "status": status,
+                "priority": priority,
+                "q": q,
+                "sort": sort_col,
+                "order": sort_order,
             },
             "version": __version__,
         },
@@ -266,38 +309,39 @@ async def draft_save(
 
     ip = request.client.host if request.client else None
     await audit_log(
-        db, user["id"], "draft_save", "mail_processed", str(mail_id),
-        f"version {version}", ip, request.headers.get("user-agent"),
+        db,
+        user["id"],
+        "draft_save",
+        "mail_processed",
+        str(mail_id),
+        f"version {version}",
+        ip,
+        request.headers.get("user-agent"),
     )
 
     return HTMLResponse(
         f'<div class="p-3 bg-green-900/40 border border-green-800 rounded text-green-300 text-sm">'
-        f'Brouillon sauvegardé (v{version}).'
-        f'</div>'
+        f"Brouillon sauvegardé (v{version})."
+        f"</div>"
     )
 
 
 def _ai_draft_html(draft_text: str) -> str:
-    safe = (
-        draft_text
-        .replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-    )
+    safe = draft_text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     return (
         f'<div class="bg-gray-900 border border-gray-800 rounded-lg p-4" id="ai-draft-section">'
         f'  <div class="flex items-center justify-between mb-3">'
         f'    <div class="flex items-center gap-2">'
         f'      <span class="w-2 h-2 rounded-full bg-green-400"></span>'
         f'      <h2 class="font-semibold">Réponse proposée par Charlie</h2>'
-        f'    </div>'
+        f"    </div>"
         f'    <div class="flex gap-2">'
         f'      <button type="button" class="px-3 py-1 bg-gray-800 hover:bg-gray-700 rounded text-xs"'
-        f'        onclick="navigator.clipboard.writeText(document.getElementById(\'ai-draft-text\').innerText); this.innerText = \'Copié !\'; setTimeout(() => this.innerText = \'Copier\', 1500)">Copier</button>'
-        f'    </div>'
-        f'  </div>'
+        f"        onclick=\"navigator.clipboard.writeText(document.getElementById('ai-draft-text').innerText); this.innerText = 'Copié !'; setTimeout(() => this.innerText = 'Copier', 1500)\">Copier</button>"
+        f"    </div>"
+        f"  </div>"
         f'  <div id="ai-draft-text" class="bg-gray-950 border border-gray-800 rounded p-3 text-sm text-gray-300 whitespace-pre-wrap max-h-80 overflow-y-auto">{safe}</div>'
-        f'</div>'
+        f"</div>"
     )
 
 
@@ -357,9 +401,7 @@ async def draft_generate(
     try:
         new_category = await classify(subject or "", full_body, sender or "")
     except Exception as exc:
-        log.warning(
-            "draft_generate.reclassify_failed", mail_id=mail_id, error=str(exc)
-        )
+        log.warning("draft_generate.reclassify_failed", mail_id=mail_id, error=str(exc))
         new_category = category or ""
     if new_category != (category or ""):
         await db.execute(
@@ -380,20 +422,24 @@ async def draft_generate(
     # QUE pour les catégories qui appellent le builder déterministe (draft_
     # categories). Pour les autres (phishing, spam, facture…), aucune réponse
     # n'est attendue — retourner un message clair au lieu d'un brouillon LLM.
-    draft_cats = {
-        c.strip().lower() for c in settings.draft_categories.split(",") if c.strip()
-    }
+    draft_cats = {c.strip().lower() for c in settings.draft_categories.split(",") if c.strip()}
     if (category or "").lower() not in draft_cats:
         ip = request.client.host if request.client else None
         await audit_log(
-            db, user["id"], "draft_generate_skip", "mail_processed", str(mail_id),
-            f"category={category}", ip, request.headers.get("user-agent"),
+            db,
+            user["id"],
+            "draft_generate_skip",
+            "mail_processed",
+            str(mail_id),
+            f"category={category}",
+            ip,
+            request.headers.get("user-agent"),
         )
         return HTMLResponse(
             '<div class="p-3 bg-yellow-900/40 border border-yellow-800 rounded '
             f'text-yellow-300 text-sm">Mail classé « {category} » — aucune '
-            'génération de brouillon pour cette catégorie (le classifier a été '
-            'réappliqué).</div>'
+            "génération de brouillon pour cette catégorie (le classifier a été "
+            "réappliqué).</div>"
         )
 
     try:
@@ -422,8 +468,14 @@ async def draft_generate(
 
     ip = request.client.host if request.client else None
     await audit_log(
-        db, user["id"], "draft_generate", "mail_processed", str(mail_id),
-        f"model={result.model_used} lang={language} force={force}", ip, request.headers.get("user-agent"),
+        db,
+        user["id"],
+        "draft_generate",
+        "mail_processed",
+        str(mail_id),
+        f"model={result.model_used} lang={language} force={force}",
+        ip,
+        request.headers.get("user-agent"),
     )
 
     return HTMLResponse(_ai_draft_html(result.draft))
@@ -444,6 +496,86 @@ async def draft_retry(
     return await draft_generate(request=request, mail_id=mail_id, force=True, db=db, user=user)
 
 
+@router.post("/mails/{mail_id}/fix-subject")
+async def mail_fix_subject(
+    request: Request,
+    mail_id: int,
+    db: aiosqlite.Connection = Depends(get_db),  # noqa: B008
+    user: dict = Depends(require_operator),  # noqa: B008
+) -> HTMLResponse:
+    """Corrige un sujet illisible (homoglyphes itsme, cyrillique, etc.) via LLM.
+
+    v1.25.3 — rétrocorrection des anciens mails (ex: #614). Le sujet original
+    est conservé dans l'audit log (forensic/debug). Dégradation silencieuse si
+    le LLM échoue ou ne propose rien de mieux (on garde l'original).
+    """
+    ip = request.client.host if request.client else None
+    ua = request.headers.get("user-agent")
+    async with db.execute(
+        "SELECT subject, body FROM mail_processed WHERE id = ?", (mail_id,)
+    ) as cur:
+        row = await cur.fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Mail not found")
+    original_subject, body = row
+    original_subject = original_subject or ""
+    body_preview = (body or "")[:600]
+
+    if not original_subject:
+        await audit_log(
+            db,
+            user["id"],
+            "subject_fix_empty",
+            "mail_processed",
+            str(mail_id),
+            "no subject",
+            ip,
+            ua,
+        )
+        return HTMLResponse('<span class="text-gray-400 italic">(aucun sujet)</span>')
+
+    fixed = await fix_subject_llm(original_subject, body_preview)
+    if not fixed:
+        await audit_log(
+            db,
+            user["id"],
+            "subject_fix_noop",
+            "mail_processed",
+            str(mail_id),
+            f"no improvement; original={original_subject[:120]!r}",
+            ip,
+            ua,
+        )
+        return HTMLResponse(
+            f'<span class="text-yellow-300">{original_subject}</span>'
+            f'<div class="text-xs text-yellow-500/70 mt-1">'
+            "Aucune correction proposée (LLM a échoué ou sujet déjà lisible).</div>"
+        )
+
+    await db.execute("UPDATE mail_processed SET subject = ? WHERE id = ?", (fixed, mail_id))
+    await db.commit()
+    await audit_log(
+        db,
+        user["id"],
+        "subject_fixed",
+        "mail_processed",
+        str(mail_id),
+        f"original={original_subject[:120]!r} -> fixed={fixed[:120]!r}",
+        ip,
+        ua,
+    )
+    log.info(
+        "subject_fixed_cockpit",
+        mail_id=mail_id,
+        subject_original=original_subject[:120],
+        subject_fixed=fixed[:120],
+    )
+    return HTMLResponse(
+        f'<span class="text-green-300">{fixed}</span>'
+        f'<div class="text-xs text-gray-500/70 mt-1">Sujet corrigé</div>'
+    )
+
+
 @router.post("/drafts/{mail_id}/regenerate")
 async def draft_regenerate(
     request: Request,
@@ -453,8 +585,14 @@ async def draft_regenerate(
 ) -> HTMLResponse:
     ip = request.client.host if request.client else None
     await audit_log(
-        db, user["id"], "draft_regenerate", "mail_processed", str(mail_id),
-        "requested", ip, request.headers.get("user-agent"),
+        db,
+        user["id"],
+        "draft_regenerate",
+        "mail_processed",
+        str(mail_id),
+        "requested",
+        ip,
+        request.headers.get("user-agent"),
     )
     return HTMLResponse(
         '<div class="p-3 bg-yellow-900/40 border border-yellow-800 rounded '
@@ -478,14 +616,20 @@ async def draft_reject(
 
     ip = request.client.host if request.client else None
     await audit_log(
-        db, user["id"], "draft_reject", "mail_processed", str(mail_id),
-        None, ip, request.headers.get("user-agent"),
+        db,
+        user["id"],
+        "draft_reject",
+        "mail_processed",
+        str(mail_id),
+        None,
+        ip,
+        request.headers.get("user-agent"),
     )
 
     return HTMLResponse(
         '<div class="p-3 bg-red-900/40 border border-red-800 rounded text-red-300 text-sm">'
-        'Brouillon rejeté.'
-        '</div>'
+        "Brouillon rejeté."
+        "</div>"
     )
 
 
@@ -529,22 +673,34 @@ async def draft_approve(
 
     ip = request.client.host if request.client else None
     await audit_log(
-        db, user["id"], "draft_approve", "mail_processed", str(mail_id),
-        extra_msg or None, ip, request.headers.get("user-agent"),
+        db,
+        user["id"],
+        "draft_approve",
+        "mail_processed",
+        str(mail_id),
+        extra_msg or None,
+        ip,
+        request.headers.get("user-agent"),
     )
 
     return HTMLResponse(
         '<div class="p-3 bg-green-900/40 border border-green-800 rounded text-green-300 text-sm">'
-        f'Brouillon approuvé.{extra_msg}'
-        '</div>'
+        f"Brouillon approuvé.{extra_msg}"
+        "</div>"
     )
 
 
 _STATUSES = ["pending", "approved", "rejected", "sent", "reviewed"]
 _PRIORITIES = ["high", "normal", "low"]
 _CATEGORIES = [
-    "demande_client", "facture", "newsletter", "spam",
-    "urgent", "phishing", "rappel", "autre",
+    "demande_client",
+    "facture",
+    "newsletter",
+    "spam",
+    "urgent",
+    "phishing",
+    "rappel",
+    "autre",
 ]
 
 
@@ -568,8 +724,14 @@ async def mail_update_status(
 
     ip = request.client.host if request.client else None
     await audit_log(
-        db, user["id"], "status_update", "mail_processed", str(mail_id),
-        new_status, ip, request.headers.get("user-agent"),
+        db,
+        user["id"],
+        "status_update",
+        "mail_processed",
+        str(mail_id),
+        new_status,
+        ip,
+        request.headers.get("user-agent"),
     )
 
     return HTMLResponse(
@@ -581,7 +743,7 @@ async def mail_update_status(
         f'<option value="rejected" {"selected" if new_status == "rejected" else ""}>rejected</option>'
         f'<option value="sent" {"selected" if new_status == "sent" else ""}>sent</option>'
         f'<option value="reviewed" {"selected" if new_status == "reviewed" else ""}>reviewed</option>'
-        f'</select></form>'
+        f"</select></form>"
     )
 
 
@@ -605,8 +767,14 @@ async def mail_update_priority(
 
     ip = request.client.host if request.client else None
     await audit_log(
-        db, user["id"], "priority_update", "mail_processed", str(mail_id),
-        new_priority, ip, request.headers.get("user-agent"),
+        db,
+        user["id"],
+        "priority_update",
+        "mail_processed",
+        str(mail_id),
+        new_priority,
+        ip,
+        request.headers.get("user-agent"),
     )
 
     return HTMLResponse(
@@ -619,7 +787,7 @@ async def mail_update_priority(
         f'<option value="high" {"selected" if new_priority == "high" else ""}>high</option>'
         f'<option value="normal" {"selected" if new_priority == "normal" else ""}>normal</option>'
         f'<option value="low" {"selected" if new_priority == "low" else ""}>low</option>'
-        f'</select></form>'
+        f"</select></form>"
     )
 
 
@@ -643,8 +811,14 @@ async def mail_update_category(
 
     ip = request.client.host if request.client else None
     await audit_log(
-        db, user["id"], "category_update", "mail_processed", str(mail_id),
-        new_category, ip, request.headers.get("user-agent"),
+        db,
+        user["id"],
+        "category_update",
+        "mail_processed",
+        str(mail_id),
+        new_category,
+        ip,
+        request.headers.get("user-agent"),
     )
 
     options = ""
@@ -656,8 +830,8 @@ async def mail_update_category(
         f'<form class="inline" hx-post="/api/mails/{mail_id}/category" '
         f'hx-target="this" hx-swap="outerHTML" hx-trigger="change">'
         f'<select name="category" class="bg-gray-950 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200">'
-        f'{options}'
-        f'</select></form>'
+        f"{options}"
+        f"</select></form>"
     )
 
 
@@ -706,7 +880,7 @@ def _format_rows_html(rows: list[dict]) -> str:
     html = (
         f'<div class="mt-4 overflow-x-auto border border-gray-700 rounded-lg">'
         f'<table class="w-full text-base"><thead><tr>{header_html}</tr></thead>'
-        f'<tbody>{rows_html}</tbody></table></div>'
+        f"<tbody>{rows_html}</tbody></table></div>"
     )
     if len(rows) > 20:
         html += f'<p class="text-xs text-gray-500 mt-1">({len(rows)} résultats — 20 affichés)</p>'
@@ -752,8 +926,8 @@ async def charlie_ask(
         arc_cnt = len(result.archive_rows)
         results_html = (
             f'<p class="text-xs text-gray-500 mt-2">'
-            f'📎 {arc_cnt} email(s) source(s) trouvé(s) dans les archives historiques'
-            f'</p>'
+            f"📎 {arc_cnt} email(s) source(s) trouvé(s) dans les archives historiques"
+            f"</p>"
         )
 
     vault_html = ""
@@ -790,8 +964,9 @@ async def charlie_ask(
             arrow = "📥" if direction == "in" else "📤" if direction == "out" else "📝"
 
             # --- Preview body (après le frontmatter) ---
-            preview = (body_text[:250]
-                       .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+            preview = (
+                body_text[:250].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            )
 
             msg_type_tag = f'<span class="text-gray-600">[{msg_type}]</span>' if msg_type else ""
             items_html += (
@@ -799,48 +974,46 @@ async def charlie_ask(
                 f'<div class="flex items-center gap-2 mb-1">'
                 f'<span class="text-purple-400 font-mono">{arrow}</span>'
                 f'<span class="text-purple-300 font-medium">{subject}</span>'
-                f'</div>'
+                f"</div>"
                 f'<div class="flex items-center gap-2 text-gray-500 mb-1">'
-                f'<span>{date_str}</span>'
-                f'{msg_type_tag}'
-                f'</div>'
+                f"<span>{date_str}</span>"
+                f"{msg_type_tag}"
+                f"</div>"
                 f'<div class="text-gray-400 whitespace-pre-wrap">{preview}…</div>'
-                f'</div>'
+                f"</div>"
             )
         vault_html = (
             f'<div class="mt-4 border-t border-gray-700 pt-3">'
             f'<div class="text-xs text-purple-400 font-semibold mb-1">📚 Sources Cerveau2 '
-            f'({len(result.vault_notes)} note(s))</div>'
-            f'{items_html}'
-            f'</div>'
+            f"({len(result.vault_notes)} note(s))</div>"
+            f"{items_html}"
+            f"</div>"
         )
 
     ip = request.client.host if request.client else None
     await audit_log(
-        db, user["id"], "charlie_ask", "mail_processed", "",
-        f"q={question[:40]} sql={bool(result.sql)}", ip, request.headers.get("user-agent"),
+        db,
+        user["id"],
+        "charlie_ask",
+        "mail_processed",
+        "",
+        f"q={question[:40]} sql={bool(result.sql)}",
+        ip,
+        request.headers.get("user-agent"),
     )
 
-    safe_question = (
-        question
-        .replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-    )
+    safe_question = question.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     safe_response = (
-        result.response_text
-        .replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
+        result.response_text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     )
     # Échapper pour les attributs HTML (value="...")
-    html_q = safe_question.replace('"', '&quot;').replace("'", "&#39;")
-    html_r = safe_response.replace('"', '&quot;').replace("'", "&#39;")
+    html_q = safe_question.replace('"', "&quot;").replace("'", "&#39;")
+    html_r = safe_response.replace('"', "&quot;").replace("'", "&#39;")
 
     user_bubble = (
         f'<div class="flex gap-3 justify-end animate-in fade-in slide-in-from-bottom-2">'
         f'<div class="bg-gray-700 rounded-xl px-5 py-3 max-w-[80%] text-base text-gray-100 leading-relaxed">{safe_question}</div>'
-        f'</div>'
+        f"</div>"
     )
 
     copy_btn = (
@@ -860,15 +1033,15 @@ async def charlie_ask(
         f'<input type="hidden" name="feedback" value="good">'
         f'<button type="submit" class="text-green-400 hover:text-green-300 flex items-center gap-1 transition-colors">'
         f'<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>'
-        f'Bonne réponse'
-        f'</button></form>'
+        f"Bonne réponse"
+        f"</button></form>"
         f'<button type="button" id="{feedback_id}-toggle" class="text-red-400 hover:text-red-300 flex items-center gap-1 transition-colors"'
-        f' onclick="document.getElementById(\'{feedback_id}-form\').classList.remove(\'hidden\'); '
-        f'document.getElementById(\'{feedback_id}-toggle\').classList.add(\'hidden\');">'
+        f" onclick=\"document.getElementById('{feedback_id}-form').classList.remove('hidden'); "
+        f"document.getElementById('{feedback_id}-toggle').classList.add('hidden');\">"
         f'<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>'
-        f'À corriger'
-        f'</button>'
-        f'</div>'
+        f"À corriger"
+        f"</button>"
+        f"</div>"
         f'<div id="{feedback_id}-form" class="hidden mt-2">'
         # Correction : remplace le bloc entier par le message de succès + désactive le bouton pendant l'envoi
         f'<form hx-post="/api/charlie/feedback" hx-target="#{feedback_id}-form" hx-swap="outerHTML" hx-disabled-elt="find button[type=submit]">'
@@ -879,10 +1052,10 @@ async def charlie_ask(
         f'placeholder="Votre correction..."></textarea>'
         f'<div class="flex justify-end mt-1">'
         f'<button type="submit" class="px-3 py-1 bg-purple-700 hover:bg-purple-600 rounded text-xs text-white">Envoyer correction</button>'
-        f'</div>'
-        f'</form>'
-        f'</div>'
-        f'</div>'
+        f"</div>"
+        f"</form>"
+        f"</div>"
+        f"</div>"
     )
 
     ai_bubble = (
@@ -890,12 +1063,12 @@ async def charlie_ask(
         f'<div class="w-9 h-9 rounded-full bg-purple-600 flex items-center justify-center text-sm font-bold shrink-0 mt-1">AI</div>'
         f'<div class="flex-1 bg-gray-800 rounded-xl px-5 py-4 text-base text-gray-200 leading-relaxed">'
         f'<div class="charlie-text whitespace-pre-wrap">{safe_response}</div>'
-        f'{results_html}'
-        f'{vault_html}'
+        f"{results_html}"
+        f"{vault_html}"
         f'<div class="flex">{copy_btn}</div>'
-        f'{feedback_html}'
-        f'</div>'
-        f'</div>'
+        f"{feedback_html}"
+        f"</div>"
+        f"</div>"
     )
 
     return JSONResponse({"html": user_bubble + ai_bubble, "response_text": result.response_text})
@@ -915,13 +1088,13 @@ async def charlie_feedback(
     corrected_response = str(form.get("corrected_response", "")).strip() or None
 
     if not question or not response or feedback not in ("good", "bad"):
-        return HTMLResponse(
-            '<span class="text-xs text-red-400">Données manquantes.</span>'
-        )
+        return HTMLResponse('<span class="text-xs text-red-400">Données manquantes.</span>')
 
     # Extraire le dossier_id de la question pour lier la correction
     dossier_id = None
-    m = re.search(r"(?i:dossier|affaire|projet|enquete|investigation)[\s:]+([A-Z][a-zA-Z0-9]{2,})", question)
+    m = re.search(
+        r"(?i:dossier|affaire|projet|enquete|investigation)[\s:]+([A-Z][a-zA-Z0-9]{2,})", question
+    )
     if m:
         dossier_id = m.group(1)
     else:
@@ -963,8 +1136,14 @@ async def charlie_feedback(
 
     ip = request.client.host if request.client else None
     await audit_log(
-        db, user["id"], "charlie_feedback", "charlie_memory", "",
-        f"feedback={feedback} q={question[:40]}", ip, request.headers.get("user-agent"),
+        db,
+        user["id"],
+        "charlie_feedback",
+        "charlie_memory",
+        "",
+        f"feedback={feedback} q={question[:40]}",
+        ip,
+        request.headers.get("user-agent"),
     )
 
     if feedback == "good":

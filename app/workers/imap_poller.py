@@ -28,6 +28,7 @@ from app.pipeline.generator import generate_draft
 from app.pipeline.language import detect_language
 from app.pipeline.prefilter import quick_classify
 from app.pipeline.priority import assign_priority
+from app.pipeline.subject_fixer import fix_subject_llm, is_subject_suspect
 
 # Signaux de coordonnées contact dans un body (tél belge, code postal, adresse)
 _CONTACT_SIGNALS_RE = re.compile(
@@ -334,8 +335,18 @@ def _is_client_followup(db_path: Path, sender: str, msg: Message) -> bool:
     cutoff = datetime.now().astimezone() - timedelta(days=30)
     rfc_re = re.compile(r"[A-Za-z]{3},\s+(\d+)\s+(\w+)\s+(\d{4})\s+(\d{2}):(\d{2}):(\d{2})")
     months = {
-        "Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6,
-        "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12,
+        "Jan": 1,
+        "Feb": 2,
+        "Mar": 3,
+        "Apr": 4,
+        "May": 5,
+        "Jun": 6,
+        "Jul": 7,
+        "Aug": 8,
+        "Sep": 9,
+        "Oct": 10,
+        "Nov": 11,
+        "Dec": 12,
     }
 
     for _mid, received_at in rows:
@@ -346,8 +357,12 @@ def _is_client_followup(db_path: Path, sender: str, msg: Message) -> bool:
         day, mon_s, year, hh, mm, ss = m.groups()
         try:
             dt = datetime(
-                int(year), months[mon_s], int(day),
-                int(hh), int(mm), int(ss),
+                int(year),
+                months[mon_s],
+                int(day),
+                int(hh),
+                int(mm),
+                int(ss),
                 tzinfo=None,
             )
         except (KeyError, ValueError):
@@ -939,7 +954,9 @@ def _is_verified_demande_client(category: str, msg: Message) -> bool:
         return False
 
     # Réponses automatiques / Out-of-office.
-    if any(m in body for m in ("out of office", "absent du bureau", "automatic reply", "auto-reply")):
+    if any(
+        m in body for m in ("out of office", "absent du bureau", "automatic reply", "auto-reply")
+    ):
         return False
 
     return True
@@ -1153,6 +1170,22 @@ async def _process_single_mail(
             message_id=message_id,
         )
 
+        # v1.25.3 — correction du sujet si homoglyphes (ex: itsme cyrillique #614).
+        # Coût LLM nul (forfait Ollama Pro). Dégradation silencieuse si LLM échoue :
+        # on conserve le sujet original. Le sujet corrigé bénéficie à classify,
+        # assign_priority, generate_draft (sujet lisible du brouillon V2a) et la persistance.
+        if is_subject_suspect(subject):
+            fixed = await fix_subject_llm(subject, body)
+            if fixed:
+                log.info(
+                    "poller.subject_fixed",
+                    mailbox=mailbox.name,
+                    uid=uid,
+                    subject_original=subject[:120],
+                    subject_fixed=fixed[:120],
+                )
+                subject = fixed
+
         prefilter_category = quick_classify(msg)
         if prefilter_category:
             # Garde anti-faux-positif phishing : si l'expéditeur est déjà connu
@@ -1187,23 +1220,30 @@ async def _process_single_mail(
         # Newsletter / calendrier : auto-approved + low priority (rien à traiter)
         status = "pending"
         text_lower = f"{subject} {body}".lower()
-        if category == "newsletter" or category == "spam" or (category == "autre" and any(
-            kw in text_lower
-            for kw in (
-                "invitation",
-                "calendar",
-                "ical",
-                "vcalendar",
-                "event",
-                "meeting request",
-                "updated invitation",
-                "invitation updated",
-                "accepté",
-                "refusé",
-                "tentative",
-                "provisoire",
+        if (
+            category == "newsletter"
+            or category == "spam"
+            or (
+                category == "autre"
+                and any(
+                    kw in text_lower
+                    for kw in (
+                        "invitation",
+                        "calendar",
+                        "ical",
+                        "vcalendar",
+                        "event",
+                        "meeting request",
+                        "updated invitation",
+                        "invitation updated",
+                        "accepté",
+                        "refusé",
+                        "tentative",
+                        "provisoire",
+                    )
+                )
             )
-        )):
+        ):
             status = "approved"
             priority = "low"
         log.info(
@@ -1232,7 +1272,12 @@ async def _process_single_mail(
                     subject=subject,
                 )
             gen = await generate_draft(
-                subject, body, sender, mailbox, language, category,
+                subject,
+                body,
+                sender,
+                mailbox,
+                language,
+                category,
                 is_followup_response=is_followup,
             )
             draft_generated = 1

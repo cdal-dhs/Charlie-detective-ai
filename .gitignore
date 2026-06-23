@@ -54,3 +54,6 @@ models/
 .idea/
 *.swp
 .DS_Store
+
+# Build local cross-platform (Mac ARM -> VPS x86_64) — non commité
+Dockerfile.full
