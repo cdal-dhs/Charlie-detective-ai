@@ -39,11 +39,16 @@ class Settings(BaseSettings):
 
     ollama_pro_api_key: str = ""
     ollama_pro_base_url: str = "https://ollama.com/v1"
-    llm_model_default: str = "openai/kimi-k2.6:cloud"
+    # v1.25.0 : bascule modèles — gemma4:31b (non-reasoning, multimodal) est le
+    # modèle principal sur toutes les tâches (default/classifier/chat/qualifier).
+    # Fallback = glm-5.2:cloud (reasoning model, thinking High/Max). kimi-k2.6:cloud
+    # n'est plus utilisé. Provider Ollama Pro Cloud = openai/<model> + api_base
+    # ollama.com/v1 (JAMAIS ollama_chat/<model> → force vers Ollama local inexistant).
     openrouter_api_key: str = ""
-    llm_model_fallback: str = "openai/glm-5.1:cloud"
-    llm_model_classifier: str = "openai/kimi-k2.6:cloud"
-    llm_model_chat: str = "openai/kimi-k2.6:cloud"
+    llm_model_default: str = "openai/gemma4:31b"
+    llm_model_fallback: str = "openai/glm-5.2:cloud"
+    llm_model_classifier: str = "openai/gemma4:31b"
+    llm_model_chat: str = "openai/gemma4:31b"
     # v1.22.7 : modèle dédié à la qualification prospect (cas de figure + questions)
     llm_model_qualifier: str = "openai/gemma4:31b"
 

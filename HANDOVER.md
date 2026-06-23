@@ -1,14 +1,14 @@
 # HANDOVER — Detective.be Agent IA (Charlie)
 
 > Document de transfert pour tout agent (Claude Sonnet/Opus 4.X, GPT, etc.).
-> **Dernière mise à jour**: 2026-06-23 · **Version courante**: v1.24.2 · **Déployé sur** : `detective.digitalhs.biz`
+> **Dernière mise à jour**: 2026-06-23 · **Version courante**: v1.25.0 · **Déployé sur** : `detective.digitalhs.biz`
 
 ---
 
 ## TABLE DES MATIÈRES (TL;DR)
 
 1. [Qui, quoi, pourquoi](#1-qui-quoi-pourquoi)
-2. [Architecture actuelle v1.24.2](#2-architecture-actuelle-v1242)
+2. [Architecture actuelle v1.25.0](#2-architecture-actuelle-v1250)
 3. [Le pipeline Charlie AI](#3-le-pipeline-charlie-ai)
 4. [Stack technique détaillée](#4-stack-technique-détaillée)
 5. [Cerveau2-Det — second cerveau](#5-cerveau2-det--second-cerveau)
@@ -38,7 +38,7 @@
 
 ---
 
-## 2. Architecture actuelle (v1.24.2)
+## 2. Architecture actuelle (v1.25.0)
 
 ```
 [3 boîtes Infomaniak IMAP] ──polling 5min──► [Worker asyncio Python]
@@ -63,12 +63,12 @@
 
 | Fichier | Rôle critique | À savoir |
 |---|---|---|
-| `app/_version.py` | **Source unique de vérité** version | `VERSION = "1.24.2` — tolérance zéro, ne JAMAIS utiliser `importlib.metadata`. |
+| `app/_version.py` | **Source unique de vérité** version | `VERSION = "1.25.0` — tolérance zéro, ne JAMAIS utiliser `importlib.metadata`. |
 | `app/charlie.py` | **Cœur intelligent Charlie AI** | `ask_charlie()` : extraction entités → SQL programmatique (bypass LLM) + vault Cerveau2 (fallback direct GET) + archives + corrections + mémoire → nuage de liaison familial → **résumé de dossier narratif LLM** (v1.19.1) → garde anti-vide + garde anti-"pas trouvé" |
 | `app/charlie_memory.py` | **Mémoire persistante** | Table `charlie_memory` (feedback good/bad, corrections, auto-save) |
 | `app/cerveau_client.py` | **Client HTTP Cerveau2** | `query_vault()`, `get_vault_note()` (fallback direct), `feed_correspondance()`, `feed_document()`. Bearer Token statique. **Dégradation silencieuse** (retourne `[]` si Cerveau2 down) |
-| `app/config.py` | **Configuration pydantic-settings** | `llm_model_default = "openai/kimi-k2.6:cloud"` (Ollama Pro, cloud). Provider `openai/` + `api_base=https://ollama.com/v1` |
-| `app/llm/router.py` | **Wrapper LiteLLM** | `complete()` avec fallback automatique + extraction `reasoning_content` (kimi-k2.6 reasoning) + post-traitement `_clean_reasoning()` (30+ patterns pour traces raisonnement) |
+| `app/config.py` | **Configuration pydantic-settings** | `llm_model_default = "openai/gemma4:31b"` (Ollama Pro, cloud). Provider `openai/` + `api_base=https://ollama.com/v1` |
+| `app/llm/router.py` | **Wrapper LiteLLM** | `complete()` avec fallback automatique + extraction `reasoning_content` (fallback glm-5.2:cloud reasoning) + post-traitement `_clean_reasoning()` (30+ patterns pour traces raisonnement) |
 | `app/pipeline/translator.py` | **Aide lecture multilingue (v1.21.0)** | `translate_to_fr()` + `translate_from_fr()` avec try/except, troncature 12K. Utilisé si langue mail ≠ FR |
 | `app/pipeline/draft_renderer.py` | **Rendu brouillon enrichi (v1.21.0 → v1.24.1)** | Compose 4 blocs pour langues étrangères ; pour le FR, proposition FR + message original du client en dessous |
 | `app/pipeline/generator.py` | **Génération brouillon** | Pour `demande_client`/`prise_contact` : branche `app/pipeline/qualification_builder.py` (brouillon déterministe, v1.22.8). Pour les autres catégories : flux LLM few-shot + Cerveau2 + RAG (⚠️ RAG en pause v1.24.2, `pairs` retourné vide). Appelle `translate_to_fr` + `translate_from_fr` en parallèle. **`_load_daniel_fewshot()` (v1.22.4)** : récupère 200 candidats SQL, parse date RFC 2822 en Python, garde top 4 dans fenêtre 30j |
@@ -88,7 +88,7 @@
 
 ---
 
-## 3. Le pipeline Charlie AI (état v1.24.2)
+## 3. Le pipeline Charlie AI (état v1.25.0)
 
 Le fichier `app/charlie.py` contient `ask_charlie()`. Flow exact :
 
@@ -156,7 +156,7 @@ Ordre de priorité dans le prompt final :
 - 2 tentatives avec le modèle chat, fallback sur `llm_model_fallback`.
 
 #### LLM final (questions spécifiques)
-- `complete(model=settings.llm_model_chat, ...)` — `kimi-k2.6:cloud` via Ollama Pro Cloud.
+- `complete(model=settings.llm_model_chat, ...)` — `gemma4:31b` via Ollama Pro Cloud.
 
 #### Garde-fous de secours (CRITIQUE)
 Si le LLM dit "pas trouvé" / "aucune information" malgré des résultats SQL en base :
@@ -173,16 +173,16 @@ if not response and rows:
 
 ---
 
-## 4. Stack technique détaillée (v1.24.2)
+## 4. Stack technique détaillée (v1.25.0)
 
 | Couche | Outil | Version / Détail |
 |---|---|---|
 | Python | 3.11+ | VPS = 3.11, Mac CDAL = 3.14 |
 | Concurrence | `asyncio` | Tout est `async def` |
 | IMAP | `aioimaplib` | 2.0.1 |
-| LLM router | **LiteLLM** | + post-traitement `_clean_reasoning()` (filtre traces raisonnement) |
-| LLM chat + pipeline (classifier + generator + Charlie) | **`kimi-k2.6:cloud`** via Ollama Pro Cloud | `openai/kimi-k2.6:cloud` (reasoning model, extraction `reasoning_content`) |
-| LLM fallback | **`glm-5.1:cloud`** via Ollama Pro Cloud | `openai/glm-5.1:cloud` |
+| LLM router | **LiteLLM** | + post-traitement `_clean_reasoning()` (filtre traces raisonnement — utile pour le fallback glm-5.2:cloud) |
+| LLM principal (chat + pipeline : classifier + generator + Charlie) | **`gemma4:31b`** via Ollama Pro Cloud | `openai/gemma4:31b` (non-reasoning, réponse dans `message.content`) |
+| LLM fallback | **`glm-5.2:cloud`** via Ollama Pro Cloud | `openai/glm-5.2:cloud` (reasoning model, thinking High/Max — extraction `reasoning_content`) |
 | Embeddings | `text-embedding-3-small` via OpenRouter | API stateless, image Docker ~800MB au lieu de ~4GB |
 | Vector store | `sqlite-vec` | Vit dans les DB existantes |
 | Détection langue | `langdetect` | v1.21.0+ : `Language = str` (toutes BCP-47) |
@@ -383,8 +383,8 @@ Le poller IMAP ne traite que les mails reçus depuis cette date. Les archives hi
 
 ### Règle 8 — Provider LLM pour Ollama Cloud = `openai/<model>` + `api_base=https://ollama.com/v1`
 - **JAMAIS** `ollama_chat/<model>` (force litellm vers `localhost:11434`).
-- **Vrai nom des modèles** : `kimi-k2.6:cloud` (avec `.6` et `:cloud`), `glm-5.1:cloud`.
-- **JAMAIS** `kimi-k2` (404), `gemma4:31b` (obsolète), `claude-sonnet-4` (404 OpenRouter).
+- **Modèles actuels (v1.25.0)** : `gemma4:31b` (principal, non-reasoning — réponse dans `message.content`), `glm-5.2:cloud` (fallback, reasoning model — réponse dans `reasoning_content`, extrait automatiquement par `complete()`).
+- **JAMAIS** `kimi-k2` (404), `ollama_chat/<model>` (Ollama local inexistant sur le VPS).
 - Si un nouveau modèle ne répond pas, vérifier immédiatement provider + api_base + nom.
 
 ### Règle 9 — JAMAIS builder Docker sur le VPS de prod
@@ -398,7 +398,7 @@ Le poller IMAP ne traite que les mails reçus depuis cette date. Les archives hi
 
 ---
 
-## 9. Bugs résolus et points de vigilance (état au 2026-06-23, v1.24.2)
+## 9. Bugs résolus et points de vigilance (état au 2026-06-23, v1.25.0)
 
 ### ✅ Bugs résolus récents (v1.22.0 → v1.24.2)
 
@@ -463,16 +463,17 @@ Vérifier aussi les catégories de `boite2` (10 catégories dont `PRISE_CONTACT:
 
 #### Point de vigilance #2 — Provider litellm pour Ollama Cloud (CRITIQUE v1.21.1)
 `ollama_chat/<model>` force litellm vers `localhost:11434` (Ollama **local**). Le provider correct pour Ollama **Cloud** est `openai/<model>` avec `api_base=https://ollama.com/v1`.
-**Vrai nom des modèles** : `openai/kimi-k2.6:cloud` (principal + classifier + chat), `openai/glm-5.1:cloud` (fallback).
+**Modèles actuels (v1.25.0)** : `openai/gemma4:31b` (principal + classifier + chat, non-reasoning), `openai/glm-5.2:cloud` (fallback, reasoning).
 **Si un nouveau modèle ne répond pas** → vérifier immédiatement provider (openai/ vs ollama_chat/), l'URL api_base (`/v1` pas `/api`), et que le nom de modèle existe sur ollama.com/library.
 
-#### Point de vigilance #3 — kimi-k2.6:cloud est un reasoning model
+#### Point de vigilance #3 — glm-5.2:cloud (fallback) est un reasoning model
 Sa réponse finale est dans `message.reasoning_content`, pas dans `message.content` (vide). Le wrapper `complete()` extrait automatiquement, MAIS :
 - Soit utiliser un autre modèle non-reasoning si on veut du contenu direct
 - Soit accepter le coût (raisonnement = plus de tokens) + le post-traitement `_clean_reasoning()`
+- **gemma4:31b (modèle principal v1.25.0) est non-reasoning** : réponse directe dans `message.content`, pas d'extraction ni de cleaning nécessaires.
 
-#### Point de vigilance #4 — Traces de raisonnement kimi-k2.6 (CRITIQUE v1.21.2)
-Le modèle produit des métadiscours parasites : "L'utilisateur demande...", "Let me analyze...", "Points importants :", "Refonte :", "Version plus X :", "C'est mieux.", etc. Le post-traitement `_clean_reasoning()` filtre ~30 patterns, **MAIS** si un nouveau type d'artefact apparaît, il faut **enrichir `_REASONING_LINE_PATTERNS`** dans `app/llm/router.py`. Le cleaning n'est jamais "complet" — c'est une bataille continue.
+#### Point de vigilance #4 — Traces de raisonnement glm-5.2:cloud (CRITIQUE v1.21.2)
+Le fallback reasoning produit des métadiscours parasites : "L'utilisateur demande...", "Let me analyze...", "Points importants :", "Refonte :", "Version plus X :", "C'est mieux.", etc. Le post-traitement `_clean_reasoning()` filtre ~30 patterns, **MAIS** si un nouveau type d'artefact apparaît, il faut **enrichir `_REASONING_LINE_PATTERNS`** dans `app/llm/router.py`. Le cleaning n'est jamais "complet" — c'est une bataille continue.
 
 #### Point de vigilance #5 — Tables `app_settings` peuvent être stale
 Si tu modifies `app/config.py` (défauts `llm_model_*`), il faut aussi **purger la table `app_settings` en prod** (clés `llm_model_default`, `llm_model_classifier`, `llm_model_fallback`) — sinon les valeurs runtime en DB écrasent tes défauts.
@@ -504,9 +505,6 @@ Les fiches `04_entities/personnes/*.md` créées manuellement ne sont pas dans l
 - L'instance `CDAL2` (`/Users/cdal/DEV_APP_CLAUDE/CDAL2/`)
 
 Le serveur Cerveau2 n'est pas affecté par ces fixes. Si tu réutilises Charlie comme base pour un nouveau client (via `SECONDCERVEAU-PRO`), les patches sont **réutilisables** — voir `docs/PATTERNS_FROM_CHARLIE_V1.21.3.md` pour le détail d'implémentation.
-
-#### Point de vigilance #10 — case_classifier + translator tournent encore sur `gemma4:31b` (OBSOLÈTE)
-Découvert 2026-06-22 (v1.24.1) dans les logs du backfill #515 : `case_classifier` et `translator` loggent `model=openai/gemma4:31b`, alors que `gemma4:31b` est **obsolète** depuis v1.21.1 (CLAUDE.md §3, bug #8 résolu). Le modèle principal (génération brouillon) est bien sur `kimi-k2.6:cloud`, mais le sous-modèle de classification de cas et le traducteur utilisent encore l'ancien modèle — probablement via `LLM_MODEL_QUALIFIER` (défaut `gemma4:31b` dans `app/config.py`, cf. bug #15). **À corriger** : basculer `LLM_MODEL_QUALIFIER` (et le modèle translator) sur `kimi-k2.6:cloud`, puis purger la table `app_settings` (cf. point #5). Hors-scope v1.24.1 — à traiter prochaine version.
 
 ---
 
@@ -725,11 +723,11 @@ fi
 
 ## Note pour le prochain agent
 
-État au **2026-06-23** : **v1.24.2** déployée en prod. Le brouillon qualifiant déterministe gère tous les cas de figure (questions par cas + infos client déjà reçues + refus poli des demandes hors-légalité depuis v1.24.1). **Le RAG est mis en pause** (v1.24.2, `rag_enabled=False`) : l'approche déterministe + few-shot Daniel est plus fiable et le remplace — ce n'est plus un bug à corriger en urgence (voir point de vigilance #1). Chantiers ouverts restants : reclassement #614 (validation brouillon refus poli avec CDAL), bascule `case_classifier`/`translator` de `gemma4:31b` (obsolète) vers `kimi-k2.6:cloud` (point de vigilance #10), V2b (polishing cockpit), V2c (feedback loop qualité Daniel). Pour le reste, voir HANDOVER §12 (checklist reprise) et §13 (4 niveaux anti-crash silencieux opérationnels).
+État au **2026-06-23** : **v1.25.0** déployée en prod. Le brouillon qualifiant déterministe gère tous les cas de figure (questions par cas + infos client déjà reçues + refus poli des demandes hors-légalité depuis v1.24.1). **Le RAG est mis en pause** (v1.24.2, `rag_enabled=False`) : l'approche déterministe + few-shot Daniel est plus fiable et le remplace — ce n'est plus un bug à corriger en urgence (voir point de vigilance #1). **Bascule LLM v1.25.0** : `gemma4:31b` (non-reasoning) est le modèle principal sur toutes les tâches (classifier, generator, chat Charlie, case_classifier, translator) ; `glm-5.2:cloud` (reasoning) remplace `glm-5.1:cloud` comme fallback. `kimi-k2.6:cloud` n'est plus utilisé nulle part. Chantiers ouverts restants : reclassement #614 (validation brouillon refus poli avec CDAL), V2b (polishing cockpit), V2c (feedback loop qualité Daniel). Pour le reste, voir HANDOVER §12 (checklist reprise) et §13 (4 niveaux anti-crash silencieux opérationnels).
 
 **Philosophie CDAL** : MVP simple d'abord, V2 quand qualité prouvée. Pas d'over-engineering. ROI client : "solde 24/7" sans surdimensionner. Communique court en français, écrit parfois avec des fautes de frappe rapides — décoder l'intention.
 
 ---
 
-*Document mis à jour le 2026-06-23 pour la v1.24.2 de Detective.be Agent IA.*
+*Document mis à jour le 2026-06-23 pour la v1.25.0 de Detective.be Agent IA.*
 

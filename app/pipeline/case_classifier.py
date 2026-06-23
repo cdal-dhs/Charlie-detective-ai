@@ -168,7 +168,12 @@ async def classify_case(
         raw = await complete(
             model=model,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=300,
+            # v1.25.0 : 300 → 500. Le fallback glm-5.2:cloud est un reasoning
+            # model (consomme des tokens en raisonnement avant le JSON de
+            # sortie). 500 laisse la place au raisonnement + au JSON compact
+            # {case_type, confidence, reason}. gemma4:31b (principal) s'arrête
+            # naturellement (plafond, pas cible).
+            max_tokens=500,
             temperature=0.1,
         )
         case_type, confidence, reason = _extract_case_type_from_json(

@@ -30,7 +30,7 @@ L'agent surveille 3 boîtes Infomaniak (3 marques : Detective Belgique FR, Detec
     Génération LLM few-shot style Daniel + personnalité
   Chat AI Charlie (cockpit + Slack) :
     Recherche SQL + archives historiques (boite1/2/3) + Cerveau2 vault + mémoire
-    Modèle chat : openai/kimi-k2.6:cloud (Ollama Pro Cloud, reasoning model)
+    Modèle chat : openai/gemma4:31b (Ollama Pro Cloud, non-reasoning)
          ↓
 [Flag IMAP AgentProcessed]        → idempotence
 [Flag IMAP AgentAttempted]        → libère la queue même en cas de crash (v1.21.3)
@@ -132,16 +132,16 @@ docker compose up -d --build      # si requirements.txt ou Dockerfile modifiés
 
 ---
 
-## Stack technique (état v1.24.2)
+## Stack technique (état v1.25.0)
 
 | Couche | Choix |
 |---|---|
 | Runtime | Python 3.11+ (VPS = 3.11, Mac CDAL = 3.14) |
 | Concurrence | `asyncio` |
 | IMAP | `aioimaplib` |
-| LLM router | **LiteLLM** + post-traitement `_clean_reasoning()` (30+ patterns regex, v1.21.2) |
-| LLM principal (classifier + generator + chat) | **`openai/kimi-k2.6:cloud`** via Ollama Pro Cloud (20€/mois), `api_base=https://ollama.com/v1` — **reasoning model** (extraction `reasoning_content`) |
-| LLM fallback | **`openai/glm-5.1:cloud`** via Ollama Pro Cloud |
+| LLM router | **LiteLLM** + post-traitement `_clean_reasoning()` (30+ patterns regex, v1.21.2 — utile pour le fallback reasoning glm-5.2:cloud) |
+| LLM principal (classifier + generator + chat) | **`openai/gemma4:31b`** via Ollama Pro Cloud (20€/mois), `api_base=https://ollama.com/v1` — **non-reasoning** (réponse dans `message.content`) |
+| LLM fallback | **`openai/glm-5.2:cloud`** via Ollama Pro Cloud (reasoning model, thinking High/Max) |
 | Embeddings | **`openai/text-embedding-3-small`** via OpenRouter (API stateless, image Docker ~800MB au lieu de ~4GB) — ⚠️ RAG en pause v1.24.2 (`rag_enabled=False`) |
 | Vector store | **`sqlite-vec`** (extension SQLite, vit dans les DB existantes) — ⚠️ `pairs_vec` non réindexées depuis 2026-05-28 |
 | Détection langue | **`langdetect`** — `Language = str` (toutes BCP-47, v1.21.0+) |
@@ -155,7 +155,7 @@ docker compose up -d --build      # si requirements.txt ou Dockerfile modifiés
 | Service prod | **Docker + Docker Compose + Traefik** (VPS Hostinger KVM8) |
 | Logs | `structlog` (JSON structuré, rotation 7j) |
 | Config | `pydantic-settings` depuis `.env` |
-| Version | Source unique `app/_version.py` (`VERSION = "1.24.2"`) — `pyproject.toml` figé en 1.9.5 (volontaire) |
+| Version | Source unique `app/_version.py` (`VERSION = "1.25.0"`) — `pyproject.toml` figé en 1.9.5 (volontaire) |
 
 **Ne PAS introduire** sans discussion : Kubernetes, Swarm, Celery, Redis, Postgres, ORM lourd, framework JS front (React/Vue/Angular). Le périmètre Docker actuel (1 service Compose + Traefik externe) est figé.
 
@@ -254,10 +254,10 @@ DETECTIVE_BE/
 
 ## Statut
 
-✅ **Production active** — `detective.digitalhs.biz` — **v1.24.2**
+✅ **Production active** — `detective.digitalhs.biz` — **v1.25.0**
 
 - **Pipeline IMAP** : polling 3 boîtes toutes les 5 min, classification 8 catégories, priorité intelligente, flag `AgentProcessed` (succès) + `AgentAttempted` (libère la queue même en cas de crash, v1.21.3).
-- **Génération brouillon** : kimi-k2.6:cloud (reasoning model), style Daniel imité via few-shot learning (v1.22.0) + personnalité Cerveau2. **RAG sqlite-vec en pause (v1.24.2)** — remplacé par le brouillon qualifiant déterministe (`qualification_builder`) pour les `demande_client`/`prise_contact`.
+- **Génération brouillon** : gemma4:31b (non-reasoning), style Daniel imité via few-shot learning (v1.22.0) + personnalité Cerveau2. **RAG sqlite-vec en pause (v1.24.2)** — remplacé par le brouillon qualifiant déterministe (`qualification_builder`) pour les `demande_client`/`prise_contact`.
 - **Aide lecture multilingue v1.21.0** : pour mails NL/EN/DE/ES/etc., brouillon enrichi avec 4 blocs (email d'origine + traduction FR + proposition FR + traduction langue source). Réponse TOUJOURS en FR.
 - **Livraison V2a — Drafts IMAP (v1.17+)** : dépôt direct dans la boîte source, flag `\Draft`, sujet `DEMANDE D'Approbation - Reponse Demande Client : ...`. Resend conservé en fallback uniquement.
 - **Endpoint retry-draft v1.21.0** : `POST /api/drafts/{id}/retry` pour régénérer un brouillon manquant (cas deadlock poller).
@@ -269,7 +269,7 @@ DETECTIVE_BE/
 - **Chat AI Charlie** : SQL programmatique bypass LLM, Cerveau2 vault, nuage de liaison familial YAML, archives historiques, résumé de dossier narratif, garde anti-hallucination, garde anti-"pas trouvé" malgré données présentes, scoring mots-clés avec bonus noms concrets.
 - **Slack Bot Charlie AI** : @mention + DM sur #detective.
 - **Cerveau2 vault** : ingestion 100% emails + PJ, recherche sans troncation, insensible aux accents, blindé injection, mapping priorité high→urgent/low→faible (v1.18.6), timeout 120s.
-- **LLM kimi-k2.6:cloud stable v1.21.1+** : extraction `reasoning_content` + post-traitement `_clean_reasoning()` v1.21.2 (filtre 30+ patterns de traces de raisonnement).
+- **LLM gemma4:31b principal + glm-5.2:cloud fallback (v1.25.0)** : bascule depuis kimi-k2.6:cloud (v1.21.1→v1.24.x) vers gemma4:31b (non-reasoning) comme modèle principal sur toutes les tâches. glm-5.2:cloud remplace glm-5.1:cloud comme fallback (reasoning model). Extraction `reasoning_content` + post-traitement `_clean_reasoning()` v1.21.2 (filtre 30+ patterns, utile pour le fallback reasoning glm-5.2:cloud).
 - **Dashboard admin** : stats, settings LLM, audit logs, télémétrie poller, backup Cerveau2.
 - **4 niveaux anti-crash silencieux** : Slack + Resend in-app + cron watchdog externe + Healthchecks.io.
 
@@ -279,7 +279,7 @@ Voir `docs/ROADMAP.md` pour la roadmap V2b/V2c (polishing cockpit, feedback loop
 
 ## Versions
 
-Version source de vérité : **`app/_version.py`** (`VERSION = "1.24.2"`).
+Version source de vérité : **`app/_version.py`** (`VERSION = "1.25.0"`).
 
 Le badge affiché dans le cockpit est lu dynamiquement depuis `app/_version.py`. **Tolérance zéro** sur la désynchronisation.
 

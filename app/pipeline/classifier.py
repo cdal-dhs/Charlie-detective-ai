@@ -391,7 +391,13 @@ async def classify(subject: str, body: str, sender: str) -> Category:
     response = await complete(
         model=get_llm_model_classifier(),
         messages=[{"role": "user", "content": prompt}],
-        max_tokens=15,
+        # v1.25.0 : 15 → 200. gemma4:31b (principal) répond en 1 mot et s'arrête
+        # naturellement (max_tokens = plafond, pas cible). Mais le fallback
+        # glm-5.2:cloud est un reasoning model : il consomme d'abord des tokens
+        # en raisonnement avant la réponse. Avec 15 tokens, le fallback ne
+        # pouvait jamais répondre → mail classé "autre" silencieusement
+        # (faux négatif). 200 laisse la place au raisonnement + à la catégorie.
+        max_tokens=200,
         temperature=0.0,
     )
     raw = response.strip().lower().split()[0] if response.strip() else "autre"

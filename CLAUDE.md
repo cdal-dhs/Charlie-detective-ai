@@ -45,17 +45,17 @@
 
 ## 3. Stack technique
 
-État au **2026-06-23 (v1.24.2)**. La SPEC.md d'origine est désalignée sur certains points — **cette section fait foi**.
+État au **2026-06-23 (v1.25.0)**. La SPEC.md d'origine est désalignée sur certains points — **cette section fait foi**.
 
 | Couche | Choix |
 |---|---|
 | Runtime | Python ≥ 3.11 (VPS = 3.11, Mac CDAL = 3.14) |
 | Concurrence | `asyncio` |
 | IMAP | `aioimaplib` |
-| LLM router | **LiteLLM** + post-traitement `_clean_reasoning()` (filtre les traces de raisonnement kimi-k2.6) |
-| LLM principal (pipeline : classifier, generator) | **`openai/kimi-k2.6:cloud`** via Ollama Pro Cloud (20€/mois), provider `openai/` + `api_base=https://ollama.com/v1` — **raisonnement activé, voir §6 "LLM Ollama"** |
-| LLM chat Charlie (cockpit + Slack Bot) | **`openai/kimi-k2.6:cloud`** (même provider — bascule v1.19.3, gemma4:31b faisait des refus systématiques) |
-| LLM fallback | **`openai/glm-5.1:cloud`** via Ollama Pro Cloud (Claude Sonnet 4 est 404 sur OpenRouter) |
+| LLM router | **LiteLLM** + post-traitement `_clean_reasoning()` (filtre les traces de raisonnement — utile pour le fallback glm-5.2:cloud) |
+| LLM principal (pipeline : classifier, generator) | **`openai/gemma4:31b`** via Ollama Pro Cloud (20€/mois), provider `openai/` + `api_base=https://ollama.com/v1` — **non-reasoning** (réponse dans `message.content`), voir §6 "LLM Ollama" |
+| LLM chat Charlie (cockpit + Slack Bot) | **`openai/gemma4:31b`** (même provider — bascule v1.25.0 depuis kimi-k2.6:cloud) |
+| LLM fallback | **`openai/glm-5.2:cloud`** via Ollama Pro Cloud (reasoning model, thinking High/Max — réponse dans `reasoning_content`) |
 | Embeddings | **`openai/text-embedding-3-small`** via OpenRouter (API stateless — image Docker ~800MB au lieu de ~4GB avec sentence-transformers local) — ⚠️ **RAG en pause v1.24.2** (`rag_enabled=False`) : l'approche déterministe (`qualification_builder` + few-shot Daniel) remplace le RAG pour les brouillons |
 | Vector store | **`sqlite-vec`** (extension SQLite, vit dans les DB existantes) — ⚠️ **tables `pairs_vec` non réindexées depuis 2026-05-28** (RAG en pause, voir point de vigilance #1 du HANDOVER) |
 | Détection langue | **`langdetect`** (remplace fasttext qui ne build pas sur Mac ARM) — supporte **toutes langues BCP-47** (v1.21.0+) |
@@ -154,11 +154,13 @@ python -m scripts.run_telegram_bot.py
 ### LLM — Ollama Pro Cloud
 ⚠️ **Provider litellm pour Ollama Cloud = `openai/<model>` + `api_base=https://ollama.com/v1`**. **JAMAIS** `ollama_chat/<model>` qui force litellm vers `localhost:11434` (Ollama local — inexistant sur le VPS). Si un nouveau modèle ne répond pas, vérifier immédiatement le provider et l'`api_base`.
 
-⚠️ **kimi-k2.6:cloud est un *reasoning model*** (v1.21.1+) : sa réponse finale est dans `message.reasoning_content`, pas dans `message.content` (qui reste vide). Le wrapper `complete()` dans `app/llm/router.py` extrait automatiquement `reasoning_content` quand `content` est vide.
+⚠️ **gemma4:31b est le modèle PRINCIPAL (v1.25.0)** : non-reasoning, sa réponse finale est dans `message.content` (réponse directe). Multimodal, ~256K context. Existe sur https://ollama.com/library/gemma4.
+
+⚠️ **glm-5.2:cloud est le modèle de FALLBACK (reasoning model)** : sa réponse finale est dans `message.reasoning_content`, pas dans `message.content` (vide). Le wrapper `complete()` dans `app/llm/router.py` extrait automatiquement `reasoning_content` quand `content` est vide.
 
 ⚠️ **Post-traitement `_clean_reasoning()`** (v1.21.2, toujours actif) : 30+ patterns regex filtrent les traces de raisonnement typiques (FR + EN + listes + guillemets + auto-critique "Version plus X :", "C'est mieux.", "Refonte :", etc.). Sans ce nettoyage, les brouillons sont pollués par des métadiscours du LLM ("L'utilisateur demande...", "The user wants...", "Let me analyze..."). **Si un nouveau modèle reasoning est ajouté, enrichir les patterns dans `_REASONING_LINE_PATTERNS`**.
 
-⚠️ **Nom du modèle = `kimi-k2.6:cloud`** (avec `.6` et `:cloud`). **JAMAIS** `kimi-k2` (404), `gemma4:31b` (obsolète), `claude-sonnet-4` (404 OpenRouter).
+⚠️ **Modèles actuels = `gemma4:31b` (principal) et `glm-5.2:cloud` (fallback)**. **JAMAIS** `kimi-k2` (404), `ollama_chat/<model>` (Ollama local inexistant).
 
 ### Cerveau2
 ⚠️ **Ingestion 100% des emails + PJ** : tout mail traité (peu importe la catégorie) doit être envoyé à Cerveau2 via `feed_correspondance()`, et toute pièce jointe via `feed_document()`. Zéro tolérance sur le skip — c'est ce qui alimente le second cerveau de Daniel.
@@ -198,7 +200,7 @@ Le script `scripts/deploy-to-vps.sh` intègre ce workflow. **Ne jamais utiliser 
 
 ## 7. État courant du projet
 
-État au **2026-06-23 — v1.24.2** déployée en prod. Voir `HANDOVER.md` pour le détail complet, `CHANGELOG.md` pour l'historique, `docs/ROADMAP.md` pour la roadmap à jour.
+État au **2026-06-23 — v1.25.0** déployée en prod. Voir `HANDOVER.md` pour le détail complet, `CHANGELOG.md` pour l'historique, `docs/ROADMAP.md` pour la roadmap à jour.
 
 ### ✅ Livré
 - **S1 → S4 terminées** : infra & data, pipeline IMAP, génération (RAG mis en pause v1.24.2 — approche déterministe), prod 24/7 sur KVM8.
@@ -209,7 +211,7 @@ Le script `scripts/deploy-to-vps.sh` intègre ce workflow. **Ne jamais utiliser 
 - **Charlie — recherche robuste** : SQL programmatique bypass (comptages, statuts pending, listes dossiers), résumé de dossier narratif LLM, garde anti-hallucination, garde anti-"pas trouvé" malgré données présentes, scoring mots-clés avec bonus noms concrets / pénalité verbes, déduplication probants, recherche numérique par numéro.
 - **Aide lecture multilingue v1.21.0** : pour les mails NL/EN/DE/ES/etc., brouillon enrichi avec 4 blocs (email d'origine + traduction FR + proposition FR + traduction langue source). Daniel n'a plus à déchiffrer une langue qu'il ne maîtrise pas.
 - **Endpoint retry-draft v1.21.0** : `POST /api/drafts/{id}/retry` permet de régénérer un brouillon manquant (cas deadlock poller).
-- **LLM kimi-k2.6:cloud stable v1.21.1+** : bascule depuis gemma4:31b (obsolète) + claude-sonnet-4 (404). Extraction `reasoning_content` + post-traitement `_clean_reasoning()` v1.21.2 (filtre 30+ patterns de traces de raisonnement).
+- **LLM gemma4:31b principal + glm-5.2:cloud fallback (v1.25.0)** : bascule depuis kimi-k2.6:cloud (v1.21.1→v1.24.x) vers gemma4:31b (non-reasoning, réponse dans `content`) comme modèle principal sur toutes les tâches. glm-5.2:cloud remplace glm-5.1:cloud comme fallback (reasoning model). Extraction `reasoning_content` + post-traitement `_clean_reasoning()` v1.21.2 (filtre 30+ patterns, reste utile pour le fallback reasoning glm-5.2:cloud).
 - **Hardening classifier v1.24.0** (meeting Daniel 2026-06-22) : 3 règles déterministes où le body l'emporte sur le sujet — `_is_wp_contact_form()` (formulaires WordPress toutes boîtes), `_is_reply_to_daniel()` (Re:+citation signée Daniel), `_has_strong_human_demand()` (exception au « jamais remonter depuis phishing »). Rattrape #515 (formulaire WP classé facture), #606 (Re:+devis classé facture), #614 (homoglyphes itsme classé phishing). #515 + #606 reclassés et livrés en prod. Règle d'or : faux positifs acceptables, faux négatifs intolérables.
 - **Brouillon hors-légalité v1.24.1** : `_detect_illegal_request()` (11 regex FR/NL/EN) court-circuite le brouillon qualifiant si le client demande un piratage / accès non autorisé aux communications (WhatsApp, téléphone, compte, logiciel espion) → `_build_illegal_refusal_draft()` = refus poli + cadre légal belge (infractions pénales) + alternative légale (filature/surveillance/constat). Pour #614 (Serge M / « faire sortir les conversations WhatsApp »).
 - **RAG mis en pause v1.24.2** : `rag_enabled: bool = False` dans `config.py` (env `RAG_ENABLED`). `retrieve()` court-circuite avant tout appel embedding. L'approche déterministe (`qualification_builder` + few-shot Daniel) est plus fiable et remplace le RAG pour les brouillons `demande_client`/`prise_contact`. Le RAG était de plus cassé sur les 3 boîtes depuis 2026-05-28 (`pairs_vec` vide/missing). Code conservé intact pour réactivation. Voir point de vigilance #1 du HANDOVER.
@@ -219,7 +221,6 @@ Le script `scripts/deploy-to-vps.sh` intègre ce workflow. **Ne jamais utiliser 
 - **V2c — Feedback loop qualité Daniel** : détecter les mails `Sent` qui correspondent à un brouillon V2a, calculer le diff, taux d'acceptation, affiner `personality_daniel.txt` avec les patterns d'édition. **Démarrage lundi 2026-05-25** (cf. mémoire `project_v2_drafts_approval`).
 - **Reclassement #614 (post-v1.24.1)** : `backfill_reclassify.py --apply --only-id 614` puis `deliver_pending_drafts.py --only-id 614 --apply` — à valider avec CDAL (brouillon = refus poli, confronter au ton de Daniel).
 - **Task #4 — Extraction vrai contact client formulaires WP** : les formulaires WP ne demandent jamais l'email — le vrai contact = téléphone (`Telefoonnummer`). Le brouillon doit dire « je vous appelle au 04xx » plutôt que répondre par email au forwarder `mail@/wordpress@/contact@detective*`.
-- **Point de vigilance #10** : `case_classifier` + `translator` tournent encore sur `gemma4:31b` (obsolète) — basculer `LLM_MODEL_QUALIFIER` sur `kimi-k2.6:cloud` + purger `app_settings`. Hors-scope v1.24.1.
 
 ### ⬜ À venir
 - **V3** : module factures (extraction montant/échéance/fournisseur), bot WhatsApp client, dashboard web supervision dédié, suppression mails > 28 jours, architecture multi-sub-agents avec LLM différencié par tâche.

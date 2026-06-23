@@ -1,5 +1,58 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.25.0] — 2026-06-23 (bascule des modèles LLM — gemma4:31b principal + glm-5.2:cloud fallback)
+
+### Contexte
+La documentation (CLAUDE.md, README, HANDOVER) était **massivement désynchronisée** avec la prod depuis la v1.21.1 : elle affirmait que `kimi-k2.6:cloud` était le modèle principal, que `gemma4:31b` était « obsolète », et que `claude-sonnet-4` était « 404 sur OpenRouter ». En réalité, la prod tournait déjà sur `gemma4:31b` (default/classifier/qualifier) avec `claude-sonnet-4` en fallback via OpenRouter. CDAL a confirmé la cible :
+
+- **`gemma4:31b`** (Ollama Pro Cloud, `openai/gemma4:31b` + `api_base=https://ollama.com/v1`) devient le modèle **principal sur toutes les tâches** : génération de brouillons (default), classifier, case classifier (qualifier), **et le chat Charlie** (cockpit + Slack Bot — bascule depuis kimi-k2.6:cloud). Modèle **non-reasoning** (réponse dans `message.content`), multimodal, ~256K context. Existe sur https://ollama.com/library/gemma4 — ce n'est PAS un modèle obsolète.
+- **`glm-5.2:cloud`** (Ollama Pro Cloud, `openai/glm-5.2:cloud`) devient le **fallback** unique (remplace `claude-sonnet-4` via OpenRouter et `glm-5.1:cloud`). Reasoning model (Z.ai, ~756B params, ~976K context, thinking effort High/Max) — réponse dans `reasoning_content`, le wrapper `complete()` du routeur l'extrait automatiquement quand `content` est vide. `_clean_reasoning()` (30+ patterns) reste utile pour filtrer les traces de raisonnement de ce fallback.
+- **`kimi-k2.6:cloud`** n'est plus utilisé nulle part.
+
+Cette entrée annule la « découverte latérale » de v1.24.1 qui recommandait de « basculer case_classifier/translator de gemma4:31b (obsolète) vers kimi-k2.6:cloud » — cette recommandation était **fausse**, gemma4:31b est le modèle voulu.
+
+### Changé — `app/config.py` (défauts)
+- `llm_model_default` : `openai/kimi-k2.6:cloud` → `openai/gemma4:31b`
+- `llm_model_classifier` : `openai/kimi-k2.6:cloud` → `openai/gemma4:31b`
+- `llm_model_chat` : `openai/kimi-k2.6:cloud` → `openai/gemma4:31b`
+- `llm_model_fallback` : `openai/glm-5.1:cloud` → `openai/glm-5.2:cloud`
+- `llm_model_qualifier` : `openai/gemma4:31b` (inchangé — déjà correct)
+
+### Changé — `.env` (local CDAL, rsyncé vers `.env.production` au deploy)
+- `LLM_MODEL_FALLBACK` : `openrouter/anthropic/claude-sonnet-4` → `openai/glm-5.2:cloud`
+- Ajout `LLM_MODEL_CHAT=openai/gemma4:31b` (bascule chat kimi→gemma4 explicite)
+- Commentaire « Fallback : OpenRouter » → « Fallback : glm-5.2:cloud via Ollama Pro ». La clé `OPENROUTER_API_KEY` est conservée (utilisée uniquement pour les embeddings `text-embedding-3-small`).
+
+### Changé — `.env.example`
+- Section LLM alignée : `LLM_MODEL_DEFAULT`/`CLASSIFIER`/`CHAT`/`QUALIFIER` = `openai/gemma4:31b`, `LLM_MODEL_FALLBACK` = `openai/glm-5.2:cloud`. Commentaires reformulés (provider Ollama Cloud, JAMAIS `ollama_chat/`). Retrait des mentions « Kimi K2.6 », « GLM 5.1 », « Claude Sonnet 4 404 ».
+
+### Inchangé — `app/llm/router.py`
+- Le wrapper `complete()` prend déjà `content` d'abord, puis `reasoning_content` si vide : compatible gemma4:31b non-reasoning (content direct) ET glm-5.2:cloud reasoning (reasoning_content). `_clean_reasoning()` est inoffensif sur gemma4:31b (aucun pattern de trace à filtrer) et utile pour le fallback glm-5.2:cloud. Aucun changement de code nécessaire.
+
+### Documentation (23 edits via sub-agent)
+- **CLAUDE.md** (§3 stack, §6 garde-fous, §7 état courant) : principal = `gemma4:31b`, chat = `gemma4:31b` (bascule v1.25.0), fallback = `glm-5.2:cloud`. Retrait de « Claude Sonnet 4 est 404 sur OpenRouter ». Reformulation des garde-fous LLM (glm-5.2:cloud reasoning fallback + gemma4:31b non-reasoning principal, `ollama_chat/` toujours interdit). **Suppression du « Point de vigilance #10 »** (gemma4:31b n'est pas un bug à corriger).
+- **README.md** (architecture, stack, statut, version) : idem. Version → 1.25.0.
+- **HANDOVER.md** (header, §2 fichiers clés, §3, §4 stack, §8 règle 8, §9 points vigilance #2/#3/#4, suppression #10) : idem. Mentions historiques kimi dans les post-mortems conservées (faits passés datés).
+- `docs/ROADMAP.md` : aucune correction nécessaire (pas de mention modèle courant obsolète).
+
+### Tests
+- **137/137 tests verts** (aucune régression — les tests mockent `complete()`).
+- **Smoke test LLM** : `openai/gemma4:31b` répond `pong` (~1s, latence faible). `openai/glm-5.2:cloud` répond `pong` (mais nécessite `max_tokens` ≥ ~100 — voir point de vigilance ci-dessous).
+
+### Corrigé — `max_tokens` du fallback reasoning (anti crash silencieux)
+`glm-5.2:cloud` est un **reasoning model** : il produit d'abord une trace de raisonnement (`reasoning_content`) puis la réponse finale (`content`). Si l'appel est fait avec un `max_tokens` trop faible, **tous les tokens sont consommés par le raisonnement** et `content` reste vide → réponse finale vide après `_clean_reasoning()`. Le fallback du router `complete()` réutilise le même `max_tokens` que l'appel principal, donc le risque dépend des valeurs passées par chaque appelant. Audit fait :
+
+- **`app/pipeline/classifier.py:394`** — `max_tokens=15` → **200**. Le classifier attend 1 mot (la catégorie) ; gemma4:31b (principal) répond en 1 mot et s'arrête (max_tokens = plafond, pas cible). Mais le fallback glm-5.2:cloud ne pouvait **jamais** répondre en 15 tokens → mail classé `"autre"` silencieusement = faux négatif (intolérable). 200 laisse la place au raisonnement + à la catégorie.
+- **`app/pipeline/case_classifier.py:171`** — `max_tokens=300` → **500**. Le case_classifier renvoie un JSON `{case_type, confidence, reason}` ; 300 tokens laissait trop peu de place au raisonnement glm-5.2:cloud avant le JSON. 500 donne la marge. (Dégradation gracieuse déjà en place via try/except → `non_determine`.)
+- Appels déjà sûrs (inchangés) : `generator.py` (2500), `translator.py` (3000), `charlie.py` (500-1000), `classifier` déterministe.
+
+### Point de vigilance restant — chat Charlie en fallback
+Le chat Charlie (`app/charlie.py:1275`, `max_tokens=500`) appelle gemma4:31b (principal, non-reasoning → pas de problème). Le fallback glm-5.2:cloud ne s'active qu'en cas de panne gemma4 : à 500 tokens, le raisonnement glm-5.2 peut laisser ~100-200 tokens pour la réponse — acceptable pour la plupart des questions, mais une question complexe pourrait voir sa réponse tronquée. Le chat a un try/except (dégradation gracieuse). Surveillance prod conseillée lors d'une panne gemma4 — hors-scope v1.25.0.
+
+### Déploiement
+- Le rsync `.env` → `.env.production` au déploiement propagera `LLM_MODEL_FALLBACK=glm-5.2:cloud` et `LLM_MODEL_CHAT=gemma4:31b` en prod. `docker compose restart` (dev mount `./app:ro`) — pas de rebuild Docker nécessaire (aucune dépendance modifiée).
+- `app_settings` prod : déjà vide (pas de purge nécessaire — les défauts config.py + `.env.production` priment).
+
 ## [1.24.2] — 2026-06-23 (RAG mis en pause — l'approche déterministe le remplace)
 
 ### Contexte
