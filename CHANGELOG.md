@@ -1,5 +1,26 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.25.7] — 2026-06-23 (brouillon ack pour les réponses client à Daniel — #606 Van Houtte)
+
+### Contexte
+#606 (Frédéric Van Houtte) = `Re: Mission ouvrier en maladie` : réponse du client à un échange récent avec Daniel (« Je vous ai répondu en vert sur votre mail » + citation du mail de Daniel du 16 juin sur la mission ouvrier en incapacité). C'est un **follow-up / accusé de réception**, pas un nouveau prospect. Le brouillon généré était le **qualifiant standard** (« Je comprends que vous souhaitez vérifier une incapacité de travail… pourriez-vous me transmettre : 1. Vos nom et prénom complets. 2. Votre adresse… ») — inadapté : Daniel a déjà envoyé sa mission/devis, le client répond, il ne faut pas redemander nom/prénom/GSM comme un nouveau prospect.
+
+Le brouillon ack (`build_followup_ack_draft`, v1.25.1) existe déjà (« Merci pour ces compléments d'informations. Je les prends bien en compte et je vous reviens dès que possible sur la suite de votre dossier ») mais n'était pas déclenché : `_is_client_followup` (poller) et `_is_web_followup` (cockpit) requéraient que le sender ait **déjà un mail `demande_client` en DB dans les 30 derniers jours**. Or Frédéric n'avait qu'**un seul mail** en DB (#606 lui-même) — le mail initial qui a déclenché la mission a été traité hors-agent / autre boîte. L'historique DB manquait → follow-up non détecté → brouillon qualifiant.
+
+`_is_reply_to_daniel` (v1.24.0, créé explicitement pour #606) détectait bien « Re: + body cite un mail de Daniel (préfixe `>` + signature cabinet) » mais ne faisait que **forcer la catégorie `demande_client`** (pour ne pas classer en facture/phishing) — il ne déclenchait pas le brouillon ack.
+
+### Ajouté
+- **Shortcut citation Daniel** dans `_is_client_followup` (poller) ET `_is_web_followup` (cockpit) : si `_is_reply_to_daniel(body, sender)` est vrai (Re: + citation d'un mail de Daniel avec signature cabinet), le mail est traité comme follow-up **sans nécessiter d'historique DB**. La citation d'un mail de Daniel est la preuve d'un échange existant — indépendante de l'historique DB (qui peut manquer si le mail initial a été traité hors-agent / autre boîte). → brouillon ack au lieu du qualifiant.
+- **Cohérence poller ↔ cockpit** : le shortcut est dans les deux fonctions, donc la régénération cockpit (`POST /api/drafts/{id}/retry`) produit aussi le brouillon ack pour #606.
+
+### Sécurité
+Le brouillon ack est **safe** même si le client formule une nouvelle demande dans sa réponse : Daniel valide tous les brouillons en Drafts IMAP (V2a) avant envoi — il lit le mail original et adapte si besoin. Aucune demande n'est perdue. La règle d'or « faux positifs acceptables, faux négatifs intolérables » est respectée (un ack sur une réponse-avec-nouvelle-demande est un faux positif bénin que Daniel corrige ; un qualifiant sur un ack pur était un faux négatif qui polue l'inbox de Daniel avec des questions déjà répondues).
+
+### Tests
+- `tests/test_imap_poller_resilience.py` : +2 tests (`_is_client_followup` True sur citation Daniel sans historique DB #606 ; False sur citation sans signature cabinet — pas de shortcut).
+- `tests/test_web_followup_shortcut.py` (3 tests) : `_is_web_followup` True sur citation Daniel sans historique DB, False sur citation sans signature, False sur nouvelle demande sans marqueurs.
+- 110 tests au total, 0 régression (tests follow-up existants inchangés : leurs bodies ne citent pas Daniel).
+
 ## [1.25.6] — 2026-06-23 (demande de l'objectif final — #615 douane Kaiserslautern)
 
 ### Contexte

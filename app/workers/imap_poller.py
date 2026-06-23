@@ -22,7 +22,7 @@ from app.delivery.imap_draft import append_draft
 from app.delivery.resend_notifier import IncomingMail, notify_draft
 from app.delivery.slack_notifier import notify_new_draft as notify_slack_draft
 from app.healthcheck import health
-from app.pipeline.classifier import classify
+from app.pipeline.classifier import _is_reply_to_daniel, classify
 from app.pipeline.document_extract import extract_text_bytes, is_supported
 from app.pipeline.generator import generate_draft
 from app.pipeline.language import detect_language
@@ -298,14 +298,25 @@ def _is_client_followup(db_path: Path, sender: str, msg: Message) -> bool:
     if not sender_norm:
         return False
 
+    body = _get_body_text(msg)
+
+    # v1.25.7 — shortcut : Re: + citation d'un mail de Daniel (préfixe > + signature
+    # cabinet) = réponse à un échange existant. Preuve indépendante de l'historique
+    # DB (qui peut manquer si le mail initial a été traité hors-agent / autre boîte).
+    # Cf. #606 (Van Houtte) : pas d'historique DB mais citation explicite d'un mail
+    # de Daniel du 16 juin → brouillon ack au lieu du qualifiant qui redemandait
+    # nom/prénom comme un nouveau prospect.
+    if _is_reply_to_daniel(body, sender):
+        return True
+
     # --- 1. Le mail ressemble-t-il à une réponse ? ---
     is_reply = bool(msg.get("In-Reply-To") or msg.get("References"))
     subject = str(msg.get("Subject", "") or "")
     if _FOLLOWUP_SUBJECT_RE.search(subject):
         is_reply = True
 
-    body = _get_body_text(msg).lower()
-    if any(marker in body for marker in _FOLLOWUP_BODY_MARKERS):
+    body_l = body.lower()
+    if any(marker in body_l for marker in _FOLLOWUP_BODY_MARKERS):
         is_reply = True
 
     if not is_reply:

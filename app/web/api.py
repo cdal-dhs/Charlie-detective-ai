@@ -16,7 +16,7 @@ from app.cerveau_client import push_correction
 from app.charlie import BOX_ABBR, ask_charlie
 from app.charlie_memory import save_feedback
 from app.config import get_settings
-from app.pipeline.classifier import classify
+from app.pipeline.classifier import _is_reply_to_daniel, classify
 from app.pipeline.generator import generate_draft
 from app.pipeline.language import detect_language
 from app.pipeline.subject_fixer import fix_subject_llm, tag_no_email
@@ -67,6 +67,13 @@ async def _is_web_followup(
     sender_norm = sender.lower().strip()
     if not sender_norm:
         return False
+
+    # v1.25.7 — shortcut : Re: + citation d'un mail de Daniel (préfixe > + signature
+    # cabinet) = réponse à un échange existant, preuve indépendante de l'historique
+    # DB. Cf. #606 (Van Houtte). Permet à la régénération cockpit de produire le
+    # brouillon ack même sans mail initial du sender en DB.
+    if _is_reply_to_daniel(body, sender):
+        return True
 
     is_reply = bool(_FOLLOWUP_SUBJECT_RE.search(subject))
     body_lower = body.lower()

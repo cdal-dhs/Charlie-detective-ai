@@ -704,3 +704,42 @@ def test_is_client_followup_false_when_new_request(tmp_path):
 
     msg = _make_followup_msg(subject="Nouvelle demande", body="Bonjour, je souhaite un devis.")
     assert _is_client_followup(db, "client@example.com", msg) is False
+
+
+# --- v1.25.7 - shortcut citation Daniel (cf. #606 Van Houtte) ---
+
+
+def test_is_client_followup_true_when_quotes_daniel_no_history(tmp_path):
+    """#606 - Re: + citation d'un mail de Daniel SANS historique DB = follow-up.
+
+    Le mail initial de Frédéric n'est pas en DB (traité hors-agent / autre boîte),
+    mais le body cite explicitement un mail de Daniel du 16 juin (préfixe > +
+    signature cabinet). La citation est la preuve d'un échange → brouillon ack,
+    pas le qualifiant qui redemandait nom/prénom comme un nouveau prospect.
+    """
+    db = _setup_db(tmp_path)  # DB vide : aucun historique du sender
+    body = (
+        "Bonjour Monsieur\n\nJe vous ai répondu en vert sur votre mail\n\n"
+        "Bien à vous\n\nFrédéric Van Houtte\n\n"
+        "> Le 16 juin 2026 à 15:23, Detective Belgique <contact@detectivebelgique.be> a écrit :\n"
+        ">\n> MISSION : OUVRIER EN INCAPACITÉ DE TRAVAIL\n"
+        "> Daniel Hurchon - DetectiveBelgique.be SRL - GSM - 0471/31.81.20"
+    )
+    msg = _make_followup_msg(
+        subject="Re: Mission ouvrier en maladie",
+        body=body,
+        in_reply_to="<abc@daniel>",
+    )
+    assert _is_client_followup(db, "etsvanhoutte@gmail.com", msg) is True
+
+
+def test_is_client_followup_quote_without_daniel_signature_is_not_shortcut(tmp_path):
+    """Une citation (>) sans signature du cabinet ne déclenche PAS le shortcut :
+    on retombe sur la logique historique DB (ici pas d'historique → False)."""
+    db = _setup_db(tmp_path)
+    body = (
+        "Bonjour,\n\nMerci pour votre retour.\n\n"
+        "> Le 16 juin, Toto <toto@example.com> a écrit :\n> Voici un mail quelconque"
+    )
+    msg = _make_followup_msg(subject="Re: Demande", body=body, in_reply_to="<x@y>")
+    assert _is_client_followup(db, "client@example.com", msg) is False
