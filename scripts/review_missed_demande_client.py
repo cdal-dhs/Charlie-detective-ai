@@ -28,7 +28,7 @@ import structlog
 from app.config import get_settings, MailboxConfig
 from app.delivery.imap_draft import append_draft
 from app.delivery.resend_notifier import IncomingMail
-from app.models.schema import GenerationResult
+from app.pipeline.generator import GenerationResult
 from app.pipeline.classifier import _is_human_followup, _is_reply_to_daniel
 from app.pipeline.language import detect_language
 from app.pipeline.prefilter import _is_wp_contact_form
