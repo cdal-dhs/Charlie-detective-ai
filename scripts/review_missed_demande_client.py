@@ -32,7 +32,7 @@ from app.pipeline.classifier import classify, _is_human_followup, _is_reply_to_d
 from app.pipeline.generator import GenerationResult, generate_draft
 from app.pipeline.language import detect_language
 from app.pipeline.prefilter import _is_wp_contact_form
-from app.slack.client import send_slack_message
+from app.delivery.slack_notifier import send_slack_message
 
 log = structlog.get_logger()
 
