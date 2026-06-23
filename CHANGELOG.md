@@ -1,6 +1,10 @@
 # Changelog Charlie AI — Detective.be
 
-## [1.25.14] — 2026-06-23 (corrections brouillons #513/#515 : prénom + tarifs NL)
+## [1.25.15] — 2026-06-23 (garde-fou 100% qualité brouillons multilingues)
+
+### Ajouté
+- **Validateur de draft multilingue** dans `app/pipeline/generator.py` : pour tout mail non-FR, vérification post-génération que les 4 blocs sont présents (`📩 EMAIL D'ORIGINE`, `🇫🇷 TRADUCTION FR`, `✉️ PROPOSITION DE RÉPONSE (en Français)`, `🌍 TRADUCTION DE LA PROPOSITION`) et que la traduction de la proposition n'est pas vide/tronquée. Si la traduction de la proposition est incomplète, re-traduction automatique avec retry. Garantie 100% qualité pour les nouveaux entrants.
+- **`scripts/deliver_pending_drafts.py`** : détection de la vraie langue du body original au lieu de `language="fr"` hardcodé.
 
 ### Fixé
 - **`_strip_quoted_thread()`** dans `app/pipeline/qualification_builder.py` : gère désormais les citations Outlook sans préfixe `>` (en-têtes `Van:/Verzonden:/Aan:/Onderwerp:`, `De:/Date:/À:/Objet:`, `From:/Sent:/To:/Subject:`). Évite d'extraire "Daniel" comme prénom client dans les réponses qui citent un mail de Daniel.

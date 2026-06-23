@@ -38,6 +38,7 @@ from app.config import get_settings
 from app.delivery.imap_draft import append_draft
 from app.delivery.resend_notifier import IncomingMail
 from app.pipeline.generator import GenerationResult
+from app.pipeline.language import detect_language
 
 log = structlog.get_logger()
 
@@ -142,6 +143,11 @@ async def main(apply: bool, limit: int | None, only_id: int | None) -> None:
             skipped += 1
             continue
 
+        # v1.25.14 : détecter la vraie langue du body original pour que
+        # _build_draft_body() et les éventuels re-rendus multilingues soient
+        # cohérents avec la langue source.
+        language = detect_language(mail.get("body") or "", default=mailbox.default_lang)
+
         incoming = IncomingMail(
             sender=mail["sender"] or "",
             subject=_sanitize_subject(mail["subject"] or ""),
@@ -153,7 +159,7 @@ async def main(apply: bool, limit: int | None, only_id: int | None) -> None:
         gen = GenerationResult(
             draft=mail["ai_draft"],
             raw_draft=mail["ai_draft"],  # non utilisé par append_draft
-            language="fr",  # non utilisé par append_draft
+            language=language,
             rag_pairs=[],
             model_used="",  # non utilisé par append_draft
             category="demande_client",  # non utilisé par append_draft

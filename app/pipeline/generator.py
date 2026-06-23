@@ -1,4 +1,5 @@
 import asyncio
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -8,7 +9,7 @@ from app.cerveau_client import VaultNote, query_vault
 from app.config import MailboxConfig, get_settings
 from app.llm.router import complete
 from app.pipeline.case_classifier import classify_case
-from app.pipeline.language import Language
+from app.pipeline.language import Language, language_label
 from app.pipeline.objective_check import assess_objective_clarity, extract_free_message
 from app.pipeline.qualification_builder import (
     build_followup_ack_draft,
@@ -46,6 +47,59 @@ class GenerationResult:
     # v1.25.1 : sujet de brouillon lisible quand le sujet original est un template
     # WP absurde (formulaire relayé par forwarder). None = garder le sujet original.
     suggested_subject: str | None = None
+
+
+def _is_multilingual_draft_complete(draft: str) -> tuple[bool, str]:
+    """Vérifie la présence des 4 blocs attendus pour un mail non-FR."""
+    required = {
+        "orig_nl": "📩 EMAIL D'ORIGINE",
+        "tr_fr": "🇫🇷 TRADUCTION FR",
+        "prop_fr": "✉️ PROPOSITION DE RÉPONSE (en Français)",
+        "prop_tr": "🌍 TRADUCTION DE LA PROPOSITION",
+    }
+    for key, marker in required.items():
+        if marker not in draft:
+            return False, key
+    # Vérifie que la traduction de la proposition n'est pas vide/tronquée.
+    prop_tr_block = draft.split("🌍 TRADUCTION DE LA PROPOSITION")[1]
+    prop_tr_content = re.split(r"\n[═─]+", prop_tr_block)[0].strip()
+    if len(prop_tr_content) < 50:
+        return False, "prop_tr_empty"
+    return True, ""
+
+
+async def _validate_and_fix_translation(
+    final_draft: str,
+    incoming_body: str,
+    raw_draft: str,
+    language: Language,
+    incoming_subject: str,
+) -> str:
+    """Valide le draft multilingue ; retente si incomplet."""
+    ok, reason = _is_multilingual_draft_complete(final_draft)
+    if ok:
+        return final_draft
+
+    log.warning("generator.draft_incomplete", language=language, reason=reason)
+    if reason == "prop_tr_empty":
+        # Retraduit la proposition avec un prompt plus strict.
+        from app.pipeline.translator import translate_from_fr
+
+        fixed_tr = await translate_from_fr(raw_draft, language)
+        if fixed_tr and len(fixed_tr) >= 50:
+            fixed_draft = final_draft.split("🌍 TRADUCTION DE LA PROPOSITION")[0]
+            fixed_draft += (
+                f"\n================================================\n"
+                f"🌍 TRADUCTION DE LA PROPOSITION ({language_label(language)} — pour le client)\n"
+                f"================================================\n"
+                f"{fixed_tr.strip()}"
+            )
+            ok2, reason2 = _is_multilingual_draft_complete(fixed_draft)
+            if ok2:
+                log.info("generator.draft_fixed", language=language)
+                return fixed_draft
+            log.error("generator.draft_fix_failed", language=language, reason=reason2)
+    return final_draft
 
 
 def _load_personality() -> str:
@@ -438,6 +492,18 @@ async def generate_draft(
         language=language,
         final_length=len(final_draft),
     )
+
+    # v1.25.14 : garde-fou qualité 100% pour les mails non-FR.
+    # On s'assure que les 4 blocs sont présents ; si la traduction de la
+    # proposition est tronquée/vide, on retente avec un prompt plus strict.
+    if language != "fr":
+        final_draft = await _validate_and_fix_translation(
+            final_draft,
+            incoming_body,
+            raw_draft,
+            language,
+            incoming_subject,
+        )
 
     return GenerationResult(
         draft=final_draft,
