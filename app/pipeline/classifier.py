@@ -40,48 +40,155 @@ PROMPT_PATH = Path(__file__).parent.parent / "prompts" / "classifier_prompt.txt"
 # Gain : on ne rate plus AUCUN client.
 _HUMAN_QUESTION_SIGNALS = (
     # Question / suivi client typique (FR)
-    "c'est combien", "c combien", "quel est le tarif", "quel est le prix",
-    "quels sont vos tarifs", "vos tarifs", "votre prix", "votre tarif",
-    "tarif exact", "prix exact", "devis", "combien ça coûte", "combien cela coûte",
-    "combien coûte", "je vous contacte", "je vous écris", "je vous sollicite",
-    "je souhaite", "je voudrais", "je cherche", "je désire", "j'aimerais",
-    "est-ce que vous", "pouvez-vous", "pourriez-vous", "merci de me",
-    "merci de bien vouloir", "dans l'attente", "en attente de votre",
-    "j'attends de vos", "j'attends votre", "merci de votre retour",
-    "merci de votre réponse", "pourriez-vous m'", "pouvez-vous m'",
-    "avez-vous eu", "avez-vous bien reçu", "suivi de ma demande",
-    "faire suite à", "fais suite à", "suite à votre", "suite à ma",
-    "relance", "relancer", "nouvelles de", "des nouvelles",
-    "avez-vous", "as-tu", "puis-je", "est-il possible",
+    "c'est combien",
+    "c combien",
+    "quel est le tarif",
+    "quel est le prix",
+    "quels sont vos tarifs",
+    "vos tarifs",
+    "votre prix",
+    "votre tarif",
+    "tarif exact",
+    "prix exact",
+    "devis",
+    "combien ça coûte",
+    "combien cela coûte",
+    "combien coûte",
+    "je vous contacte",
+    "je vous écris",
+    "je vous sollicite",
+    "je souhaite",
+    "je voudrais",
+    "je cherche",
+    "je désire",
+    "j'aimerais",
+    "est-ce que vous",
+    "pouvez-vous",
+    "pourriez-vous",
+    "merci de me",
+    "merci de bien vouloir",
+    "dans l'attente",
+    "en attente de votre",
+    "j'attends de vos",
+    "j'attends votre",
+    "merci de votre retour",
+    "merci de votre réponse",
+    "pourriez-vous m'",
+    "pouvez-vous m'",
+    "avez-vous eu",
+    "avez-vous bien reçu",
+    "suivi de ma demande",
+    "faire suite à",
+    "fais suite à",
+    "suite à votre",
+    "suite à ma",
+    "relance",
+    "relancer",
+    "nouvelles de",
+    "des nouvelles",
+    "avez-vous",
+    "as-tu",
+    "puis-je",
+    "est-il possible",
     # Équivalents NL (néerlandais) — Detective Belgium
-    "wens ik", "wenst u", "wilt u", "zou u", "kan u", "kunt u",
-    "offerte", "prijs", "kost", "kosten", "tarief",
-    "ik wil", "ik zou", "ik had", "ik heb", "alvast bedankt",
-    "met vriendelijke groet", "mvg", "vraag", "vraagje",
+    "wens ik",
+    "wenst u",
+    "wilt u",
+    "zou u",
+    "kan u",
+    "kunt u",
+    "offerte",
+    "prijs",
+    "kost",
+    "kosten",
+    "tarief",
+    "ik wil",
+    "ik zou",
+    "ik had",
+    "ik heb",
+    "alvast bedankt",
+    "met vriendelijke groet",
+    "mvg",
+    "vraag",
+    "vraagje",
     # Équivalents EN (anglais) — multilingue
-    "i would like", "i want", "i need", "how much", "what is the cost",
-    "could you", "would you", "please send", "quote", "i'm looking",
-    "looking for", "kind regards", "regards", "best regards",
+    "i would like",
+    "i want",
+    "i need",
+    "how much",
+    "what is the cost",
+    "could you",
+    "would you",
+    "please send",
+    "quote",
+    "i'm looking",
+    "looking for",
+    "kind regards",
+    "regards",
+    "best regards",
     # Questions à la 1ère personne sur l'enquête (typique Detective.be)
-    "ma femme", "mon mari", "ma conjointe", "mon conjoint", "mon partenaire",
-    "mon entreprise", "ma société", "mon employé", "ma salariée",
-    "suspecte", "soupçonne", "soupçonn", "douter", "doute",
-    "infidèle", "infidélité", "tromper", "adultère",
-    "filature", "surveillance", "enquête", "investigation",
-    "enquete", "détective", "detective", "privé",
-    "mijn vrouw", "mijn man", "mijn partner",  # NL
-    "my wife", "my husband", "my partner",  # EN
+    "ma femme",
+    "mon mari",
+    "ma conjointe",
+    "mon conjoint",
+    "mon partenaire",
+    "mon entreprise",
+    "ma société",
+    "mon employé",
+    "ma salariée",
+    "suspecte",
+    "soupçonne",
+    "soupçonn",
+    "douter",
+    "doute",
+    "infidèle",
+    "infidélité",
+    "tromper",
+    "adultère",
+    "filature",
+    "surveillance",
+    "enquête",
+    "investigation",
+    "enquete",
+    "détective",
+    "detective",
+    "privé",
+    "mijn vrouw",
+    "mijn man",
+    "mijn partner",  # NL
+    "my wife",
+    "my husband",
+    "my partner",  # EN
     # Verbes d'action métier
-    "vérifier", "controler", "contrôler", "découvrir", "prouver",
-    "confirmer", "identifier", "retrouver", "localiser",
+    "vérifier",
+    "controler",
+    "contrôler",
+    "découvrir",
+    "prouver",
+    "confirmer",
+    "identifier",
+    "retrouver",
+    "localiser",
 )
 
 _HUMAN_HINTS_IN_BODY = (
     # Présence d'un prénom/nom en début de mail
-    "bonjour", "bonsoir", "hello", "hi ",
-    "cher monsieur", "chère madame", "cher m.", "chère mme",
-    "geachte", "beste", "beste heer", "beste mevrouw",
-    "monsieur hurchon", "madame hurchon", "mr hurchon", "mme hurchon",
+    "bonjour",
+    "bonsoir",
+    "hello",
+    "hi ",
+    "cher monsieur",
+    "chère madame",
+    "cher m.",
+    "chère mme",
+    "geachte",
+    "beste",
+    "beste heer",
+    "beste mevrouw",
+    "monsieur hurchon",
+    "madame hurchon",
+    "mr hurchon",
+    "mme hurchon",
     "m. hurchon",
 )
 
@@ -102,33 +209,89 @@ _WP_FORM_NL_MARKER = "hoe kunnen wij u helpen"
 # (https://) ici : un client peut légitimement mentionner un profil Facebook, un
 # site, etc. On cible uniquement les CTAs d'urgence de phishing.
 _ACTIVE_PHISHING_MARKERS = (
-    "cliquez ici", "cliquez sur le lien", "click here", "click the link",
-    "cliquez pour vérifier", "vérifiez votre identité", "verify your identity",
-    "confirmez votre compte", "votre compte a été suspendu",
-    "your account has been suspended", "votre compte sera désactivé",
-    "reactiver votre compte", "réactiver votre compte",
-    "action requise sur votre compte", "votre compte sera bloqué",
-    "connexion à votre espace", "identifiants sont erronés",
+    "cliquez ici",
+    "cliquez sur le lien",
+    "click here",
+    "click the link",
+    "cliquez pour vérifier",
+    "vérifiez votre identité",
+    "verify your identity",
+    "confirmez votre compte",
+    "votre compte a été suspendu",
+    "your account has been suspended",
+    "votre compte sera désactivé",
+    "reactiver votre compte",
+    "réactiver votre compte",
+    "action requise sur votre compte",
+    "votre compte sera bloqué",
+    "connexion à votre espace",
+    "identifiants sont erronés",
 )
 
 # v1.24.0 — vocabulaire métier enquête (FR + NL + EN). Présence combinée à une
 # signature prénom + question de tarif = demande humaine forte (exception phishing).
 _ENQUIRY_VOCAB = (
-    "infidélité", "infidélite", "infidele", "infidèle", "adultère", "tromper",
-    "trompe", "filature", "surveillance", "enquête", "enquete", "investigation",
-    "détective", "detective", "soupçonn", "suspect", "prouver", "preuve",
-    "attraper la main dans le sac", "attraper", "mandant", "mission",
-    "incapacité", "incapacite", "arrêt maladie", "arret maladie", "maladie",
-    "ontrouw", "overspel", "afluisteren", "bewaking", "onderzoek",
-    "privédetective", "privedetective", "detective",
-    "cheating", "affair", "surveillance", "investigation", "private detective",
+    "infidélité",
+    "infidélite",
+    "infidele",
+    "infidèle",
+    "adultère",
+    "tromper",
+    "trompe",
+    "filature",
+    "surveillance",
+    "enquête",
+    "enquete",
+    "investigation",
+    "détective",
+    "detective",
+    "soupçonn",
+    "suspect",
+    "prouver",
+    "preuve",
+    "attraper la main dans le sac",
+    "attraper",
+    "mandant",
+    "mission",
+    "incapacité",
+    "incapacite",
+    "arrêt maladie",
+    "arret maladie",
+    "maladie",
+    "ontrouw",
+    "overspel",
+    "afluisteren",
+    "bewaking",
+    "onderzoek",
+    "privédetective",
+    "privedetective",
+    "detective",
+    "cheating",
+    "affair",
+    "surveillance",
+    "investigation",
+    "private detective",
 )
 
 # v1.24.0 — question de tarif (FR + NL + EN). Indique un prospect réel.
 _PRICE_QUESTION = (
-    "combien", "tarif", "coûte", "coute", "prix", "devis", "estimation",
-    "offerte", "prijs", "kosten", "tarief", "hoeveel",
-    "how much", "cost", "price", "quote", "fee",
+    "combien",
+    "tarif",
+    "coûte",
+    "coute",
+    "prix",
+    "devis",
+    "estimation",
+    "offerte",
+    "prijs",
+    "kosten",
+    "tarief",
+    "hoeveel",
+    "how much",
+    "cost",
+    "price",
+    "quote",
+    "fee",
 )
 
 # Signature prénom en fin de body : "merci\nSerge M" / "Bien à vous,\nFrédéric Van Houtte"
@@ -139,9 +302,7 @@ _SIGNED_NAME_RE = re.compile(
     re.IGNORECASE,
 )
 # Fallback : juste un prénom + nom en toute fin de body (sans formule de politesse).
-_TRAILING_NAME_RE = re.compile(
-    r"\n\s*([A-ZÀ-Ý][\wà-ÿ\-]+(?:\s+[A-ZÀ-Ý\w][\wà-ÿ\-]*){0,3})\s*$"
-)
+_TRAILING_NAME_RE = re.compile(r"\n\s*([A-ZÀ-Ý][\wà-ÿ\-]+(?:\s+[A-ZÀ-Ý\w][\wà-ÿ\-]*){0,3})\s*$")
 
 
 def _is_wp_contact_form(body: str) -> bool:
@@ -207,13 +368,127 @@ _DANIEL_SIGNATURE_PATTERNS = (
 )
 
 
+# v1.25.8 — réponse/relance humaine sans citation Daniel (#Vacature).
+# Préfixes de réponse multilingues (FR/NL/EN/DE).
+_FOLLOWUP_SUBJECT_PREFIXES_RE = re.compile(
+    r"^(?:re|rép|rép|aw|antw|sv|wtr|fwd|fw|doorsturen)\s*[:\.\s]",
+    re.IGNORECASE,
+)
+
+# Marqueurs de relance / suivi de demande (FR + NL + EN + DE).
+_FOLLOWUP_RELANCE_MARKERS = (
+    # FR
+    "avez-vous reçu",
+    "avez vous reçu",
+    "as-tu reçu",
+    "as tu reçu",
+    "avez-vous bien reçu",
+    "avez vous bien reçu",
+    "avez vous mon",
+    "est-ce que vous avez reçu",
+    "est ce que vous avez reçu",
+    "suivi de ma demande",
+    "faire suite",
+    "fais suite",
+    "suite à mon",
+    "suite à ma demande",
+    "relance",
+    "des nouvelles",
+    "nouvelles de",
+    "pas de nouvelles",
+    "donner des nouvelles",
+    "pourriez-vous me tenir",
+    "pourriez vous me tenir",
+    "pouvez-vous me tenir",
+    "pouvez vous me tenir",
+    "en attente de votre",
+    "j'attends votre",
+    "j'attends de vos",
+    # NL
+    "heeft u ontvangen",
+    "heeft u mijn",
+    "heb je ontvangen",
+    "heb je mijn",
+    "is mijn e-mail aangekomen",
+    "is mijn mail aangekomen",
+    "opvolging",
+    "vervolg",
+    "vervolg op",
+    "nieuws over",
+    "nieuws van",
+    "geen nieuws",
+    "herinnering",
+    "terugkomend op",
+    "wacht op",
+    "in afwachting van",
+    "blijf in afwachting",
+    # EN
+    "did you receive",
+    "have you received",
+    "have you got",
+    "follow up",
+    "following up",
+    "any update",
+    "any news",
+    "news about",
+    "just checking",
+    "checking in",
+    # DE
+    "haben sie erhalten",
+    "haben sie meine",
+    "nachfrage",
+    "rückfrage",
+)
+
+# v1.25.8 — candidature/spontanée (NL vacature / FR candidature). Certains job-boards
+# envoient depuis des senders marketing et sont classés newsletter à tort.
+_JOB_APPLICATION_MARKERS = (
+    "vacature",
+    "candidature",
+    "sollicitatie",
+    "job",
+    "emploi",
+    "stagiair",
+    "stage",
+    "zelfstandige",
+    "bijberoep",
+    "bijverdienste",
+    "recherche",
+)
+
+# Senders de service / marketing dont une relance ne peut PAS être humaine.
+_FOLLOWUP_SERVICE_SENDERS = (
+    "noreply",
+    "no-reply",
+    "ne-pas-repondre",
+    "donotreply",
+    "mailer-daemon",
+    "wordpress@",
+    "mail@detective",
+    "contact@detective",
+    "newsletter@",
+    "promo@",
+    "marketing@",
+    "campaign@",
+    "mailing@",
+    "info@arval",
+    "info@",  # domaine marketing générique ; garder strict
+)
+
+
 def _is_reply_to_daniel(body: str, sender: str) -> bool:
     """Re: + body cite un mail de Daniel (préfixe > + signature cabinet) +
     expéditeur humain (pas un service/no-reply)."""
     sender_l = sender.lower()
     service_hints = (
-        "noreply", "no-reply", "ne-pas-repondre", "mailer-daemon",
-        "infomaniak", "wordpress@", "mail@detective", "contact@detective",
+        "noreply",
+        "no-reply",
+        "ne-pas-repondre",
+        "mailer-daemon",
+        "infomaniak",
+        "wordpress@",
+        "mail@detective",
+        "contact@detective",
     )
     # mail@/contact@detective* = forwarder formulaire (pas une réponse humaine à Daniel)
     if any(h in sender_l for h in service_hints):
@@ -222,6 +497,90 @@ def _is_reply_to_daniel(body: str, sender: str) -> bool:
         return False
     b = body.lower()
     return any(sig in b for sig in _DANIEL_SIGNATURE_PATTERNS)
+
+
+def _is_human_followup(subject: str, body: str, sender: str) -> bool:
+    """Relance/suivi d'un humain (Re:/Rép.:/AW:/Wtr. + marqueur de relance +
+    expéditeur humain). Indépendant de la citation Daniel — certains clients
+    relancent sans citer le mail initial (#Vacature)."""
+    sender_l = sender.lower().strip()
+    if not sender_l:
+        return False
+    service_senders = (
+        "noreply",
+        "no-reply",
+        "ne-pas-repondre",
+        "donotreply",
+        "mailer-daemon",
+        "infomaniak",
+        "wordpress@",
+        "mail@detective",
+        "contact@detective",
+        "newsletter@",
+        "promo@",
+        "marketing@",
+        "campaign@",
+        "mailing@",
+        "info@arval",  # marketing connu
+    )
+    if any(s in sender_l for s in service_senders):
+        return False
+
+    text = f"{subject}\n{body}".lower()
+    has_relance_marker = any(m in text for m in _FOLLOWUP_RELANCE_MARKERS)
+    has_reply_prefix = bool(_FOLLOWUP_SUBJECT_PREFIXES_RE.search(subject))
+    body_stripped = body.strip()
+    is_signed = bool(_SIGNED_NAME_RE.search(body_stripped)) or bool(
+        _TRAILING_NAME_RE.search(body_stripped[-120:])
+    )
+
+    # Cas fort : préfixe Re: + marqueur de relance explicite.
+    if has_reply_prefix and has_relance_marker:
+        return True
+    # Cas modéré : préfixe Re: + body signé + vocabulaire de suivi/question.
+    followup_words = (
+        "merci",
+        "mvg",
+        "cordialement",
+        "groeten",
+        "regards",
+        "vragen",
+        "vraag",
+        "question",
+    )
+    return has_reply_prefix and is_signed and any(q in text for q in followup_words)
+
+
+def _is_job_application(subject: str, body: str, sender: str) -> bool:
+    """Candidature spontanée / demande d'emploi. Les job-boards peuvent forwarder
+    depuis des senders marketing et être classés newsletter à tort."""
+    sender_l = sender.lower().strip()
+    if not sender_l:
+        return False
+    service_senders = (
+        "noreply",
+        "no-reply",
+        "ne-pas-repondre",
+        "donotreply",
+        "mailer-daemon",
+        "newsletter@",
+        "promo@",
+        "marketing@",
+        "campaign@",
+        "mailing@",
+    )
+    if any(s in sender_l for s in service_senders):
+        return False
+
+    text = f"{subject}\n{body}".lower()
+    has_job_marker = any(m in text for m in _JOB_APPLICATION_MARKERS)
+    body_stripped = body.strip()
+    is_signed = bool(_SIGNED_NAME_RE.search(body_stripped)) or bool(
+        _TRAILING_NAME_RE.search(body_stripped[-120:])
+    )
+
+    # Candidature : sujet/body job + signé.
+    return has_job_marker and is_signed
 
 
 def _looks_like_human_question(body: str, subject: str, sender: str) -> bool:
@@ -236,27 +595,76 @@ def _looks_like_human_question(body: str, subject: str, sender: str) -> bool:
     # Pas une demande humaine si :
     # 1. sender = service / no-reply / infomaniak / microsoft / google / etc.
     service_senders = (
-        "noreply", "no-reply", "ne-pas-repondre", "donotreply",
-        "infomaniak", "microsoft", "google", "apple", "meta", "facebook",
-        "linkedin", "twitter", "x.com", "github", "gitlab", "atlassian",
-        "stripe", "paypal", "ovh", "sendgrid", "mailgun", "brevo", "mailchimp",
-        "hubspot", "zendesk", "intercom", "freshdesk",
-        "support@", "billing@", "invoice@", "facture@", "compta@",
-        "accounting@", "newsletter@", "promo@", "marketing@",
+        "noreply",
+        "no-reply",
+        "ne-pas-repondre",
+        "donotreply",
+        "infomaniak",
+        "microsoft",
+        "google",
+        "apple",
+        "meta",
+        "facebook",
+        "linkedin",
+        "twitter",
+        "x.com",
+        "github",
+        "gitlab",
+        "atlassian",
+        "stripe",
+        "paypal",
+        "ovh",
+        "sendgrid",
+        "mailgun",
+        "brevo",
+        "mailchimp",
+        "hubspot",
+        "zendesk",
+        "intercom",
+        "freshdesk",
+        "support@",
+        "billing@",
+        "invoice@",
+        "facture@",
+        "compta@",
+        "accounting@",
+        "newsletter@",
+        "promo@",
+        "marketing@",
         # Expéditeurs de plateformes publicitaires / corporate connues.
-        "ads-google", "googleads", "google-ads", "bauermedia", "outdoor.com",
+        "ads-google",
+        "googleads",
+        "google-ads",
+        "bauermedia",
+        "outdoor.com",
     )
     if any(s in sender_l for s in service_senders):
         return False
 
     # 2. mots-clés de service évidents dans le sujet
     service_subjects = (
-        "facture", "invoice", "recu", "reçu", "payment", "paiement",
-        "subscription", "abonnement", "renewal", "renouvellement",
-        "validation en deux étapes", "2-step", "two-step",
-        "alerte de sécurité", "security alert", "new sign-in", "nouvelle connexion",
-        "votre identifiant a été utilisé", "votre compte",
-        "rapport de maintenance", "votre reçu", "your receipt",
+        "facture",
+        "invoice",
+        "recu",
+        "reçu",
+        "payment",
+        "paiement",
+        "subscription",
+        "abonnement",
+        "renewal",
+        "renouvellement",
+        "validation en deux étapes",
+        "2-step",
+        "two-step",
+        "alerte de sécurité",
+        "security alert",
+        "new sign-in",
+        "nouvelle connexion",
+        "votre identifiant a été utilisé",
+        "votre compte",
+        "rapport de maintenance",
+        "votre reçu",
+        "your receipt",
     )
     if any(s in subject_l for s in service_subjects):
         return False
@@ -319,9 +727,12 @@ def _enforce_recall_over_precision(
        Un formulaire WP est toujours une vraie demande client, jamais un phishing.
     2. Réponse client à un mail de Daniel (Re: + citation signée) → force depuis TOUTE
        catégorie (expéditeur humain déjà vérifié).
-    3. Demande humaine forte (prénom signé + vocabulaire enquête + question tarif, sans
+    3. Relance/suivi humain (Re:/Rép.:/AW: + marqueur de relance) → remontée depuis
+       autre/facture/rappel/urgent/newsletter (#Vacature : pas de citation Daniel).
+    4. Candidature spontanée → remontée depuis autre/newsletter.
+    5. Demande humaine forte (prénom signé + vocabulaire enquête + question tarif, sans
        marqueur phishing actif) → autorise la remontée depuis phishing/spam/newsletter.
-    4. Heuristique humaine classique → remontée depuis autre/facture/rappel/urgent.
+    6. Heuristique humaine classique → remontée depuis autre/facture/rappel/urgent.
     """
     if llm_category == "demande_client":
         return "demande_client"
@@ -350,7 +761,35 @@ def _enforce_recall_over_precision(
         )
         return "demande_client"
 
-    # 3. Demande humaine forte — autorise la remontée depuis phishing/spam/newsletter.
+    # 3. Relance/suivi humain sans citation Daniel (#Vacature) — peut remonter
+    # depuis autre/facture/rappel/urgent/newsletter. Jamais depuis spam/phishing.
+    followup_upgradable = {"autre", "facture", "rappel", "urgent", "newsletter"}
+    if llm_category in followup_upgradable and _is_human_followup(subject, body, sender):
+        log.info(
+            "classifier.recall_override",
+            rule="human_followup",
+            llm_said=llm_category,
+            forced_to="demande_client",
+            subject=subject[:60],
+            sender=sender[:40],
+        )
+        return "demande_client"
+
+    # 4. Candidature spontanée / demande d'emploi — peut venir d'un job-board
+    # classé newsletter/autre à tort.
+    job_upgradable = {"autre", "newsletter"}
+    if llm_category in job_upgradable and _is_job_application(subject, body, sender):
+        log.info(
+            "classifier.recall_override",
+            rule="job_application",
+            llm_said=llm_category,
+            forced_to="demande_client",
+            subject=subject[:60],
+            sender=sender[:40],
+        )
+        return "demande_client"
+
+    # 5. Demande humaine forte — autorise la remontée depuis phishing/spam/newsletter.
     strong, _reason = _has_strong_human_demand(body)
     if strong:
         log.info(
@@ -363,7 +802,7 @@ def _enforce_recall_over_precision(
         )
         return "demande_client"
 
-    # 4. Comportement v1.22.1 : remontée classique depuis autre/facture/rappel/urgent.
+    # 6. Comportement v1.22.1 : remontée classique depuis autre/facture/rappel/urgent.
     upgradable = {"autre", "facture", "rappel", "urgent"}
     if llm_category not in upgradable:
         return llm_category  # type: ignore[return-value]

@@ -1,5 +1,28 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.25.8] — 2026-06-23 (relance humaine + candidature spontanée — #Vacature Xavier Plaghki)
+
+### Contexte
+Mail de Xavier Plaghki (`xavierplaghki@hotmail.com`) — sujet **« Rép.: Vacature »**, envoyé à `contact@detectivebelgique.be`. Candidature spontanée NL : le client relance (« Heeft u mijn e-mail goed ontvangen ? » / « Avez-vous bien reçu mon email ? »). Le mail n'a **pas généré de brouillon** : ni dans la DB, ni de proposition Charlie. Diagnostic : le LLM classifier a probablement classé le mail en `newsletter` (sujet emploi + absence de demande d'enquête classique), et notre garde-fou `human_question` ne remonte **jamais** depuis `newsletter`. Résultat : catégorie `newsletter` → pas de brouillon.
+
+### Ajouté
+- **`_is_human_followup()`** (`app/pipeline/classifier.py`) : détecte une relance/accusé de réception humaine indépendamment de la citation Daniel. Preuves combinées :
+  - préfixe de réponse multilingue (`Re:`, `Rép.:`, `AW:`, `Wtr:`, `SV:`, `Antw:`…) ;
+  - marqueurs de relance/suivi en FR/NL/EN/DE (« avez-vous reçu », « suivi de ma demande », « heeft u ontvangen », « did you receive », « Nachfrage »…) ;
+  - expéditeur humain (pas no-reply / newsletter@ / marketing@ / forwarder WP).
+- **Shortcut follow-up dans le poller + cockpit** : `_is_client_followup()` (poller) et `_is_web_followup()` (cockpit) retournent `True` dès qu'`_is_human_followup()` est vrai → brouillon **ack** court généré, même sans historique DB.
+- **`_is_job_application()`** : détecte une candidature spontanée (`vacature`, `candidature`, `zelfstandige`, `bijberoep`…) signée par un humain. Certains job-boards sont classés `newsletter` à tort ; cette règle les remonte en `demande_client`.
+
+### Changé
+- `_enforce_recall_over_precision()` : autorise la remontée depuis `newsletter` uniquement pour les deux cas ci-dessus (relance humaine, candidature). Les newsletters commerciales restent `newsletter`. Le `spam`/`phishing` restent inchangés (anti-régression).
+
+### Sécurité
+- `newsletter@` / `promo@` / `marketing@` / `campaign@` / `mailing@` sont explicitement rejetés par `_is_human_followup()` et `_is_job_application()` : une vraie newsletter commerciale ne peut pas matcher, même avec un sujet `Re:`.
+
+### Tests
+- `tests/test_classifier_hardening.py` : +12 tests (relance Vacature FR/NL, candidature spontanée, newsletter commerciale rejetée, remontée depuis `newsletter`/`autre`, anti-régression `phishing`, end-to-end LLM mocké).
+- 228 tests au total, 0 régression.
+
 ## [1.25.7] — 2026-06-23 (brouillon ack pour les réponses client à Daniel — #606 Van Houtte)
 
 ### Contexte

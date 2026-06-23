@@ -22,7 +22,7 @@ from app.delivery.imap_draft import append_draft
 from app.delivery.resend_notifier import IncomingMail, notify_draft
 from app.delivery.slack_notifier import notify_new_draft as notify_slack_draft
 from app.healthcheck import health
-from app.pipeline.classifier import _is_reply_to_daniel, classify
+from app.pipeline.classifier import _is_human_followup, _is_reply_to_daniel, classify
 from app.pipeline.document_extract import extract_text_bytes, is_supported
 from app.pipeline.generator import generate_draft
 from app.pipeline.language import detect_language
@@ -309,9 +309,15 @@ def _is_client_followup(db_path: Path, sender: str, msg: Message) -> bool:
     if _is_reply_to_daniel(body, sender):
         return True
 
+    # v1.25.8 — relance/accusé de réception humain sans citation Daniel (#Vacature).
+    # Le client relance simplement (« avez-vous bien reçu mon email ? ») ; c'est
+    # un follow-up au sens métier même sans historique DB.
+    subject = str(msg.get("Subject", "") or "")
+    if _is_human_followup(subject, body, sender):
+        return True
+
     # --- 1. Le mail ressemble-t-il à une réponse ? ---
     is_reply = bool(msg.get("In-Reply-To") or msg.get("References"))
-    subject = str(msg.get("Subject", "") or "")
     if _FOLLOWUP_SUBJECT_RE.search(subject):
         is_reply = True
 

@@ -20,6 +20,8 @@ import pytest
 from app.pipeline.classifier import (
     _enforce_recall_over_precision,
     _has_strong_human_demand,
+    _is_human_followup,
+    _is_job_application,
     _is_reply_to_daniel,
     _is_wp_contact_form,
     _looks_like_human_question,
@@ -329,7 +331,7 @@ _BODY_614 = (
     "J 'aimerais prouver l 'infidélité de ma femme qui selon moi dure depuis au moinq 6-8 ans\n\r\n"
     "Elle est en ce moment au congo et je suis certain que son téléphone contient tout les secrets\n\r\n"
     "Est ce que vous pouvez faire sortir toutes les conversations d'au moins 2 ans dans le passé ?\n\r\n"
-    "Les enfants ont surpris un message whatsapp ou elle appelait un autre homme \"mon chéri\".\n\r\n"
+    'Les enfants ont surpris un message whatsapp ou elle appelait un autre homme "mon chéri".\n\r\n'
     "Pouvez vous me dire combien cela va t il coûter et quelles méthodes possédez vous pour "
     "l' attraper la main dans le sac car elle nie absolument tout.\n\r\n"
     "merci\r\n\r\nSerge M"
@@ -406,3 +408,108 @@ async def test_classify_real_phishing_kept():
     with patch("app.pipeline.classifier.complete", new=AsyncMock(return_value="phishing")):
         result = await classify(subject, body, sender)
     assert result == "phishing"
+
+
+# ── v1.25.8 — relance humaine + candidature spontanée ───────────
+
+
+# Mail Vacature : relance NL d'un candidat après l'email initial.
+_BODY_VACATURE_FOLLOWUP = """Beste,
+
+Heeft u mijn e-mail goed ontvangen?
+
+Mvg,
+
+Xavier Plaghki"""
+
+
+# Mail initial de candidature (si jamais traité seul).
+_BODY_VACATURE_INITIAL = """Beste,
+
+Zijn er opties om als zelfstandige bij jullie te werken in bijberoep?
+
+Mvg,
+
+Xavier Plaghki
+04715633335"""
+
+
+def test_is_human_followup_vacature():
+    """#Vacature : 'Rép.: Vacature' + relance NL signée = follow-up humain."""
+    assert (
+        _is_human_followup("Rép.: Vacature", _BODY_VACATURE_FOLLOWUP, "xavierplaghki@hotmail.com")
+        is True
+    )
+
+
+def test_is_human_followup_vacature_dutch_prefix():
+    """Même relance avec préfixe NL 'AW:' doit matcher."""
+    assert (
+        _is_human_followup("AW: Vacature", _BODY_VACATURE_FOLLOWUP, "xavierplaghki@hotmail.com")
+        is True
+    )
+
+
+def test_is_human_followup_newsletter_commercial_false():
+    """Newsletter commerciale classique — pas un follow-up humain."""
+    assert (
+        _is_human_followup(
+            "Offre spéciale -50%", "Découvrez nos promotions", "newsletter@hubspot.com"
+        )
+        is False
+    )
+
+
+def test_is_job_application_vacature_initial():
+    """Candidature spontanée NL signée = job application."""
+    assert (
+        _is_job_application("Vacature", _BODY_VACATURE_INITIAL, "xavierplaghki@hotmail.com") is True
+    )
+
+
+def test_is_job_application_newsletter_sender_false():
+    """Job-board qui envoie depuis un sender marketing n'est pas un humain."""
+    body = "Vacature bij ons! Solliciteer nu.\n\nTeam HR"
+    assert _is_job_application("Vacature detectieve", body, "newsletter@jobs.be") is False
+
+
+def test_recall_override_vacature_from_newsletter():
+    """#Vacature : LLM dit 'newsletter' → relance humaine force demande_client."""
+    result = _enforce_recall_over_precision(
+        "newsletter", "Rép.: Vacature", _BODY_VACATURE_FOLLOWUP, "xavierplaghki@hotmail.com"
+    )
+    assert result == "demande_client"
+
+
+def test_recall_override_vacature_from_autre():
+    """#Vacature : LLM dit 'autre' → relance humaine force demande_client."""
+    result = _enforce_recall_over_precision(
+        "autre", "Rép.: Vacature", _BODY_VACATURE_FOLLOWUP, "xavierplaghki@hotmail.com"
+    )
+    assert result == "demande_client"
+
+
+def test_recall_override_vacature_from_phishing_kept():
+    """Anti-régression : une relance classée 'phishing' par le LLM reste phishing."""
+    result = _enforce_recall_over_precision(
+        "phishing", "Rép.: Vacature", _BODY_VACATURE_FOLLOWUP, "xavierplaghki@hotmail.com"
+    )
+    assert result == "phishing"
+
+
+def test_recall_override_vacature_job_from_newsletter():
+    """Candidature spontanée classée 'newsletter' → job_application force demande_client."""
+    result = _enforce_recall_over_precision(
+        "newsletter", "Vacature", _BODY_VACATURE_INITIAL, "xavierplaghki@hotmail.com"
+    )
+    assert result == "demande_client"
+
+
+@pytest.mark.asyncio
+async def test_classify_vacature_from_newsletter():
+    """End-to-end #Vacature : LLM dit 'newsletter' → post-traitement force demande_client."""
+    with patch("app.pipeline.classifier.complete", new=AsyncMock(return_value="newsletter")):
+        result = await classify(
+            "Rép.: Vacature", _BODY_VACATURE_FOLLOWUP, "xavierplaghki@hotmail.com"
+        )
+    assert result == "demande_client"

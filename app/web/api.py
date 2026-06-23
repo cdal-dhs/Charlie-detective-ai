@@ -16,7 +16,7 @@ from app.cerveau_client import push_correction
 from app.charlie import BOX_ABBR, ask_charlie
 from app.charlie_memory import save_feedback
 from app.config import get_settings
-from app.pipeline.classifier import _is_reply_to_daniel, classify
+from app.pipeline.classifier import _is_human_followup, _is_reply_to_daniel, classify
 from app.pipeline.generator import generate_draft
 from app.pipeline.language import detect_language
 from app.pipeline.subject_fixer import fix_subject_llm, tag_no_email
@@ -73,6 +73,10 @@ async def _is_web_followup(
     # DB. Cf. #606 (Van Houtte). Permet à la régénération cockpit de produire le
     # brouillon ack même sans mail initial du sender en DB.
     if _is_reply_to_daniel(body, sender):
+        return True
+
+    # v1.25.8 — relance humaine sans citation Daniel (#Vacature).
+    if _is_human_followup(subject, body, sender):
         return True
 
     is_reply = bool(_FOLLOWUP_SUBJECT_RE.search(subject))
