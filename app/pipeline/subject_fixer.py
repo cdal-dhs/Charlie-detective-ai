@@ -87,20 +87,25 @@ _TECHNICAL_LOCALS = (
     "mailer-daemon",
     "maildaemon",
 )
+# Email client strict : local part alnum/._%+- + domaine avec un TLD de 2+ lettres.
+# Évite les faux positifs sur les @ des URLs markdown (@lab9be dans youtube.com/@x)
+# et des règles CSS (@media, @-ms-viewport).
+_CLIENT_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 
 
 def _extract_client_email_from_body(body: str) -> str:
     """Retourne le 1er email CLIENT trouvé dans le body, ou "".
 
     Un email client = un @ dont le domaine n'appartient pas à Detective.be et
-    dont la locale n'est pas un robot (no-reply/noreply/donotreply). Les
-    formulaires WP n'exposent jamais l'email du client, donc en pratique un
-    @ trouvé ici est une signature/forward rare — mais si présent, c'est le
-    vrai contact à afficher plutôt que le forwarder technique.
+    dont la locale n'est pas un robot (no-reply/noreply/donotreply). Le regex
+    strict exclut les @ des URLs markdown et des règles CSS (@media). Les
+    formulaires WP n'exposent jamais l'email du client, donc en pratique un @ ici
+    est une signature/forward rare — mais si présent, c'est le vrai contact à
+    afficher plutôt que le forwarder technique.
     """
     body = body or ""
     no_reply_local = ("no-reply", "noreply", "donotreply")
-    for match in re.finditer(r"[^\s<]+@[^\s>\n,]+", body):
+    for match in _CLIENT_EMAIL_RE.finditer(body):
         email = match.group(0).strip("<>")
         if "@" not in email:
             continue

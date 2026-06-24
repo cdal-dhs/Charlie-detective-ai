@@ -1,5 +1,27 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.25.25] — 2026-06-24 (durcissement extracteur email body — faux positifs @URL/@CSS)
+
+### Contexte
+Le dry-run du backfill sender (v1.25.24) a révélé que `_extract_client_email_from_body`
+matchait les `@` des URLs markdown et des règles CSS comme des emails :
+- `[YouTube](https://www.youtube.com/@lab9be)` → `@lab9be` capturé
+- `@@-ms-viewport{` (CSS `@media`) → capturé
+=> sender DB aurait été remplacé par `@@-ms-viewport{` ou une URL. Régression
+potentielle aussi sur les NOUVEAUX mails (mask_forwarder_sender en poller).
+
+### Fixé
+- **`subject_fixer.py`** : regex strict `[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}`
+  (local part alnum + domaine avec TLD 2+ lettres). Élimine les `@` d'URLs et
+  de CSS. Constante compilée `_CLIENT_EMAIL_RE`.
+
+### Ajouté
+- **`tests/test_v1_25_22_fixes.py`** : 2 tests de régression — URL markdown
+  `youtube.com/@lab9be` → "" ; règle CSS `@media`/`@-ms-viewport` → "".
+
+### Tests
+- 308 passed (306 + 2 nouveaux).
+
 ## [1.25.24] — 2026-06-24 (expéditeur affiché = vrai client, jamais le forwarder)
 
 ### Contexte

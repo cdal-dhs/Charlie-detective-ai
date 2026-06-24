@@ -365,6 +365,24 @@ def test_extract_client_email_finds_client() -> None:
     assert _extract_client_email_from_body("Email: client@vo.lu merci") == "client@vo.lu"
 
 
+def test_extract_client_email_ignores_markdown_url_at() -> None:
+    """Regression : le @ d'une URL markdown (youtube.com/@lab9be) ne doit PAS
+    etre matche comme email (backfill #80 newsletter@lab9.be)."""
+    from app.pipeline.subject_fixer import _extract_client_email_from_body
+
+    body = "[YouTube](https://www.youtube.com/@lab9be) Suivez-nous"
+    assert _extract_client_email_from_body(body) == ""
+
+
+def test_extract_client_email_ignores_css_at_rule() -> None:
+    """Regression : une regle CSS @media / @-ms-viewport ne doit PAS etre
+    matchee comme email (backfill #94 noreply@communication.bpost.be)."""
+    from app.pipeline.subject_fixer import _extract_client_email_from_body
+
+    body = "@media screen and (max-width:600px){ @@-ms-viewport{ width:100% }}"
+    assert _extract_client_email_from_body(body) == ""
+
+
 def test_persist_masks_forwarder_sender(tmp_path) -> None:
     """_persist stocke NO_EMAIL_IN_THE_FORM pour un forwarder sans contact client."""
     import sqlite3
