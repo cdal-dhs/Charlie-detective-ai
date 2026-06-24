@@ -24,7 +24,7 @@
          Nuage de liaison (wikilinks + YAML relations)
 ```
 
-**Règle d'or** : TOUT email depuis le 20/05/2026 (cut-off) est ingéré dans Cerveau2, **sauf** newsletter et phishing (bruit inutile). Toute pièce jointe est ingérée, même non extractable (fallback métadonnées).
+**Règle d'or** : **100% des emails traités** sont ingérés dans Cerveau2 via `feed_correspondance()` — **zéro tolérance sur le skip**, peu importe la catégorie (newsletter et phishing inclus, contrairement à la spec d'origine). **Toute pièce jointe** est ingérée via `feed_document()`, même non extractable (fallback métadonnées). Cut-off initial : 20/05/2026.
 
 ---
 

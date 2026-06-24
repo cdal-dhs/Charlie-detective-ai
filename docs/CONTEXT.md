@@ -65,7 +65,7 @@ Ces règles sont déjà encodées dans le placeholder `app/prompts/personality_d
 - **NL** : marché secondaire (Belgique néerlandophone — nombreux clients sur `detectivebelgium.com`)
 - **EN** : clients internationaux
 
-Règle absolue : **l'agent répond TOUJOURS dans la langue du mail entrant**, jamais en traduction. La détection langue est faite par `fasttext` avant la génération.
+Règle absolue : **la réponse générée est TOUJOURS en français** (langue de travail de Daniel), quelle que soit la langue du mail entrant. Si le mail entrant est en NL/EN/DE/ES/autre, le brouillon est enrichi (v1.21.0) avec **4 blocs** : email d'origine + traduction FR + proposition FR + traduction dans la langue source (aide lecture multilingue — Daniel n'a plus à déchiffrer une langue qu'il ne maîtrise pas). La détection langue est faite par **`langdetect`** (toutes langues BCP-47 supportées) avant la génération — `fasttext` a été abandonné (ne build pas sur Mac ARM).
 
 ---
 
@@ -86,20 +86,19 @@ CDAL a déjà fait le travail d'**anonymisation** des mails historiques de Danie
 
 - 8 vCPU, 32 Go RAM, 400 Go NVMe — largement sous-utilisé
 - CDAL l'exploite pour héberger plusieurs projets clients
-- L'agent y vivra dans `/opt/detective-agent/` sous user dédié `detective-agent`
-- systemd unit, auto-restart, healthcheck local, alertes Telegram
+- L'agent y vivra dans `/opt/DETECTIVE/` (Docker Compose + Traefik externe), healthcheck FastAPI sur `127.0.0.1:8765`
+- Auto-restart via Docker, alertes système via Slack (`#detective`) + Resend + cron watchdog + Healthchecks.io (4 niveaux anti-crash silencieux)
 
 ---
 
-## Canal Telegram Boss ↔ Charlie
+## Canal Slack Boss ↔ Charlie
 
-Outre le pipeline email, **Charlie** (l'agent IA) dispose d'un **canal Telegram direct avec Daniel** :
+Outre le pipeline email, **Charlie** (l'agent IA) dispose d'un **canal Slack direct avec Daniel** sur `#detective` (workspace CDAL) via un Slack Bot interactif (`slack_bolt`) :
 
-- **Usage** : Daniel peut interroger Charlie en direct, demander un résumé de dossier, ou valider/rejeter un brouillon sans passer par l'email
+- **Usage** : Daniel peut interroger Charlie en direct (@mention ou DM), demander un résumé narratif de dossier, faire une recherche factuelle, ou valider/rejeter un brouillon sans passer par l'email
 - **Identité** : Daniel = le Boss, Charlie = l'assistant IA (persona distinct, ton professionnel mais accessible)
-- **Phase test** : connecté au compte Telegram de **CDAL** pour itérer sans déranger Daniel
-- **Phase prod** : migré sur le VPS Hostinger avec le bot dédié à Daniel
-- **Alertes système** (agent down, IMAP timeout, etc.) utilisent le **même bot** mais dans un canal/thread séparé pour ne pas polluer la conversation métier
+- **Alertes système** (agent down, IMAP timeout, etc.) utilisent le **même canal** mais dans un thread séparé pour ne pas polluer la conversation métier
+- **Note** : un module Telegram est conservé dans le code mais **inactif** (dépriorisé — Slack suffit)
 
 ## Vision long terme
 

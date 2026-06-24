@@ -70,9 +70,9 @@ print('OK')
 - [ ] `docker compose build` local réussit (dry-run)
 - [ ] Tous les répertoires montés dans `docker-compose.yml` existent en local
 - [ ] `CHANGELOG.md` à jour avec la version
-- [ ] `pyproject.toml` version bumpée
+- [ ] `app/_version.py` bumpée (source unique — **JAMAIS** `pyproject.toml` qui reste figé en `1.9.5`)
 - [ ] Après deploy : `/health = 200` et `/auth/login = 200`
 
 ---
 
-*Dernière mise à jour : 2026-05-16 (post INC-001)*
+*Dernière mise à jour : 2026-06-24 (v1.25.26)*
