@@ -236,10 +236,12 @@ def test_mask_forwarder_sender_masks_without_client_email() -> None:
 
 
 def test_mask_forwarder_sender_keeps_real_sender_when_client_email_present() -> None:
+    """v1.25.24 — un email client dans le body prime sur le forwarder technique :
+    on affiche le vrai contact, jamais l'adresse robot du forwarder."""
     body = "Email: client@example.com\nTelefoonnummer: 0477/123456"
     assert (
         mask_forwarder_sender("wordpress@detectivebelgium.com", body)
-        == "wordpress@detectivebelgium.com"
+        == "client@example.com"
     )
 
 

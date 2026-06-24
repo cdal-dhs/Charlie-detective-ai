@@ -71,6 +71,50 @@ def is_wp_forwarder(sender: str) -> bool:
     return bool(_WP_FORWARDER_RE.match((sender or "").strip()))
 
 
+_CLIENT_OWN_DOMAINS = (
+    "detectivebelgique.be",
+    "detectivebelgium.com",
+    "dpdhuinvestigations.be",
+)
+# Locales d'expéditeurs techniques (non-humains) : newsletters, robots, forwarders.
+_TECHNICAL_LOCALS = (
+    "newsletter",
+    "noreply",
+    "no-reply",
+    "donotreply",
+    "wordpress",
+    "bounce",
+    "mailer-daemon",
+    "maildaemon",
+)
+
+
+def _extract_client_email_from_body(body: str) -> str:
+    """Retourne le 1er email CLIENT trouvé dans le body, ou "".
+
+    Un email client = un @ dont le domaine n'appartient pas à Detective.be et
+    dont la locale n'est pas un robot (no-reply/noreply/donotreply). Les
+    formulaires WP n'exposent jamais l'email du client, donc en pratique un
+    @ trouvé ici est une signature/forward rare — mais si présent, c'est le
+    vrai contact à afficher plutôt que le forwarder technique.
+    """
+    body = body or ""
+    no_reply_local = ("no-reply", "noreply", "donotreply")
+    for match in re.finditer(r"[^\s<]+@[^\s>\n,]+", body):
+        email = match.group(0).strip("<>")
+        if "@" not in email:
+            continue
+        local, _, domain = email.rpartition("@")
+        domain = domain.lower()
+        local = local.lower()
+        if any(d in domain for d in _CLIENT_OWN_DOMAINS):
+            continue
+        if domain.startswith(no_reply_local) or local in no_reply_local:
+            continue
+        return email
+    return ""
+
+
 def has_client_email_in_body(body: str) -> bool:
     """True si le body contient un email client (pas un forwarder WP interne).
 
@@ -79,22 +123,7 @@ def has_client_email_in_body(body: str) -> bool:
     On considère qu'il y a un vrai email client si le domaine n'appartient pas
     à Detective.be et si ce n'est pas un no-reply/service.
     """
-    body = body or ""
-    own_domains = ("detectivebelgique.be", "detectivebelgium.com", "dpdhuinvestigations.be")
-    for match in re.finditer(r"[^\s<]+@[^\s>\n,]+", body):
-        email = match.group(0).strip("<>")
-        if "@" not in email:
-            continue
-        local, _, domain = email.rpartition("@")
-        domain = domain.lower()
-        local = local.lower()
-        if any(d in domain for d in own_domains):
-            continue
-        no_reply_local = ("no-reply", "noreply", "donotreply")
-        if domain.startswith(no_reply_local) or local in no_reply_local:
-            continue
-        return True
-    return False
+    return bool(_extract_client_email_from_body(body))
 
 
 def tag_no_email(subject: str, sender: str, body: str = "") -> str:
@@ -117,24 +146,28 @@ def tag_no_email(subject: str, sender: str, body: str = "") -> str:
 
 
 def mask_forwarder_sender(sender: str, body: str = "", reply_to: str = "") -> str:
-    """Retourne l'expéditeur affiché pour le brouillon/notification.
+    """Retourne l'expéditeur affiché/stoké pour le brouillon, notif et cockpit.
 
-    v1.25.22 — priorité au header ``reply_to`` : pour les forwarders WP, le vrai
-    email client est dans le Reply-To (cas #629 : ckremp@vo.lu = Christèle). On
-    l'affiche à la place du forwarder technique.
+    v1.25.24 — règle CDAL : ne PLUS JAMAIS afficher l'expéditeur technique
+    (newsletter@/wordpress@/mail@detective/noreply@/domaine Detective) comme
+    expéditeur client. Ordre de résolution :
 
-    Sans Reply-To valide, si c'est un forwarder WP sans email client visible dans
-    le body, on remplace par NO_EMAIL_IN_THE_FORM pour que Daniel comprenne qu'il
-    ne doit PAS répondre à cette adresse technique.
+    1. Reply-To valide (non interne) → c'est le vrai client (cas #629
+       ckremp@vo.lu).
+    2. Sinon un email client présent dans le body → on l'affiche.
+    3. Sinon, si le sender est technique → NO_EMAIL_IN_THE_FORM (Daniel sait
+       qu'il ne doit pas répondre à cette adresse ; vrai contact = téléphone).
+    4. Sinon (mail direct d'un humain) → sender inchangé.
     """
     rt = (reply_to or "").strip().strip("<>")
     if rt and "@" in rt and not _is_internal_address(rt):
         return rt
-    if not is_wp_forwarder(sender):
-        return sender or ""
-    if has_client_email_in_body(body):
-        return sender or ""
-    return "NO_EMAIL_IN_THE_FORM"
+    email_body = _extract_client_email_from_body(body)
+    if email_body:
+        return email_body
+    if _is_technical_sender(sender):
+        return "NO_EMAIL_IN_THE_FORM"
+    return sender or ""
 
 
 def _is_internal_address(email: str) -> bool:
@@ -142,8 +175,26 @@ def _is_internal_address(email: str) -> bool:
     lowered = (email or "").lower()
     if lowered.startswith("no-reply") or lowered.startswith("noreply"):
         return True
-    own_domains = ("detectivebelgique.be", "detectivebelgium.com", "dpdhuinvestigations.be")
-    return any(d in lowered for d in own_domains)
+    return any(d in lowered for d in _CLIENT_OWN_DOMAINS)
+
+
+def _is_technical_sender(sender: str) -> bool:
+    """True si l'expéditeur n'est pas un humain/client : robot, newsletter,
+    forwarder WP, ou adresse du cabinet Detective (forwarder technique).
+
+    Plus large que ``is_wp_forwarder`` (qui exige @detective*) : capte aussi
+    newsletter@wikipreneurs.be, noreply@quelconque, etc. Un vrai client direct
+    (prenom.nom@gmail.com) n'est JAMAIS technique.
+    """
+    if _is_internal_address(sender):
+        return True
+    lowered = (sender or "").lower().strip().strip("<>")
+    if "@" not in lowered:
+        return False
+    local = lowered.rpartition("@")[0]
+    if local in _TECHNICAL_LOCALS:
+        return True
+    return any(local.startswith(p) for p in ("no-reply", "noreply"))
 
 
 async def fix_subject_llm(

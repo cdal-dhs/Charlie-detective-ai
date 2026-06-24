@@ -310,3 +310,126 @@ def test_build_draft_body_affiche_reply_to() -> None:
     assert "EMAIL #629" in body_text
     assert "ckremp@vo.lu" in body_text  # reply_to affiché, pas le forwarder
     assert "X-Detective-Mail-Id" not in body_text  # marker header, pas dans le body texte
+
+
+# --- v1.25.24 : mask_forwarder_sender — ne plus jamais afficher le forwarder ---
+
+
+def test_mask_forwarder_newsletter_no_reply_to() -> None:
+    """newsletter@wikipreneurs.be (le vrai sender #629) sans Reply-To -> NO_EMAIL."""
+    got = mask_forwarder_sender("newsletter@wikipreneurs.be", body="Bonjour", reply_to="")
+    assert got == "NO_EMAIL_IN_THE_FORM"
+
+
+def test_mask_forwarder_wordpress_no_reply_to() -> None:
+    """wordpress@detectivebelgium.com sans Reply-To ni email body -> NO_EMAIL."""
+    got = mask_forwarder_sender("wordpress@detectivebelgium.com", body="x", reply_to="")
+    assert got == "NO_EMAIL_IN_THE_FORM"
+
+
+def test_mask_forwarder_noreply_external() -> None:
+    """noreply@domaine-tiers sans Reply-To -> NO_EMAIL (robot, pas un client)."""
+    got = mask_forwarder_sender("noreply@shop.com", body="cmd", reply_to="")
+    assert got == "NO_EMAIL_IN_THE_FORM"
+
+
+def test_mask_forwarder_with_body_email_returns_body_email() -> None:
+    """Forwarder sans Reply-To MAIS email client dans le body -> email du body."""
+    body = "Nom: Dupont\nMon email: client.reel@gmail.com"
+    got = mask_forwarder_sender("wordpress@detectivebelgium.com", body=body, reply_to="")
+    assert got == "client.reel@gmail.com"
+
+
+def test_mask_forwarder_direct_client_unchanged() -> None:
+    """Un mail direct d'un humain (pas un robot) reste inchangé."""
+    got = mask_forwarder_sender("jean.dupont@gmail.com", body="Bonjour", reply_to="")
+    assert got == "jean.dupont@gmail.com"
+
+
+def test_mask_forwarder_internal_reply_to_rejected() -> None:
+    """Un Reply-To interne Detective n'est pas un client -> retombe sur NO_EMAIL."""
+    assert mask_forwarder_sender(
+        "mail@detectivebelgique.be", body="x", reply_to="no-reply@detectivebelgique.be"
+    ) == "NO_EMAIL_IN_THE_FORM"
+
+
+def test_extract_client_email_skips_detective_domain() -> None:
+    from app.pipeline.subject_fixer import _extract_client_email_from_body
+
+    assert _extract_client_email_from_body("Contact: privacy@detectivebelgium.com") == ""
+
+
+def test_extract_client_email_finds_client() -> None:
+    from app.pipeline.subject_fixer import _extract_client_email_from_body
+
+    assert _extract_client_email_from_body("Email: client@vo.lu merci") == "client@vo.lu"
+
+
+def test_persist_masks_forwarder_sender(tmp_path) -> None:
+    """_persist stocke NO_EMAIL_IN_THE_FORM pour un forwarder sans contact client."""
+    import sqlite3
+
+    from app.workers.imap_poller import _persist
+
+    db = tmp_path / "state.db"
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "CREATE TABLE mail_processed (id INTEGER PRIMARY KEY, imap_uid TEXT, "
+        "mailbox_name TEXT, subject TEXT, sender TEXT, received_at TEXT, "
+        "category TEXT, draft_generated INTEGER, body_preview TEXT, body TEXT, "
+        "ai_draft TEXT, status TEXT, priority TEXT, reply_to TEXT, "
+        "delivered_at TEXT, processed_at TEXT)"
+    )
+    conn.commit()
+    conn.close()
+    mail_id = _persist(
+        db_path=db,
+        imap_uid="uid-mask-1",
+        mailbox_name="detective_belgique",
+        subject="Sujet",
+        sender="wordpress@detectivebelgium.com",
+        received_at="Mon, 1 Jan 2026 10:00:00 +0200",
+        category="demande_client",
+        draft_generated=0,
+        body="Bonjour",
+        reply_to="",
+    )
+    row = sqlite3.connect(db).execute(
+        "SELECT sender FROM mail_processed WHERE id=?", (mail_id,)
+    ).fetchone()
+    assert row[0] == "NO_EMAIL_IN_THE_FORM"
+
+
+def test_persist_keeps_reply_to_as_sender(tmp_path) -> None:
+    """_persist stocke le Reply-To comme sender quand c'est le vrai client (#629)."""
+    import sqlite3
+
+    from app.workers.imap_poller import _persist
+
+    db = tmp_path / "state.db"
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "CREATE TABLE mail_processed (id INTEGER PRIMARY KEY, imap_uid TEXT, "
+        "mailbox_name TEXT, subject TEXT, sender TEXT, received_at TEXT, "
+        "category TEXT, draft_generated INTEGER, body_preview TEXT, body TEXT, "
+        "ai_draft TEXT, status TEXT, priority TEXT, reply_to TEXT, "
+        "delivered_at TEXT, processed_at TEXT)"
+    )
+    conn.commit()
+    conn.close()
+    mail_id = _persist(
+        db_path=db,
+        imap_uid="uid-mask-2",
+        mailbox_name="detective_belgique",
+        subject="Sujet",
+        sender="newsletter@wikipreneurs.be",
+        received_at="Mon, 1 Jan 2026 10:00:00 +0200",
+        category="demande_client",
+        draft_generated=1,
+        body="Nom: Kremp",
+        reply_to="ckremp@vo.lu",
+    )
+    row = sqlite3.connect(db).execute(
+        "SELECT sender FROM mail_processed WHERE id=?", (mail_id,)
+    ).fetchone()
+    assert row[0] == "ckremp@vo.lu"

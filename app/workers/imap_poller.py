@@ -725,6 +725,12 @@ def _persist(
     body = str(body) if body is not None else ""
     ai_draft = str(ai_draft) if ai_draft is not None else ""
     reply_to = str(reply_to) if reply_to is not None else ""
+    # v1.25.24 — l'expéditeur stocké = expéditeur affiché : on masque le
+    # forwarder/robot (newsletter@/wordpress@/mail@detective/noreply@) au
+    # profit du vrai client (Reply-To valide, sinon email du body, sinon
+    # NO_EMAIL_IN_THE_FORM). Ne touche que les NOUVEAUX mails (l'UPDATE des
+    # mails existants protège le sender cockpit).
+    sender = mask_forwarder_sender(sender, body=body, reply_to=reply_to)
     conn = sqlite3.connect(db_path)
     try:
         # Vérifier existence

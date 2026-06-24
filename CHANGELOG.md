@@ -1,5 +1,55 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.25.24] — 2026-06-24 (expéditeur affiché = vrai client, jamais le forwarder)
+
+### Contexte
+Suite au fix one-shot de #629 (subject + sender forcés en DB), CDAL exige que
+l'expéditeur technique (newsletter@/wordpress@/mail@detective/noreply@/domaine
+Detective) ne soit **JAMAIS** affiché comme expéditeur dans le cockpit. Règle :
+si un email client réel existe (Reply-To valide, sinon email dans le body),
+c'est lui qu'on affiche ; sinon `NO_EMAIL_IN_THE_FORM` (Daniel sait que le vrai
+contact est le téléphone, Task #4). Auparavant, un forwarder WP avec un email
+client dans le body gardait l'adresse robot du forwarder — régression de
+perception corrigée.
+
+### Changé
+- **`app/pipeline/subject_fixer.py::mask_forwarder_sender`** réécrite :
+  1. Reply-To valide (non interne) → client (cas #629 ckremp@vo.lu).
+  2. Sinon email client extrait du body → cet email.
+  3. Sinon sender technique (robot/newsletter/domaine Detective) → `NO_EMAIL_IN_THE_FORM`.
+  4. Sinon (mail direct d'un humain) → sender inchangé.
+- **`subject_fixer.py`** : nouveau `_extract_client_email_from_body()` (retourne
+  le 1er email client trouvé, hors domaines Detective et hors robots no-reply) ;
+  `has_client_email_in_body()` désormais un simple wrapper booléen (DRY).
+- **`subject_fixer.py`** : nouveau `_is_technical_sender()` (plus large que
+  `is_wp_forwarder` qui exige `@detective*` — capte aussi `newsletter@`,
+  `noreply@`, `bounce@` sur tout domaine). `_is_internal_address` réutilise
+  `_CLIENT_OWN_DOMAINS`.
+- **`app/workers/imap_poller.py::_persist`** : le `sender` stocké en DB est
+  désormais `mask_forwarder_sender(sender, body, reply_to)` (après coercion
+  `str()` qui prévient le crash `Header`→sqlite). Ne touche que les NOUVEAUX
+  mails (l'UPDATE des mails existants protège le sender cockpit). Cohérent avec
+  le bandeau du brouillon (qui masquait déjà via `mask_forwarder_sender`).
+
+### Ajouté
+- **`tests/test_v1_25_22_fixes.py`** : 10 nouveaux tests — newsletter/wordpress/
+  noreply sans Reply-To → `NO_EMAIL_IN_THE_FORM` ; forwarder + email body →
+  email du body ; mail direct humain inchangé ; Reply-To interne rejeté ;
+  `_extract_client_email_from_body` (skip domaine Detective, trouve client) ;
+  `_persist` stocke `NO_EMAIL_IN_THE_FORM` puis `reply_to`.
+- **`tests/test_subject_fixer.py`** : `test_mask_forwarder_sender_keeps_real_sender_when_client_email_present`
+  mis à jour — l'ancien assert (garder le forwarder) est invalide par la
+  nouvelle règle : on affiche désormais l'email du body.
+
+### Fixé (one-shot prod, #629)
+- subject DB #629 : "Envie de vous lancer..." → "Recherche de personne —
+  Christele Kremp-voinova" (extrait du brouillon IMAP, préfixe V2a retiré).
+- sender DB #629 : newsletter@wikipreneurs.be → ckremp@vo.lu (Reply-To).
+
+### Tests
+- Suite : **306 passed** (296 + 10 nouveaux). Ruff : baseline inchangée
+  (0 nouvelle erreur sur les fichiers modifiés).
+
 ## [1.25.23] — 2026-06-24 (fix P0 réconcilieur inopérant + anti-doublon Drafts)
 
 ### Contexte
