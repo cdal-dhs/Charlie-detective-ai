@@ -19,6 +19,11 @@ class IncomingMail:
     body: str
     received_at: str
     message_id: str
+    # v1.25.22 — header Reply-To du mail entrant. Pour les forwarders WP
+    # (From = mail@detectivebelgique.be), le Reply-To contient le VRAI email
+    # client (ex: #629 ckremp@vo.lu = Christèle). Prioritaire sur le From pour
+    # l'affichage du contact client dans le brouillon.
+    reply_to: str = ""
 
 
 def _format_html(

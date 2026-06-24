@@ -1,5 +1,39 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.25.22] — 2026-06-24 (garde-fous anti-crash silencieux #629 — Drafts réconcilieur + Reply-To)
+
+### Contexte
+Daniel a signalé (2026-06-23) qu'un vrai mail client (#629, Christèle Kremp-Voinova) n'était pas dans ses brouillons IMAP malgré une proposition générée, et que le sujet stocké (« Envie de vous lancer et de grandir ? Le moment est idéal. ») n'avait aucun rapport avec la demande. Diagnostic : 6 bugs distincts (A→F), tous corrigés ici. Règle de CDAL : **une proposition créée DOIT être physiquement dans Drafts — zéro crash silencieux toléré**.
+
+### Ajouté
+- **`app/workers/drafts_reconciler.py`** (nouveau worker, branché dans `app/main.py`) : toutes les 15 min, vérifie que chaque `demande_client` avec `ai_draft` est physiquement présent dans le dossier Drafts de sa boîte. Recherche par header `X-Detective-Mail-Id` (v1.25.22+) puis fallback body `EMAIL #<id>` (legacy). Si absent → re-livraison via `append_draft` + alerte Slack. Si re-livraison KO → alerte Slack « intervention requise ». 1re passe 30s après le boot.
+- **Header `X-Detective-Mail-Id`** dans `app/delivery/imap_draft.py` : tout brouillon porte désormais ce header = mail_id, retrouvable en IMAP via `SEARCH HEADER` même si le sujet est pollué. `_verify_draft_present` fait maintenant `SEARCH HEADER` avec retry 3x (verrou strict de présence post-APPEND).
+- **Colonne `reply_to`** dans `mail_processed` (`app/web/db_migrate.py`) : persiste le header Reply-To du mail entrant.
+
+### Changé
+- **`app/pipeline/subject_fixer.py::mask_forwarder_sender`** : accepte `reply_to` et le priorise — un forwarder WP avec un Reply-To valide affiche le VRAI email client (cas #629 : `ckremp@vo.lu`) au lieu de `NO_EMAIL_IN_THE_FORM`. Nouveau helper `_is_internal_address` (rejette no-reply + domaines Detective).
+- **`app/pipeline/qualification_builder.py::_extract_client_info`** : `reply_to` prioritaire pour l'email client (écrase tout email glané dans le body, qui peut être celui d'un scammeur).
+- **`app/pipeline/qualification_builder.py::_CLIENT_INFO_LABELS["nom"]`** : regex strictifiée. Le label « nom » isolé n'est matché qu'en **début de ligne** avec **séparateur explicite** (`: = - ?`). Avant, `\bnom\b` matchait « ce nom » au milieu d'une phrase (faux nom extrait sur #629). « mon nom est » / « nom complet » (formulations naturelles) restent supportés.
+- **`app/pipeline/subject_fixer.py::fix_subject_llm`** : nouveau paramètre `use_body_hint` (défaut `True` pour le bouton cockpit). L'auto-pipeline poller appelle avec `use_body_hint=False` → **translittération des homoglyphes ONLY**, ne regarde jamais le body. Avant, un body pollué par le chrome marketing d'un forwarder (page wikipreneurs.be « Envie de vous lancer... ») devenait le sujet stocké (Bug A/E, #629).
+- **`app/workers/imap_poller.py::_get_body_text`** : `text/plain` d'abord, HTML seulement si `text/plain` VIDE. Avant, fallback HTML détaggé dès que `text/plain` < 200 chars → servait le chrome marketing d'un site relais à classify/fix_subject/persist.
+- **`app/delivery/imap_draft.py::_build_draft_body`** + **`app/workers/imap_poller.py`** + **`app/pipeline/generator.py`** + **`app/delivery/resend_notifier.py::IncomingMail`** : propagation du `reply_to` de bout en bout (extraction header → persist DB → génération → bandeau brouillon).
+- **`app/delivery/imap_draft.py::append_draft`** : set `X-Detective-Mail-Id` + verify strict post-APPEND.
+
+### Fixé
+- **Bug A** — sujet/sender fantaisistes sur #629 : `fix_subject_llm(use_body_hint=False)` ne dérive plus du body ; `_get_body_text` ne fallback plus sur le HTML marketing.
+- **Bug B** — email client ignoré : le Reply-To est maintenant la source prioritaire (forwarders WP).
+- **Bug C** — brouillon absent de Drafts malgré `delivered_at` : le réconcilieur 15 min re-livre et alerte ; le header marker permet de retrouver le brouillon même si le sujet est pollué.
+- **Bug D** — faux nom extrait depuis « ce nom » au milieu d'une phrase : regex « nom » strictifiée (début de ligne + séparateur explicite).
+
+### Tests
+- `tests/test_v1_25_22_fixes.py` (15 nouveaux tests) : Reply-To prioritaire, regex nom stricte, sujet lisible template WP, réconcilieur `_draft_present` (header marker + fallback body legacy + absence), propagation `reply_to` DB→IncomingMail, bandeau brouillon affiche le Reply-To.
+- `tests/test_imap_poller_resilience.py` : schéma de test `mail_processed` enrichi de la colonne `reply_to`.
+- Suite complète : **293 passed, 0 failed**.
+
+### Procédure
+- Après deploy : le réconcilieur re-livrera automatiquement #629 (NULLifier `delivered_at` ou laisser le cycle 15 min le détecter comme manquant puisqu'il n'est pas dans Drafts).
+- Avant chaque deploy : `venv/bin/python -m pytest -q` (doit être vert).
+
 ## [1.25.21] — 2026-06-23 (brouillon hors-légalité : refus + qualification commerciale)
 
 ### Contexte

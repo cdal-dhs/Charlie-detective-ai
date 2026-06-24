@@ -364,6 +364,7 @@ async def generate_draft(
     language: Language,
     category: str = "",
     is_followup_response: bool = False,
+    reply_to: str = "",
 ) -> GenerationResult:
     settings = get_settings()
     pairs = await asyncio.to_thread(
@@ -429,6 +430,7 @@ async def generate_draft(
         raw_draft = build_qualification_draft(
             incoming_subject, incoming_body, sender, mailbox, case_type,
             objective_clear=objective_clear,
+            reply_to=reply_to,
         )
         # v1.25.1 : sujet lisible si le sujet original est un template WP absurde.
         suggested_subject = suggested_subject_for_draft(

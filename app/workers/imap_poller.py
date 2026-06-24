@@ -184,9 +184,13 @@ def _get_body_text(msg: Message) -> str:
     body_plain = "\n".join(text_parts).strip()
     body_html = "\n".join(html_parts).strip()
 
-    # Fallback HTML si le text/plain est anormalement court (formulaire WP incomplet)
-    if len(body_plain) < 200 and len(body_html) > len(body_plain) * 2:
-        return body_html
+    # v1.25.22 — text/plain d'abord, HTML seulement si text/plain VIDE.
+    # Avant on fallback sur le HTML détaggé dès que le text/plain faisait < 200 chars,
+    # ce qui servait à classify/fix_subject_llm/persist le chrome marketing d'un site
+    # relais (cas #629 : page wikipreneurs.be « Envie de vous lancer... » + footer
+    # newsletter@wikipreneurs.be pris comme body/sujet). Politique alignée sur
+    # prefilter._get_body_text et scripts/reinsert_12097.py : pas de fallback HTML
+    # quand le text/plain existe.
     return body_plain if body_plain else body_html
 
 
@@ -707,6 +711,7 @@ def _persist(
     ai_draft: str = "",
     priority: str = "normal",
     status: str = "pending",
+    reply_to: str = "",
 ) -> int:
     """Persiste le mail. En cas de conflit, ne JAMAIS écraser category/priority/status cockpit.
 
@@ -719,6 +724,7 @@ def _persist(
     body_preview = str(body_preview) if body_preview is not None else ""
     body = str(body) if body is not None else ""
     ai_draft = str(ai_draft) if ai_draft is not None else ""
+    reply_to = str(reply_to) if reply_to is not None else ""
     conn = sqlite3.connect(db_path)
     try:
         # Vérifier existence
@@ -736,10 +742,11 @@ def _persist(
                     body_preview = COALESCE(NULLIF(?, ''), body_preview),
                     body = COALESCE(NULLIF(?, ''), body),
                     ai_draft = COALESCE(NULLIF(?, ''), ai_draft),
+                    reply_to = COALESCE(NULLIF(?, ''), reply_to),
                     processed_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                 """,
-                (draft_generated, body_preview, body, ai_draft, mail_id),
+                (draft_generated, body_preview, body, ai_draft, reply_to, mail_id),
             )
             conn.commit()
             return mail_id
@@ -749,8 +756,8 @@ def _persist(
             """
             INSERT INTO mail_processed
                 (imap_uid, mailbox_name, subject, sender, received_at, category, draft_generated,
-                 body_preview, body, ai_draft, status, priority)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 body_preview, body, ai_draft, status, priority, reply_to)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id
             """,
             (
@@ -766,6 +773,7 @@ def _persist(
                 ai_draft,
                 status,
                 priority,
+                reply_to,
             ),
         )
         row = cursor.fetchone()
@@ -1154,6 +1162,10 @@ async def _process_single_mail(
         sender = _decode_header(parseaddr(sender_raw)[1] or sender_raw)
         subject = _decode_header(subject_raw)
         received_at = str(msg.get("Date", "") or "")
+        # v1.25.22 — Reply-To : vrai email client quand le From est un forwarder
+        # (cas #629 : From=mail@detectivebelgique.be, Reply-To=ckremp@vo.lu).
+        reply_to_raw = msg.get("Reply-To", "") or ""
+        reply_to = _decode_header(parseaddr(reply_to_raw)[1] or reply_to_raw)
 
         # Filtre date critique : ne traiter que les mails depuis le 1er juin 2026.
         # Les mails plus vieux sont flaggés comme traités pour nettoyer le backlog.
@@ -1215,7 +1227,12 @@ async def _process_single_mail(
         # on conserve le sujet original. Le sujet corrigé bénéficie à classify,
         # assign_priority, generate_draft (sujet lisible du brouillon V2a) et la persistance.
         if is_subject_suspect(subject):
-            fixed = await fix_subject_llm(subject, body)
+            # v1.25.22 — auto-pipeline : translittération ONLY (use_body_hint=False).
+            # On ne dérive JAMAIS le sujet du body : un body pollué par le chrome
+            # marketing d'un forwarder WP (cas #629 « Envie de vous lancer... »)
+            # pourrait sinon devenir le sujet stocké. La reformulation depuis le
+            # body reste réservée au bouton cockpit (validation humaine).
+            fixed = await fix_subject_llm(subject, body, use_body_hint=False)
             if fixed:
                 log.info(
                     "poller.subject_fixed",
@@ -1345,6 +1362,7 @@ async def _process_single_mail(
                 language,
                 category,
                 is_followup_response=is_followup,
+                reply_to=reply_to,
             )
             draft_generated = 1
             verified_draft = _is_verified_demande_client(category, msg)
@@ -1368,6 +1386,7 @@ async def _process_single_mail(
             ai_draft_text,
             priority,
             status,
+            reply_to,
         )
 
         # --- Sauvegarde locale des pièces jointes (tous les emails) ---
@@ -1555,13 +1574,17 @@ async def _process_single_mail(
             # v1.25.18 — masque d'expéditeur pour forwarders WP sans email client visible.
             # Le vrai sender reste en DB ; c'est l'affichage du brouillon/notification qui
             # indique NO_EMAIL_IN_THE_FORM pour éviter que Daniel réponde à un forwarder.
-            display_sender = mask_forwarder_sender(sender, body)
+            # v1.25.22 — priorité au Reply-To : pour les forwarders WP, le vrai email
+            # client est dans le Reply-To (cas #629 : ckremp@vo.lu). mask_forwarder_sender
+            # l'utilise en priorité sur NO_EMAIL_IN_THE_FORM.
+            display_sender = mask_forwarder_sender(sender, body, reply_to=reply_to)
             incoming = IncomingMail(
                 sender=display_sender,
                 subject=subject,
                 body=body,
                 received_at=received_at,
                 message_id=message_id,
+                reply_to=reply_to,
             )
             draft_ok = await append_draft(
                 incoming, mailbox, gen, mail_id=mail_id, imap_client=client

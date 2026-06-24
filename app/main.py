@@ -14,6 +14,7 @@ from app.logging_config import cleanup_old_logs, setup_logging
 from app.web.app import run_web_server
 from app.web.db_migrate import migrate
 from app.workers.disk_watcher import watch_disk
+from app.workers.drafts_reconciler import watch_drafts
 from app.workers.imap_poller import cleanup_old_attachments, poll_mailbox
 
 SOUL_EVOLVE_INTERVAL_HOURS = 72  # 3 jours
@@ -63,6 +64,7 @@ async def main() -> None:
     soul_task = asyncio.create_task(run_soul_evolver(stop_event), name="soul-evolver")
     disk_task = asyncio.create_task(watch_disk(stop_event), name="disk-watcher")
     att_task = asyncio.create_task(run_attachment_cleanup(stop_event), name="attachment-cleanup")
+    reconcile_task = asyncio.create_task(watch_drafts(stop_event), name="drafts-reconciler")
 
     await stop_event.wait()
     log.info("agent.stop_requested")
@@ -73,10 +75,10 @@ async def main() -> None:
     except Exception as e:
         log.warning("agent.shutdown_notify_failed", error=str(e))
 
-    for task in [*poller_tasks, web_task, soul_task, disk_task, att_task]:
+    for task in [*poller_tasks, web_task, soul_task, disk_task, att_task, reconcile_task]:
         task.cancel()
     await asyncio.gather(
-        *poller_tasks, web_task, soul_task, disk_task, att_task,
+        *poller_tasks, web_task, soul_task, disk_task, att_task, reconcile_task,
         return_exceptions=True,
     )
     log.info("agent.stopped")

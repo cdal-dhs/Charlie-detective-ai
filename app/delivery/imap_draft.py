@@ -6,6 +6,7 @@ Fallback Resend si APPEND échoue (configuré dans imap_poller.py).
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import re
 from email.message import EmailMessage
@@ -41,26 +42,34 @@ def _parse_list_line(line: bytes) -> str | None:
 async def _verify_draft_present(
     client: aioimaplib.IMAP4,
     drafts_folder: str,
-    subject_marker: str,
+    mail_id: int | None,
 ) -> bool:
-    """Vérifie qu'au moins un message avec le sujet_marker est présent dans Drafts.
+    """Vérifie que le brouillon SPÉCIFIQUE à mail_id est présent dans Drafts.
 
-    SELECT + SEARCH SUBJECT — Infomaniak met parfois 1-2s à indexer.
-    On utilise un marqueur ASCII simple ("DEMANDE") pour éviter les problèmes
-    d'encodage IMAP avec les accents.
+    v1.25.22 — recherche par header custom ``X-Detective-Mail-Id`` (précis et
+    insensible aux sujets pollués / forwarders WP). Avant on cherchait
+    n'importe quel brouillon « DEMANDE », ce qui validait à tort un APPEND dont
+    le brouillon n'était en fait jamais indexé (cas #614/#629 : delivered_at set
+    mais brouillon absent).
+
+    SELECT + SEARCH HEADER — Infomaniak met parfois 1-2s à indexer un APPEND.
+    On retente 3× avec 1s de délai pour absorber cette latence.
     """
+    if mail_id is None:
+        return False
     try:
         sel = await client.select(drafts_folder)
         if sel.result != "OK":
             return False
-        # Marqueur ASCII commun à tous les brouillons (évite accents IMAP)
-        search_resp = await client.search('SUBJECT "DEMANDE"')
-        if search_resp.result != "OK":
-            return False
-        # lines typique : [b'1 2 3'] ou [b'']
-        for line in search_resp.lines or []:
-            if line.strip():
-                return True
+        for attempt in range(3):
+            # SEARCH HEADER X-Detective-Mail-Id <id> — header ASCII, pas d'accent.
+            search_resp = await client.search(f"HEADER X-Detective-Mail-Id {mail_id}")
+            if search_resp.result == "OK":
+                for line in search_resp.lines or []:
+                    if line.strip():
+                        return True
+            # Pas encore indexé ? On retente après 1s.
+            await asyncio.sleep(1)
         return False
     except Exception:
         return False
@@ -164,9 +173,10 @@ def _build_draft_body(
     gen.draft (via draft_renderer.py) ; s'il manque (brouillon legacy), on
     l'injecte depuis incoming.body pour garantir le contexte complet.
     """
-    # v1.25.18 — si c'est un forwarder WP sans email client visible, on affiche
-    # NO_EMAIL_IN_THE_FORM dans le brouillon pour éviter une réponse au mauvais contact.
-    display_sender = mask_forwarder_sender(incoming.sender, incoming.body)
+    # v1.25.22 — priorité au Reply-To : pour les forwarders WP, le vrai email client
+    # est dans le Reply-To (cas #629 : ckremp@vo.lu). On l'affiche à la place du
+    # forwarder technique / NO_EMAIL_IN_THE_FORM.
+    display_sender = mask_forwarder_sender(incoming.sender, incoming.body, incoming.reply_to)
 
     lines = ["⚠️  BROUILLON IA — À RELIRE AVANT ENVOI"]
     if mail_id:
@@ -229,6 +239,11 @@ async def append_draft(
     # par forwarder), on le remplace par un libellé lisible (cas + nom du client).
     draft_subject = gen.suggested_subject or incoming.subject
     msg["Subject"] = f"DEMANDE D'Approbation - Reponse Demande Client : {draft_subject}"
+    # v1.25.22 — marqueur ASCII permettant au réconcilieur 15 min de retrouver
+    # ce brouillon précis en IMAP (SEARCH HEADER X-Detective-Mail-Id <id>), même
+    # si le sujet est pollué par un forwarder WP (cas #614/#629).
+    if mail_id is not None:
+        msg["X-Detective-Mail-Id"] = str(mail_id)
     msg.set_content(body_text)
     message_bytes = msg.as_bytes()
 
@@ -271,7 +286,7 @@ async def append_draft(
             return False
 
         # Vérification post-dépôt : confirmer que le brouillon est indexé dans Drafts
-        verified = await _verify_draft_present(client, drafts_folder, msg["Subject"])
+        verified = await _verify_draft_present(client, drafts_folder, mail_id)
         if verified:
             log.info(
                 "imap_draft.ok",

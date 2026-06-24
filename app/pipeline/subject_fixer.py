@@ -116,13 +116,20 @@ def tag_no_email(subject: str, sender: str, body: str = "") -> str:
     return f"{subject} {_NO_EMAIL_TAG}".strip()
 
 
-def mask_forwarder_sender(sender: str, body: str = "") -> str:
+def mask_forwarder_sender(sender: str, body: str = "", reply_to: str = "") -> str:
     """Retourne l'expéditeur affiché pour le brouillon/notification.
 
-    Si c'est un forwarder WP sans email client visible, on remplace par
-    NO_EMAIL_IN_THE_FORM pour que Daniel comprenne immédiatement qu'il ne doit
-    PAS répondre à cette adresse technique.
+    v1.25.22 — priorité au header ``reply_to`` : pour les forwarders WP, le vrai
+    email client est dans le Reply-To (cas #629 : ckremp@vo.lu = Christèle). On
+    l'affiche à la place du forwarder technique.
+
+    Sans Reply-To valide, si c'est un forwarder WP sans email client visible dans
+    le body, on remplace par NO_EMAIL_IN_THE_FORM pour que Daniel comprenne qu'il
+    ne doit PAS répondre à cette adresse technique.
     """
+    rt = (reply_to or "").strip().strip("<>")
+    if rt and "@" in rt and not _is_internal_address(rt):
+        return rt
     if not is_wp_forwarder(sender):
         return sender or ""
     if has_client_email_in_body(body):
@@ -130,12 +137,31 @@ def mask_forwarder_sender(sender: str, body: str = "") -> str:
     return "NO_EMAIL_IN_THE_FORM"
 
 
-async def fix_subject_llm(subject: str, body_preview: str) -> str | None:
-    """Demande au LLM un sujet propre, court, lisible ET représentatif de la demande.
+def _is_internal_address(email: str) -> bool:
+    """True si l'adresse appartient au cabinet Detective ou est un no-reply."""
+    lowered = (email or "").lower()
+    if lowered.startswith("no-reply") or lowered.startswith("noreply"):
+        return True
+    own_domains = ("detectivebelgique.be", "detectivebelgium.com", "dpdhuinvestigations.be")
+    return any(d in lowered for d in own_domains)
 
-    Couvre deux cas : (1) homoglyphes illisibles (#614), (2) sujet automatique
-    non-représentatif (#515 forwarder WP « Réinitialisation du mot de passe »)
-    où le LLM reformule à partir du body pour refléter la vraie demande.
+
+async def fix_subject_llm(
+    subject: str,
+    body_preview: str,
+    use_body_hint: bool = True,
+) -> str | None:
+    """Demande au LLM un sujet propre, court, lisible.
+
+    Deux modes :
+    - ``use_body_hint=True`` (défaut, bouton cockpit manuel) : reformule un sujet
+      incohérent/non-représentatif (#515 « Réinitialisation mot de passe ») à
+      partir du body pour refléter la vraie demande. Validé par un humain.
+    - ``use_body_hint=False`` (auto-pipeline poller) : **translittère UNIQUEMENT**
+      les homoglyphes (cyrillique/grec/chiffres romains) en Latin équivalent, en
+      gardant le sens du sujet original. Ne regarde JAMAIS le body — sinon un
+      body pollué par le chrome marketing d'un forwarder WP (cas #629
+      « Envie de vous lancer... ») peut devenir le sujet stocké.
 
     Retourne le sujet corrigé (str), ou None si le LLM échoue / renvoie le même
     sujet (déjà représentatif) / renvoie vide. L'appelant conserve l'original
@@ -144,33 +170,45 @@ async def fix_subject_llm(subject: str, body_preview: str) -> str | None:
     if not subject:
         return None
     model, _ = get_llm_models()
-    # On tronque le body_preview pour rester léger (le sujet suffit en général,
-    # mais le body aide le LLM à reformuler un sujet cohérent).
-    body_hint = (body_preview or "")[:600]
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                "Tu corriges/réformules des sujets d'email incohérents ou "
-                "illisibles : (1) homoglyphes (caractères cyrilliques/grecs/"
-                "chiffres romains ressemblant à du Latin), (2) sujet automatique "
-                "non-représentatif de la demande (ex: « Réinitialisation du "
-                "mot de passe », « Contact form », forwarders). À partir du "
-                "sujet original ET de l'extrait du corps, tu renvoies "
-                "UNIQUEMENT un sujet propre, court, lisible, qui REFLETTE LA "
-                "DEMANDE RÉELLE du client (lue dans le corps). En ASCII si "
-                "possible (accents FR/NL autorisés), max 100 caractères, sans "
-                "guillemets, sans préfixe « Sujet : », sur une seule ligne. "
-                "Si le sujet reflète déjà correctement la demande, renvoie-le "
-                "tel quel."
-            ),
-        },
-        {
-            "role": "user",
-            "content": f"Sujet original :\n{subject}\n\n"
+    body_hint = (body_preview or "")[:600] if use_body_hint else ""
+    if use_body_hint:
+        system_prompt = (
+            "Tu corriges/réformules des sujets d'email incohérents ou "
+            "illisibles : (1) homoglyphes (caractères cyrilliques/grecs/"
+            "chiffres romains ressemblant à du Latin), (2) sujet automatique "
+            "non-représentatif de la demande (ex: « Réinitialisation du "
+            "mot de passe », « Contact form », forwarders). À partir du "
+            "sujet original ET de l'extrait du corps, tu renvoies "
+            "UNIQUEMENT un sujet propre, court, lisible, qui REFLETTE LA "
+            "DEMANDE RÉELLE du client (lue dans le corps). En ASCII si "
+            "possible (accents FR/NL autorisés), max 100 caractères, sans "
+            "guillemets, sans préfixe « Sujet : », sur une seule ligne. "
+            "Si le sujet reflète déjà correctement la demande, renvoie-le "
+            "tel quel."
+        )
+        user_content = (
+            f"Sujet original :\n{subject}\n\n"
             f"Extrait du corps (contexte) :\n{body_hint}\n\n"
-            "Sujet corrigé :",
-        },
+            "Sujet corrigé :"
+        )
+    else:
+        # Auto-pipeline : translittération ONLY. On ne dérive jamais le sujet du
+        # body (risque de pollution par le HTML marketing d'un forwarder, cas #629).
+        system_prompt = (
+            "Tu rétablis la lisibilité d'un sujet d'email contenant des "
+            "homoglyphes (caractères cyrilliques/grecs/chiffres romains "
+            "ressemblant à du Latin, ex: іtѕⅿе → itsme). Tu translittères "
+            "UNIQUEMENT ces confusables en lettres Latin équivalentes, en "
+            "conservant le sens et la ponctuation du sujet original. Tu ne "
+            "reformules PAS, tu n'inventes rien, tu ne regardes aucun corps. "
+            "Renvoie UNIQUEMENT le sujet translittéré, sur une seule ligne, "
+            "sans guillemets ni préfixe « Sujet : ». Si le sujet ne contient "
+            "aucun confusable, renvoie-le tel quel."
+        )
+        user_content = f"Sujet original :\n{subject}\n\nSujet translittéré :"
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_content},
     ]
     try:
         raw = await complete(model=model, messages=messages, max_tokens=120, temperature=0.2)

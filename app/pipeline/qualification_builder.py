@@ -42,12 +42,17 @@ _INFO_FIELD_SPLIT = re.compile(
     r"\s*(?:^|\n)\s*(?:Nom|Prénom|Téléphone|Email|GSM|Adresse|Profil|Heure)\s*[:\-=?]?\s*"
 )
 _CLIENT_INFO_LABELS = {
-    # "mon nom est" sans séparateur explicite + label Nom complet.
-    # Le label "nom" seul exige une frontière de mot (\b) pour éviter d'accrocher
-    # "nom" au milieu de "economic", "phenomenon", etc.
+    # "mon nom est" sans séparateur explicite + label Nom complet + label "Nom:"
+    # de formulaire web.
+    # v1.25.22 — le label "nom" ISOLÉ n'est matché qu'en DÉBUT DE LIGNE avec un
+    # séparateur explicite (: = - ?). Avant, `\bnom\b` matchait "ce nom" au milieu
+    # d'une phrase (cas #629 : faux nom extrait depuis une mention fortuite du mot
+    # "nom" dans le body). On garde "mon nom est" / "nom complet" (formulations
+    # naturelles, acceptent un simple espace).
     "nom": re.compile(
-        rf"(?:mon\s+nom\s+(?:est|saisit|c'est)|nom\s+complet|\bnom\b){_INFO_SEP}(.+?){_INFO_STOP}",
-        re.IGNORECASE | re.DOTALL,
+        rf"(?:(?:mon\s+nom\s+(?:est|saisit|c'est)|nom\s+complet){_INFO_SEP}"
+        rf"|^\s*nom\b{_INFO_SEP_STRICT})(.+?){_INFO_STOP}",
+        re.IGNORECASE | re.DOTALL | re.MULTILINE,
     ),
     "prenom": re.compile(rf"\bpr[ée]nom\b{_INFO_SEP}(.+?){_INFO_STOP}", re.IGNORECASE | re.DOTALL),
     "telephone": re.compile(
@@ -304,8 +309,14 @@ def _is_internal_email(email: str) -> bool:
     return False
 
 
-def _extract_client_info(body: str, sender: str) -> dict[str, str | None]:
-    """Extrait les informations client déjà fournies dans le body ou le sender."""
+def _extract_client_info(body: str, sender: str, reply_to: str = "") -> dict[str, str | None]:
+    """Extrait les informations client déjà fournies dans le body ou le sender.
+
+    v1.25.22 — ``reply_to`` (header Reply-To) est la source la plus fiable pour
+    l'email client : les forwarders WP mettent le forwarder en From mais le vrai
+    email client dans Reply-To (cas #629 : From=mail@detectivebelgique.be,
+    Reply-To=ckremp@vo.lu = Christèle). On le priorise sur le body et le From.
+    """
     info: dict[str, str | None] = {}
     clean_body = _strip_quoted_thread(body)
 
@@ -315,6 +326,14 @@ def _extract_client_info(body: str, sender: str) -> dict[str, str | None]:
             info[key] = _clean_value(match.group(1)) or None
         else:
             info[key] = None
+
+    # v1.25.22 — Reply-To prioritaire pour l'email client (forwarders WP).
+    # Écrase un email glané dans le body (qui peut être celui du scammeur, pas
+    # du client) car le header Reply-To est positionné par le formulaire lui-même.
+    if reply_to and "@" in reply_to:
+        rt_candidate = reply_to.strip().strip("<>")
+        if rt_candidate and not _is_internal_email(rt_candidate):
+            info["email"] = rt_candidate
 
     # Certains formulaires web envoient leurs champs dans le thread cité
     # (telephone, heure_contact, profil). On les cherche aussi dans le body
@@ -1449,6 +1468,7 @@ def build_qualification_draft(
     mailbox: MailboxConfig,
     case: str,
     objective_clear: bool | None = None,
+    reply_to: str = "",
 ) -> str:
     """Génère un brouillon qualifiant structuré et déterministe."""
     # v1.24.1 — refus poli d'une demande hors-légalité (piratage, extraction de
@@ -1456,7 +1476,7 @@ def build_qualification_draft(
     # standard par une réponse ferme qui propose l'alternative légale. Cf. #614.
     is_illegal, _reason = _detect_illegal_request(body)
     if is_illegal:
-        client_info = _extract_client_info(body, sender)
+        client_info = _extract_client_info(body, sender, reply_to=reply_to)
         case_info = _extract_case_info(body, case)
         first_name = client_info.get("prenom") or _extract_first_name(body)
         greeting = f"Bonjour {first_name}," if first_name else "Bonjour,"
@@ -1469,7 +1489,7 @@ def build_qualification_draft(
             greeting, first_name, mailbox, case, client_info, case_info,
         ))
 
-    client_info = _extract_client_info(body, sender)
+    client_info = _extract_client_info(body, sender, reply_to=reply_to)
     case_info = _extract_case_info(body, case)
     first_name = client_info.get("prenom") or _extract_first_name(body)
     greeting = f"Bonjour {first_name}," if first_name else "Bonjour,"

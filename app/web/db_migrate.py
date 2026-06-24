@@ -23,6 +23,9 @@ _MAIL_PROCESSED_COLS: list[tuple[str, str]] = [
     ("sent_by", "INTEGER"),
     ("body_preview", "TEXT"),
     ("body", "TEXT"),
+    # v1.25.22 — header Reply-To du mail entrant. Pour les forwarders WP, le
+    # vrai email client vit ici (cas #629 : ckremp@vo.lu). Vide sinon.
+    ("reply_to", "TEXT"),
 ]
 
 
