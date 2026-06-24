@@ -334,10 +334,12 @@ def test_mask_forwarder_noreply_external() -> None:
 
 
 def test_mask_forwarder_with_body_email_returns_body_email() -> None:
-    """Forwarder sans Reply-To MAIS email client dans le body -> email du body."""
+    """v1.25.26 — un email dans le body n'est PAS un signal fiable (ambigu avec
+    les pubs/signatures) : un forwarder sans Reply-To reste NO_EMAIL_IN_THE_FORM.
+    Seul le Reply-To identifie le vrai client."""
     body = "Nom: Dupont\nMon email: client.reel@gmail.com"
     got = mask_forwarder_sender("wordpress@detectivebelgium.com", body=body, reply_to="")
-    assert got == "client.reel@gmail.com"
+    assert got == "NO_EMAIL_IN_THE_FORM"
 
 
 def test_mask_forwarder_direct_client_unchanged() -> None:

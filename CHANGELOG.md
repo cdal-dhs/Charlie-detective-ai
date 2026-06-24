@@ -1,5 +1,40 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.25.26] — 2026-06-24 (mask_forwarder_sender : Reply-To uniquement, pas d'extraction body)
+
+### Contexte
+Dry-run backfill (v1.25.25) : 33 senders techniques extraient un email du body.
+Ambiguïté — mélange de vrais clients (toon.breyne@tbreyne.be, ian.beheydt@icloud.com
+via WeTransfer/formulaires) et d'emails de SERVICE trompeurs (info@fcrmedia.be,
+hello@upartner.agency, retail@arval.be, easy2cash@bnpparibasfortisfactor.com,
+support@dnsbelgium.be, ebox_enterprise_interviews@smals.be extraits de
+newsletters/pubs BNP/bpost/government). Impossible de distinguer automatiquement
+un vrai client humain d'un email de service pioché dans une pub.
+
+### Changé
+- **`subject_fixer.py::mask_forwarder_sender`** : on ne s'appuie PLUS que sur le
+  header ``reply_to`` pour identifier le vrai client (signal structuré fiable,
+  le client l'a mis intentionnellement). L'extraction d'email du body est
+  supprimée du masquage — un @ pioché dans le body est ambigu (signature/pub/
+  service). Ordre : Reply-To valide → NO_EMAIL_IN_THE_FORM (si technique) →
+  sender direct inchangé. ``body`` reste en paramètre (compat + ``tag_no_email``).
+- ``_extract_client_email_from_body`` conservé (utilisé par
+  ``has_client_email_in_body`` → ``tag_no_email`` sur le sujet, indépendant du
+  masquage du sender).
+
+### Décision CDAL
+« Reply-To uniquement » : zéro faux email affiché. Les rares WeTransfer/
+formulaires sans Reply-To deviennent NO_EMAIL_IN_THE_FORM (Daniel ouvre le mail
+pour voir l'expéditeur réel). Respecte strictement « si pas d'email vraiment
+alors NO_EMAIL_IN_THE_FORM ».
+
+### Ajouté / mis à jour
+- `tests/test_v1_25_22_fixes.py` + `tests/test_subject_fixer.py` : les 2 tests
+  qui assertaient l'extraction body (→ email du body) mis à jour → NO_EMAIL.
+
+### Tests
+- 308 passed (ruff baseline inchangée).
+
 ## [1.25.25] — 2026-06-24 (durcissement extracteur email body — faux positifs @URL/@CSS)
 
 ### Contexte

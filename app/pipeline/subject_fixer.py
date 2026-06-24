@@ -153,23 +153,25 @@ def tag_no_email(subject: str, sender: str, body: str = "") -> str:
 def mask_forwarder_sender(sender: str, body: str = "", reply_to: str = "") -> str:
     """Retourne l'expéditeur affiché/stoké pour le brouillon, notif et cockpit.
 
-    v1.25.24 — règle CDAL : ne PLUS JAMAIS afficher l'expéditeur technique
-    (newsletter@/wordpress@/mail@detective/noreply@/domaine Detective) comme
-    expéditeur client. Ordre de résolution :
+    v1.25.26 — règle CDAL (« si pas d'email vraiment alors NO_EMAIL_IN_THE_FORM ») :
+    on ne s'appuie QUE sur le header ``reply_to`` pour identifier le vrai client.
+    Un email pioché dans le body est ambigu (signature, pub, email de service
+    type info@/support@/retail@) et risquerait d'afficher un faux client — on
+    l'ignore donc. Ordre :
 
-    1. Reply-To valide (non interne) → c'est le vrai client (cas #629
-       ckremp@vo.lu).
-    2. Sinon un email client présent dans le body → on l'affiche.
-    3. Sinon, si le sender est technique → NO_EMAIL_IN_THE_FORM (Daniel sait
-       qu'il ne doit pas répondre à cette adresse ; vrai contact = téléphone).
-    4. Sinon (mail direct d'un humain) → sender inchangé.
+    1. Reply-To valide (non interne) → c'est le vrai client (cas #629 ckremp@vo.lu).
+    2. Sinon, si le sender est technique (robot/newsletter/domaine Detective)
+       → NO_EMAIL_IN_THE_FORM (Daniel sait que le vrai contact est le téléphone,
+       cf. Task #4, ou qu'il doit ouvrir le mail pour voir l'expéditeur réel).
+    3. Sinon (mail direct d'un humain) → sender inchangé.
+
+    ``body`` est conservé en paramètre pour la compatibilité d'API et pour
+    ``has_client_email_in_body``/``tag_no_email`` (tag du sujet), mais n'est
+    plus utilisé pour masquer le sender.
     """
     rt = (reply_to or "").strip().strip("<>")
     if rt and "@" in rt and not _is_internal_address(rt):
         return rt
-    email_body = _extract_client_email_from_body(body)
-    if email_body:
-        return email_body
     if _is_technical_sender(sender):
         return "NO_EMAIL_IN_THE_FORM"
     return sender or ""
