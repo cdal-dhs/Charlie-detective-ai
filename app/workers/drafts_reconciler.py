@@ -49,7 +49,20 @@ def _scope_cutoff_iso() -> str:
 
 
 async def _fetch_candidates(db_path) -> list[dict]:
-    """Mail demande_client avec brouillon, traités dans les SCOPE_DAYS derniers jours."""
+    """Mail demande_client avec brouillon généré MAIS JAMAIS livré en IMAP.
+
+    v1.25.23 — on ne re-livre QUE les ``delivered_at IS NULL`` (crash silencieux :
+    le poller/append_draft n'a jamais déposé le brouillon). Les brouillons avec
+    ``delivered_at`` set ont été livrés une fois ; s'ils ne sont plus dans Drafts,
+    c'est que Daniel les a traités (envoyés/supprimés depuis sa boîte mail) — les
+    re-livrer créerait des doublons massifs (cas detective_belgique : 1 seul
+    brouillon en Drafts mais 67 candidats delivered_at set → 66 doublons évités).
+
+    Le garde-fou principal anti-crash silencieux est ``_verify_draft_present``
+    post-APPEND (dans append_draft) : il vérifie dans la minute si l'APPEND a
+    réussi. Le réconcilieur 15 min est le filet de sécurité pour les cas où le
+    poller n'a même pas pu APPEND (delivered_at reste NULL).
+    """
     cutoff = _scope_cutoff_iso()
     sql = """
         SELECT id, imap_uid, mailbox_name, subject, sender,
@@ -61,6 +74,7 @@ async def _fetch_candidates(db_path) -> list[dict]:
           AND ai_draft != ''
           AND processed_at IS NOT NULL
           AND processed_at >= ?
+          AND delivered_at IS NULL
         ORDER BY id DESC
         LIMIT 200
     """
@@ -68,6 +82,26 @@ async def _fetch_candidates(db_path) -> list[dict]:
         db.row_factory = aiosqlite.Row
         async with db.execute(sql, (cutoff,)) as cur:
             return [dict(row) for row in await cur.fetchall()]
+
+
+def _has_search_match(lines) -> bool:
+    """True si la réponse SEARCH contient un UID/seq numérique (un vrai match).
+
+    v1.25.23 — bug P0 : aioimaplib met la ligne de status ``b'Search completed
+    (0.003 + 0.000 secs).'`` dans ``resp.lines``. Comme elle est non-vide, l'ancien
+    code ``if line.strip(): return True`` la confondait avec un match → le
+    réconcilieur déclarait TOUS les candidats "present" (jamais de détection de
+    manquant). On n'accepte qu'une ligne contenant au moins un token numérique
+    (UID/seq), en ignorant les lignes de status ``Search completed``/``completed``.
+    """
+    for line in lines or []:
+        txt = line.decode(errors="replace") if isinstance(line, bytes) else str(line)
+        txt = txt.strip()
+        if not txt or "completed" in txt.lower():
+            continue
+        if any(tok.isdigit() for tok in txt.split()):
+            return True
+    return False
 
 
 async def _draft_present(client: aioimaplib.IMAP4, folder: str, mail_id: int) -> bool:
@@ -85,19 +119,15 @@ async def _draft_present(client: aioimaplib.IMAP4, folder: str, mail_id: int) ->
     # 1) marker header (précis, nouveaux brouillons)
     try:
         resp = await client.search(f"HEADER X-Detective-Mail-Id {mail_id}")
-        if resp.result == "OK":
-            for line in resp.lines or []:
-                if line.strip():
-                    return True
+        if resp.result == "OK" and _has_search_match(resp.lines):
+            return True
     except Exception:
         pass
     # 2) fallback body marker (legacy) — "EMAIL #629" présent dans le corps du brouillon
     try:
         resp = await client.search(f'BODY "EMAIL #{mail_id}"')
-        if resp.result == "OK":
-            for line in resp.lines or []:
-                if line.strip():
-                    return True
+        if resp.result == "OK" and _has_search_match(resp.lines):
+            return True
     except Exception:
         pass
     return False

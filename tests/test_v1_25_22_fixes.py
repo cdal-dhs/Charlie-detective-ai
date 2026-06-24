@@ -134,6 +134,12 @@ class _FakeSearchResult:
         self.lines = lines
 
 
+# aioimaplib ajoute toujours une ligne de status "Search completed (...)" à la
+# fin de resp.lines. On la simule pour régresser le bug P0 v1.25.23 (l'ancien code
+# confondait cette ligne non-vide avec un vrai match -> "present" systématique).
+_STATUS_LINE = b"Search completed (0.003 + 0.000 secs)."
+
+
 class _FakeImapClient:
     """Faux client IMAP pour tester _draft_present sans vraie connexion."""
 
@@ -148,10 +154,10 @@ class _FakeImapClient:
     async def search(self, criteria: str) -> _FakeSearchResult:
         self.search_calls.append(criteria)
         if "HEADER X-Detective-Mail-Id" in criteria:
-            return _FakeSearchResult(ok=True, lines=self._header_lines)
+            return _FakeSearchResult(ok=True, lines=[*self._header_lines, _STATUS_LINE])
         if 'BODY "EMAIL #' in criteria:
-            return _FakeSearchResult(ok=True, lines=self._body_lines)
-        return _FakeSearchResult(ok=True, lines=[])
+            return _FakeSearchResult(ok=True, lines=[*self._body_lines, _STATUS_LINE])
+        return _FakeSearchResult(ok=True, lines=[_STATUS_LINE])
 
 
 @pytest.mark.asyncio
@@ -167,12 +173,39 @@ async def test_draft_present_par_header_marker() -> None:
 
 @pytest.mark.asyncio
 async def test_draft_absent_retourne_false() -> None:
-    """Aucun match header ni body -> False (brouillon manquant, à re-livrer)."""
+    """Aucun match header ni body -> False (brouillon manquant, à re-livrer).
+
+    Régression bug P0 v1.25.23 : la ligne de status 'Search completed' seule
+    (présente dans toute réponse aioimaplib) ne doit PAS être confondue avec un
+    match. Avant le fix, _draft_present retournait True ici (faux positif) ->
+    le réconcilieur ne détectait jamais les manquants.
+    """
     from app.workers.drafts_reconciler import _draft_present
 
     client = _FakeImapClient(header_lines=[], body_lines=[])
     found = await _draft_present(client, "Drafts", 999)
     assert found is False
+
+
+@pytest.mark.asyncio
+async def test_draft_present_ignores_status_line_seule() -> None:
+    """Une réponse ne contenant QUE la ligne de status -> False (régression P0)."""
+    from app.workers.drafts_reconciler import _draft_present
+
+    # header_lines et body_lines vides -> réponse = [status_line] uniquement
+    client = _FakeImapClient(header_lines=[], body_lines=[])
+    found = await _draft_present(client, "Drafts", 1234)
+    assert found is False
+
+
+def test_has_search_match_faux_positif_status() -> None:
+    """La ligne 'Search completed' seule ne doit pas compter comme un match."""
+    from app.workers.drafts_reconciler import _has_search_match
+
+    assert _has_search_match([_STATUS_LINE]) is False
+    assert _has_search_match([]) is False
+    assert _has_search_match([b"1", _STATUS_LINE]) is True  # UID 1 = vrai match
+    assert _has_search_match([b"Search completed", b"42"]) is True  # 42 = match
 
 
 @pytest.mark.asyncio
@@ -183,6 +216,49 @@ async def test_draft_present_fallback_body_legacy() -> None:
     client = _FakeImapClient(header_lines=[], body_lines=[b"42"])
     found = await _draft_present(client, "Drafts", 42)
     assert found is True
+
+
+@pytest.mark.asyncio
+async def test_fetch_candidates_exclut_delivered(tmp_path) -> None:
+    """Anti-doublon : seuls les brouillons JAMAIS livrés (delivered_at NULL) sont
+    candidats à la re-livraison. Les brouillons déjà livrés puis envoyés par
+    Daniel (delivered_at set) ne doivent PAS être re-livrés (sinon doublons massifs).
+    """
+    import aiosqlite
+
+    from app.workers.drafts_reconciler import _fetch_candidates
+
+    db = tmp_path / "state.db"
+    async with aiosqlite.connect(db) as conn:
+        await conn.execute(
+            """CREATE TABLE mail_processed (
+                id INTEGER PRIMARY KEY, imap_uid TEXT, mailbox_name TEXT,
+                subject TEXT, sender TEXT, received_at TEXT, category TEXT,
+                draft_generated INTEGER, body_preview TEXT, body TEXT,
+                ai_draft TEXT, status TEXT, priority TEXT, reply_to TEXT,
+                delivered_at TEXT, processed_at TEXT
+            )"""
+        )
+        # mail 100 : jamais livré (delivered_at NULL) -> candidat (crash silencieux)
+        # mail 101 : livré puis envoyé par Daniel (delivered_at set) -> exclus
+        # mail 102 : livré (delivered_at set) -> exclus
+        await conn.executemany(
+            "INSERT INTO mail_processed (id, imap_uid, mailbox_name, category, "
+            "draft_generated, ai_draft, body, delivered_at, processed_at) "
+            "VALUES (?,?,?,?,1,?,?,?,?)",
+            [
+                (100, "u100", "detective_belgique", "demande_client", "draft100",
+                 "body100", None, "2026-06-24T00:00:00Z"),
+                (101, "u101", "detective_belgique", "demande_client", "draft101",
+                 "body101", "2026-06-23T18:43:00Z", "2026-06-23T18:00:00Z"),
+                (102, "u102", "detective_belgique", "demande_client", "draft102",
+                 "body102", "2026-06-22T10:00:00Z", "2026-06-22T09:00:00Z"),
+            ],
+        )
+        await conn.commit()
+    cands = await _fetch_candidates(db)
+    ids = sorted(c["id"] for c in cands)
+    assert ids == [100], f"seul le mail jamais livré doit etre candidat, got {ids}"
 
 
 def test_rebuild_inputs_propage_reply_to() -> None:

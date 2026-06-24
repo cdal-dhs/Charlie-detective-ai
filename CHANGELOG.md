@@ -1,5 +1,25 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.25.23] — 2026-06-24 (fix P0 réconcilieur inopérant + anti-doublon Drafts)
+
+### Contexte
+Suite au déploiement v1.25.22, vérification live de #629 : `SEARCH ALL` Drafts detective_belgique = **1 seul brouillon**, mais le réconcilieur avait rapporté `present=67`. Diagnostic : **bug P0 dans `_draft_present`** — aioimaplib met la ligne de status `b"Search completed (0.003 + 0.000 secs)."` dans `resp.lines` ; l'ancien code `if line.strip(): return True` la confondait avec un match → le réconcilieur déclarait TOUS les candidats « present » et ne détectait **jamais** les manquants. Le garde-fou anti-crash silencieux était totalement inopérant.
+
+Second problème : la logique de re-livraison aurait créé des **doublons massifs** si le bug avait été corrigé sans autre garde. Le workflow V2a (Daniel envoie depuis sa propre boîte mail) ne notifie pas le cockpit → `status` reste `pending` même après envoi. Le réconcilieur ne peut donc pas distinguer un brouillon envoyé par Daniel (parti normalement de Drafts) d'un vrai crash silencieux.
+
+### Fixé
+- **`app/workers/drafts_reconciler.py::_draft_present`** : nouveau helper `_has_search_match(lines)` qui n'accepte qu'une ligne contenant au moins un token numérique (UID/seq), en ignorant les lignes de status `Search completed`/`completed`. Corrige le faux positif systématique.
+- **`app/workers/drafts_reconciler.py::_fetch_candidates`** : n sélectionne QUE les brouillons avec `delivered_at IS NULL` (jamais livrés en IMAP = vrai crash silencieux). Les brouillons avec `delivered_at` set ont été livrés une fois ; s'ils ne sont plus en Drafts, Daniel les a traités → ne pas re-livrer (évite les doublons). Le garde-fou principal anti-crash silencieux reste `_verify_draft_present` post-APPEND (vérification dans la minute) ; le réconcilieur 15 min est le filet pour les cas où le poller n'a même pas pu APPEND.
+
+### Ajouté
+- **`tests/test_v1_25_22_fixes.py`** : 3 nouveaux tests de régression P0 — `_has_search_match` ignore la ligne de status seule, `_draft_present` retourne False sur une réponse ne contenant que la ligne de status, `_fetch_candidates` n'exclut que les `delivered_at NULL` (test DB temporaire avec 1 mail jamais livré + 2 livrés). Le `_FakeImapClient` simule désormais la ligne de status aioimaplib réaliste.
+
+### Tests
+- Suite complète : **296 passed, 0 failed**. Ruff clean.
+
+### Procédure
+- Avant chaque deploy : `venv/bin/python -m pytest -q`.
+
 ## [1.25.22] — 2026-06-24 (garde-fous anti-crash silencieux #629 — Drafts réconcilieur + Reply-To)
 
 ### Contexte
