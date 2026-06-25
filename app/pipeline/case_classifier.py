@@ -22,6 +22,7 @@ CASE_TYPES = (
     "infidelite_filature",
     "recherche_personne",
     "recuperation_dette",
+    "investigation_successorale",
     "securite_passé_violences",
     "contre_espionnage_micros",
     "non_determine",
@@ -35,6 +36,7 @@ Analyse le mail entrant et choisis UN SEUL cas parmi cette liste exacte :
 - infidelite_filature
 - recherche_personne
 - recuperation_dette
+- investigation_successorale
 - securite_passé_violences
 - contre_espionnage_micros
 - non_determine
@@ -60,6 +62,7 @@ def _case_to_label(case_type: str) -> str:
         "infidelite_filature": "Surveillance / infidélité",
         "recherche_personne": "Recherche de personne / adresse",
         "recuperation_dette": "Récupération de dette / créance",
+        "investigation_successorale": "Investigation patrimoniale / succession",
         "securite_passé_violences": "Passé de violences / sécurité",
         "contre_espionnage_micros": "Détection micros-caméras / installation",
         "non_determine": "Cas non déterminé",
@@ -122,6 +125,17 @@ def _extract_case_type_from_json(
                 "reconnaissance de dette",
                 "doit de l'argent",
                 "somme d'argent",
+            ],
+            "investigation_successorale": [
+                "succession",
+                "héritage",
+                "héritier",
+                "héritière",
+                "patrimoine",
+                "défunt",
+                "décès",
+                "legs",
+                "testament",
             ],
             "securite_passé_violences": [
                 "violence",

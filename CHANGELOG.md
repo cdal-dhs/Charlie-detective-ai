@@ -1,5 +1,76 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.25.27] — 2026-06-25 (investigation successorale : objectif reconnu + cas métier dédié)
+
+### Contexte
+Mail **#643** (Boeteman, `detective_belgique`, 24/06) : « Nous aimerions connaître
+l'ampleur de sa succession et réserver nos droits le cas échéant. » Objectif
+explicite et actionnable (investigation patrimoniale successorale), mais le
+brouillon livré en Drafts IMAP était le **brouillon « demande floue »** qui
+redemandait « ce que vous souhaitez obtenir concrètement de notre intervention » —
+exactement ce que le client vient d'écrire. Faux négatif intolérable (règle d'or
+du projet inversée).
+
+Cause racine :
+1. Aucun cas métier `investigation_successorale` → `classify_case` retournait
+   `non_determine` (classifier LLM ne connaissait pas le cas, fallback keywords
+   ne matchait pas `succession`/`héritage`).
+2. Pour `non_determine`, `generator.py` calcule `objective_clear` via
+   `objective_check.py` (l'« intelligence check gemma » déjà livré v1.25.6/#615).
+   Ni l'heuristique `_CLEAR_OBJECTIVE_RE` ni le prompt LLM ne couvraient
+   l'investigation patrimoniale → gemma répondait `OBJECTIF_FLOU`.
+3. `_is_vague_request` → `True` pour `non_determine` + `objective_clear=False`
+   → brouillon flou générique.
+
+### Fixé
+- **`app/pipeline/objective_check.py`** (intelligence check gemma) : enrichi
+  `_CLEAR_OBJECTIVE_RE` avec les objectifs patrimoniaux (`succession`, `héritage`,
+  `héritier`/`héritière`, `patrimoine`, `défunt`, `décès`, `réserver nos/mes/ses
+  droits`, `droits successoraux`, `legs`, `testament`) et le prompt LLM
+  (`_has_clear_objective_llm`) cite désormais « évaluer un patrimoine / une
+  succession, réserver ses droits d'héritier, localiser les biens d'un défunt »
+  dans la liste d'objectifs clairs. → l'objectif succession est reconnu clair par
+  heuristique, **sans appel LLM** (coût/latence nuls).
+
+### Ajouté
+- **Nouveau cas métier `investigation_successorale`** dans
+  `app/pipeline/case_classifier.py` (`CASE_TYPES`, `_CASE_PROMPT`,
+  `_case_to_label`, fallback keywords) + `app/pipeline/generator.py`
+  (`_CASE_LABELS`).
+- **Brouillon dédié `_build_succession_draft`** dans
+  `app/pipeline/qualification_builder.py` (modèle `_build_dette_draft`) :
+  accuse réception succession, restitue les éléments déjà fournis extraits du
+  message libre (relation défunt, lieu de soins, pays de résidence, statut
+  ex-diplomate), pose 8 questions succession (identité défunt, état/décès,
+  dernière adresse, lien de parenté + autres héritiers, nationalité/statut,
+  notaire, banques/biens, testament + pays d'ouverture), closing + coordination
+  notaire. Pas de tarifs (comme la dette : stratégie après éléments).
+- `qualification_builder.py` : dispatch `elif case == "investigation_successorale"`,
+  exclusion du flou dans `_is_vague_request` (`return False`, comme
+  `recuperation_dette` — le brouillon dédié pose ses questions d'office, on ne
+  tombe JAMAIS dans la clarification générique), `_LEGAL_ALTERNATIVE` (refus
+  poli si le client demande piratage des comptes du défunt → alternative légale
+  investigation patrimoniale + notaire), `_CASE_LABELS`/`_CASE_LABELS_SHORT`,
+  `_rephrase_need`, `_extract_case_info` (extraction relation/lieu/pays/statut),
+  `_format_received_info` (restitution succession), `_CASE_QUESTIONS`.
+
+### Tests
+- `tests/test_objective_check.py` : +3 (heuristique succession/patrimoine = clair,
+  `assess_objective_clarity` succession skip LLM).
+- `tests/test_case_classifier.py` : +1 (fallback keywords succession →
+  `investigation_successorale`).
+- `tests/test_qualification_builder_succession.py` (nouveau, modèle dette) :
+  structure du brouillon + 8 questions + infos reçues restituées + **absence du
+  texte flou** + exclusion `_is_vague_request`.
+- **314 passed** (308 + 6 nouveaux). ruff baseline inchangée.
+
+### Reste à valider (CDAL)
+- Re-classement + livraison du brouillon propre pour #643 en prod (après GO) :
+  `backfill_reclassify.py --only-id 643 --apply` puis
+  `deliver_pending_drafts.py --only-id 643 --apply`.
+- Les 8 questions succession sont une proposition — CDAL (le détective) peut
+  ajuster le wording métier.
+
 ## [1.25.26] — 2026-06-24 (mask_forwarder_sender : Reply-To uniquement, pas d'extraction body)
 
 ### Contexte

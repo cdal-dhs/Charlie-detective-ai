@@ -49,6 +49,19 @@ def test_extract_case_type_fallback_work_context():
     assert case == "infidelite_filature"
 
 
+def test_extract_case_type_fallback_succession():
+    """v1.25.27 — #643 : mots-clés succession/héritage/patrimoine →
+    investigation_successorale (et non non_determine)."""
+    case, _conf, _reason = _extract_case_type_from_json(
+        "pas du json",
+        search_text=(
+            "ma compagne est la seule héritière de son père, nous voulons "
+            "connaître l'ampleur de la succession et réserver nos droits"
+        ),
+    )
+    assert case == "investigation_successorale"
+
+
 @pytest.mark.asyncio
 async def test_classify_case_returns_valid_tuple(monkeypatch):
     async def fake_complete(*args, **kwargs):

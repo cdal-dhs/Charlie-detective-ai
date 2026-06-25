@@ -68,6 +68,25 @@ def test_heuristic_clear_objective_recherche() -> None:
     ) is True
 
 
+def test_heuristic_clear_objective_succession() -> None:
+    """v1.25.27 — #643 : « connaître l'ampleur de la succession et réserver nos
+    droits » = objectif clair (investigation patrimoniale). L'heuristique doit
+    le reconnaître sans déléguer au LLM (sinon gemma répondait OBJECTIF_FLOU)."""
+    assert _has_clear_objective_heuristic(
+        "le père de ma femme serait mourant, ma compagne est sa seule héritière "
+        "directe. Nous aimerions connaître l'ampleur de sa succession et réserver "
+        "nos droits le cas échéant."
+    ) is True
+
+
+def test_heuristic_clear_objective_patrimoine() -> None:
+    """Variantes lexicales investigation patrimoniale = objectif clair."""
+    assert _has_clear_objective_heuristic(
+        "Je souhaite évaluer le patrimoine de mon défunt père et faire valoir "
+        "mes droits d'héritier."
+    ) is True
+
+
 def test_heuristic_vague_enquete_without_objective() -> None:
     """#615 — « faire une petite enquête » sans objectif final = incertain → None."""
     msg = (
@@ -94,6 +113,18 @@ async def test_assess_objective_clear_skips_llm() -> None:
     with patch("app.pipeline.objective_check.complete", new=AsyncMock()) as m:
         verdict = await assess_objective_clarity(
             "Je veux prouver l'infidélité de mon mari par filature."
+        )
+    assert verdict is True
+    m.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_assess_objective_succession_skips_llm() -> None:
+    """#643 — l'objectif succession est reconnu clair par heuristique, sans LLM."""
+    with patch("app.pipeline.objective_check.complete", new=AsyncMock()) as m:
+        verdict = await assess_objective_clarity(
+            "Nous aimerions connaître l'ampleur de sa succession et réserver "
+            "nos droits le cas échéant."
         )
     assert verdict is True
     m.assert_not_called()

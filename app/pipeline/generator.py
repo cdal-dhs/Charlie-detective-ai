@@ -29,6 +29,7 @@ _CASE_LABELS = {
     "incapacite_travail": "Ouvrier en incapacité de travail",
     "infidelite_filature": "Surveillance / suspicion d'infidélité",
     "recherche_personne": "Recherche de personne / adresse",
+    "investigation_successorale": "Investigation patrimoniale / succession",
     "securite_passé_violences": "Passé de violences / sécurité",
     "contre_espionnage_micros": "Détection micros-caméras / installation",
     "non_determine": "Cas non déterminé",

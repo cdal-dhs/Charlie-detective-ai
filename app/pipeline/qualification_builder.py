@@ -768,6 +768,46 @@ def _extract_case_info(body: str, case: str) -> dict[str, str | None]:
         if micro_match:
             info["micros_contexte"] = _clean_value(micro_match.group(1))
 
+    # --- Investigation patrimoniale / succession (v1.25.27, cf. #643) ---
+    # On n'extrait que ce qui est déjà exprimé dans le message libre du client
+    # (relation, lieu de soins, pays de résidence, statut) afin de le restituer
+    # dans les "éléments reçus" et ne pas redemander ces précisions.
+    elif case == "investigation_successorale":
+        relation_match = re.search(
+            r"(p[èe]re|m[èe]re|grand-?[ -]?p[èe]re|grand-?[ -]?m[èe]re|fr[èe]re|s[oeu]eur|"
+            r"oncle|tante|cousin|cousine|fils|fille|beau-?[ -]?p[èe]re|"
+            r"ex-?[ -]?conj|ex-?[ -]?mari|ex-?[ -]?épouse|ex-?[ -]?partenaire)"
+            r"\s+de\s+(?:ma|mon|sa|son)\s+\w+",
+            clean_body,
+            re.IGNORECASE,
+        )
+        if relation_match:
+            info["relation_cible"] = _clean_value(relation_match.group(0))
+
+        soins_match = re.search(
+            r"(?:soign[ée]e?|hospitalis[ée]e?|soins|admise?)\s+[àa]\s+"
+            r"([A-ZÀ-Ÿ][\wà-ÿ'.\s-]{1,60}?)(?=[,.]|\n|$)",
+            clean_body,
+        )
+        if soins_match:
+            info["lieu_soins"] = _clean_value(soins_match.group(1))
+
+        pays_match = re.search(
+            r"habite?\s+(?:(?:en|à|a|au|aux|la|le|les|l|d)\s+)?"
+            r"([A-ZÀ-Ÿ][\wà-ÿ'.\s-]{1,80}?)(?=[,.]|\n|$)",
+            clean_body,
+        )
+        if pays_match:
+            info["pays_residence"] = _clean_value(pays_match.group(1))
+
+        statut_match = re.search(
+            r"\b(ex-?[ -]?(?:diplomate|ambassadeur|ministre|fonctionnaire|élu))\b",
+            clean_body,
+            re.IGNORECASE,
+        )
+        if statut_match:
+            info["statut_cible"] = _clean_value(statut_match.group(0))
+
     return info
 
 
@@ -808,6 +848,10 @@ _CASE_QUESTION_SPECS: dict[str, list[tuple[str, list[str]]]] = {
     "recuperation_dette": [
         # Gardé volontairement vide : le builder dédié gère sa propre logique.
     ],
+    "investigation_successorale": [
+        # Idem recuperation_dette : le builder dédié _build_succession_draft
+        # gère sa propre logique de questions (v1.25.27, cf. #643).
+    ],
     "securite_passé_violences": [
         ("Vos nom et prénom complets", ["nom", "prenom", "nom_complet"]),
         ("Votre adresse complète (ou société + administrateur + TVA si professionnel)", ["adresse"]),
@@ -831,6 +875,7 @@ _CASE_LABELS = {
     "infidelite_filature": "une filature / surveillance",
     "recherche_personne": "une recherche de personne ou d'adresse",
     "recuperation_dette": "une récupération de dette ou de créance",
+    "investigation_successorale": "une investigation patrimoniale / succession",
     "securite_passé_violences": "une recherche sur le passé d'une personne",
     "contre_espionnage_micros": "une détection de micros ou installation de caméras",
     "non_determine": "une mission d'enquête",
@@ -866,6 +911,11 @@ def _rephrase_need(subject: str, body: str, case: str) -> str:
         return (
             "Nous accusons bonne réception de votre demande concernant une personne de "
             "votre entourage qui vous doit une somme importante d'argent."
+        )
+    if case == "investigation_successorale":
+        return (
+            "Nous accusons bonne réception de votre demande concernant l'évaluation "
+            "d'une succession et la réservation de vos droits d'héritier."
         )
     if case == "securite_passé_violences":
         return "Je comprends que vous souhaitez obtenir des éléments sur le passé d'une personne."
@@ -962,6 +1012,16 @@ def _format_received_info(
     elif case == "contre_espionnage_micros":
         if case_info.get("micros_contexte"):
             lines.append(f"- Contexte du lieu : {case_info['micros_contexte']}")
+
+    elif case == "investigation_successorale":
+        if case_info.get("relation_cible"):
+            lines.append(f"- Personne concernée : {case_info['relation_cible']}")
+        if case_info.get("lieu_soins"):
+            lines.append(f"- Lieu de soins : {case_info['lieu_soins']}")
+        if case_info.get("pays_residence"):
+            lines.append(f"- Pays de résidence connu : {case_info['pays_residence']}")
+        if case_info.get("statut_cible"):
+            lines.append(f"- Statut : {case_info['statut_cible']}")
 
     return lines
 
@@ -1347,6 +1407,13 @@ _LEGAL_ALTERNATIVE: dict[str, str] = {
         "retrouver la personne et établir un dossier de créance dans le "
         "respect du cadre légal"
     ),
+    "investigation_successorale": (
+        "mener une investigation patrimoniale par des sources légales "
+        "(recherche d'actifs déclarés, identification des biens et comptes "
+        "connus, enquête de voisinage et de proximité), en coordination avec "
+        "le notaire compétent — afin d'établir un état du patrimoine exploitable "
+        "pour faire valoir vos droits d'héritier"
+    ),
     "non_determine": (
         "mener une enquête sur le terrain par des moyens légaux : surveillance, "
         "filature, constat d'adresse, recherche d'identité ou enquête de voisinage, "
@@ -1511,6 +1578,13 @@ def build_qualification_draft(
     if case == "recuperation_dette":
         questions = _CASE_QUESTIONS.get(case, [])
         lines = _build_dette_draft(greeting, first_name, questions, mailbox, client_info)
+    elif case == "investigation_successorale":
+        # v1.25.27 — brouillon dédié succession (cf. #643). Pas de tarifs : la
+        # stratégie d'investigation patrimoniale dépend des éléments reçus.
+        questions = _CASE_QUESTIONS.get(case, [])
+        lines = _build_succession_draft(
+            greeting, first_name, questions, mailbox, client_info, case_info,
+        )
     else:
         lines = _build_standard_draft(
             greeting=greeting,
@@ -1555,6 +1629,7 @@ _CASE_LABELS_SHORT: dict[str, str] = {
     "infidelite_filature": "Filature / surveillance",
     "recherche_personne": "Recherche de personne",
     "recuperation_dette": "Récupération de dette",
+    "investigation_successorale": "Investigation successorale",
     "securite_passé_violences": "Enquête de passé",
     "contre_espionnage_micros": "Détection micros / caméras",
     "non_determine": "Demande d'enquête",
@@ -1625,6 +1700,12 @@ def _is_vague_request(
 ) -> bool:
     """Vrai si la demande est floue (clarification nécessaire avant devis)."""
     if case == "recuperation_dette":
+        return False
+    # v1.25.27 — investigation_successorale : le brouillon dédié pose ses propres
+    # questions succession d'office. Ne JAMAIS tomber dans le brouillon flou
+    # générique qui redemande l'objectif — l'objectif est par définition clair
+    # pour ce cas (évaluer une succession / réserver ses droits). Cf. #643.
+    if case == "investigation_successorale":
         return False
     # Une question de tarif explicite = le client sait ce qu'il veut, on répond
     # avec le brouillon standard (qui contient déjà les tarifs + questions).
@@ -1757,6 +1838,22 @@ _CASE_QUESTIONS: dict[str, list[str]] = {
         "Employeur ou activité professionnelle de la personne",
         "Biens éventuels de la personne (véhicules, société, biens immobiliers, etc.)",
     ],
+    "investigation_successorale": [
+        "Identité complète de la personne concernée (nom, prénom, date de naissance si connue)",
+        "État actuel, date et lieu du décès (ou lieu de soins / hospitalisation)",
+        "Dernière adresse connue de la personne (pays et ville)",
+        (
+            "Lien de parenté de l'héritier avec la personne concernée et autres "
+            "héritiers connus (enfants, conjoint survivant)"
+        ),
+        "Nationalité et statut de la personne (ex-diplomate, fonctionnaire, etc.)",
+        "Notaire déjà contacté ou connu pour cette succession",
+        "Banques, comptes, biens immobiliers ou sociétés connus de la personne",
+        (
+            "Existence d'un testament connu et pays où la succession sera ouverte "
+            "(Belgique, France, Madagascar, etc.)"
+        ),
+    ],
     "securite_passé_violences": [
         "Anciens employeurs ou villes de résidence passées de la cible",
         "Adresse professionnelle éventuelle de la cible",
@@ -1825,6 +1922,91 @@ def _build_dette_draft(
         "Sur base de ces éléments, nous pourrons analyser votre dossier et vous proposer "
         "une stratégie d'intervention adaptée, dans le respect du cadre légal applicable aux "
         "activités de détective privé en Belgique.",
+        "",
+        "Nous restons à votre disposition pour toute information complémentaire.",
+        "",
+        "Bien à vous,",
+    ])
+
+    if first_name:
+        lines.extend([
+            "",
+            first_name,
+        ])
+
+    lines.extend([
+        "",
+        "Daniel Hurchon",
+        f"{mailbox.brand}",
+        "GSM 0471/31.81.20",
+        "contact@detectivebelgique.be",
+    ])
+    return lines
+
+
+def _build_succession_draft(
+    greeting: str,
+    first_name: str | None,
+    questions: list[str],
+    mailbox: MailboxConfig,
+    client_info: dict[str, str | None],
+    case_info: dict[str, str | None],
+) -> list[str]:
+    """Brouillon spécifique pour investigation patrimoniale / succession.
+
+    v1.25.27 (cf. #643 Boeteman) : le client veut connaître l'ampleur d'une
+    succession et réserver ses droits d'héritier. Sur le modèle de
+    ``_build_dette_draft`` : accuse réception, restitue les éléments déjà fournis
+    (infos client + éléments succession extraits du message libre), pose les
+    questions spécifiques, puis closing. Pas de tarifs (la stratégie d'investigation
+    patrimoniale dépend des éléments reçus — comme pour la dette).
+    """
+    received = _format_received_info(client_info, case_info, "investigation_successorale")
+
+    lines = [
+        greeting,
+        "",
+        "Nous accusons bonne réception de votre demande concernant l'évaluation "
+        "d'une succession et la réservation de vos droits d'héritier.",
+        "",
+    ]
+
+    if received:
+        lines.extend([
+            "Voici les éléments que nous avons bien reçus de votre part :",
+            "",
+            *received,
+            "",
+        ])
+
+    lines.extend([
+        "Afin de pouvoir évaluer la situation et vous proposer une stratégie adaptée, "
+        "pourriez-vous nous communiquer :",
+        "",
+    ])
+    for q in questions:
+        lines.append(f"- {q};")
+
+    missing_client: list[str] = []
+    if not client_info.get("adresse"):
+        missing_client.append(
+            "- Votre adresse complète "
+            "(afin de pouvoir vous recontacter par courrier si nécessaire);"
+        )
+
+    if missing_client:
+        lines.extend([
+            "",
+            "De votre côté, pour finaliser le dossier :",
+        ])
+        lines.extend(missing_client)
+
+    lines.extend([
+        "",
+        "Sur base de ces éléments, nous pourrons analyser votre dossier et vous proposer "
+        "une stratégie d'intervention adaptée, dans le respect du cadre légal applicable "
+        "aux activités de détective privé en Belgique (et en coordination avec le notaire "
+        "compétent le cas échéant).",
         "",
         "Nous restons à votre disposition pour toute information complémentaire.",
         "",

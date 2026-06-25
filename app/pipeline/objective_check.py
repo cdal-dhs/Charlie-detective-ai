@@ -48,6 +48,10 @@ _FORM_FIELD_RE = re.compile(
 # Objectifs finals ÉVIDENTS (cas Daniel). Présence d'un de ces termes dans le
 # message libre = objectif clair → pas de LLM. On évite le générique « enquête »
 # (trop large : « faire une petite enquête » ≠ objectif précis).
+# v1.25.27 — investigation patrimoniale / successorale (cf. #643 Boeteman :
+# « connaître l'ampleur de la succession et réserver nos droits »). Sans ces
+# termes, l'heuristique déléguait à gemma qui répondait OBJECTIF_FLOU → brouillon
+# « demande floue » redemandant un objectif déjà exprimé (faux négatif intolérable).
 _CLEAR_OBJECTIVE_RE = re.compile(
     r"\b(?:"
     r"infid[ée]lit[ée]|filature|filer|surveiller|surveillance|"
@@ -60,7 +64,10 @@ _CLEAR_OBJECTIVE_RE = re.compile(
     r"constat(?:er)?|preuve(?:s)?\s+de|fraude(?:uleuse|use)?|"
     r"adult[èe]re|cocufiage|tromperie|"
     r"garder\s+les\s+enfants|garde\s+des\s+enfants|"
-    r"vol|d[ée]tournement|abus|escroquerie"
+    r"vol|d[ée]tournement|abus|escroquerie|"
+    r"succession|h[ée]ritage|h[ée]ritier|h[ée]riti[èe]re|patrimoine|"
+    r"d[ée]funt|d[ée]c[èe]s|r[ée]server\s+(?:nos|mes|ses|vos)\s+droits|"
+    r"droits\s+successoraux|legs?|testament"
     r")\b",
     re.IGNORECASE,
 )
@@ -121,9 +128,11 @@ async def _has_clear_objective_llm(free_msg: str) -> bool | None:
                 "ce qu'il veut obtenir concrètement de l'intervention "
                 "(prouver une infidélité, surveiller une personne, retrouver "
                 "quelqu'un, constater un fait, récupérer une dette, vérifier une "
-                "incapacité de travail, détecter des micros…) — ou juste une "
-                "intention vague SANS but précis (ex: « faire une petite enquête », "
-                "« j'ai besoin d'un détective » sans dire pourquoi) ? "
+                "incapacité de travail, détecter des micros, évaluer un patrimoine "
+                "ou une succession, réserver ses droits d'héritier, localiser les "
+                "biens d'un défunt…) — ou juste une intention vague SANS but précis "
+                "(ex: « faire une petite enquête », « j'ai besoin d'un détective » "
+                "sans dire pourquoi) ? "
                 "Réponds UNIQUEMENT par OBJECTIF_CLAIR ou OBJECTIF_FLOU, rien d'autre."
             ),
         },
