@@ -53,6 +53,7 @@ def _make_db(tmp_path: Path) -> Path:
             body_preview TEXT,
             body TEXT,
             delivered_at TEXT,
+            suggested_subject TEXT,
             UNIQUE(imap_uid, mailbox_name)
         )
         """

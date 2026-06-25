@@ -133,7 +133,7 @@ async def _fetch_mails(
     cols = [
         "id", "mailbox_name", "subject", "sender", "received_at",
         "category", "status", "priority", "processed_at", "body_preview",
-        "body", "attachment_count", "ai_draft",
+        "body", "attachment_count", "ai_draft", "suggested_subject",
     ]
 
     def _mask_sender(row_dict: dict) -> dict:
@@ -141,6 +141,10 @@ async def _fetch_mails(
         row_dict["sender"] = mask_forwarder_sender(
             row_dict.get("sender", ""), row_dict.get("body", "")
         )
+        # v1.25.28 — sujet lisible du brouillon prioritaire sur le sujet original
+        # (template WP absurde / tag [NO_EMAIL_IN_THE_FORM]). Cf. #643.
+        if row_dict.get("suggested_subject"):
+            row_dict["subject"] = row_dict["suggested_subject"]
         return row_dict
 
     # ── Requête 1 : HOT (demande_client + high + pending) ──
@@ -153,7 +157,7 @@ async def _fetch_mails(
         "SELECT m.id, m.mailbox_name, m.subject, m.sender, m.received_at, m.category, "
         "m.status, m.priority, m.processed_at, m.body_preview, m.body, "
         "(SELECT COUNT(*) FROM email_attachment WHERE mail_processed_id = m.id) AS attachment_count, "
-        "ai_draft "
+        "ai_draft, m.suggested_subject "
         "FROM mail_processed m WHERE " + " AND ".join(hot_where) + " "
         f"ORDER BY {col} {order} LIMIT ?"
     )
@@ -171,7 +175,7 @@ async def _fetch_mails(
         "SELECT m.id, m.mailbox_name, m.subject, m.sender, m.received_at, m.category, "
         "m.status, m.priority, m.processed_at, m.body_preview, m.body, "
         "(SELECT COUNT(*) FROM email_attachment WHERE mail_processed_id = m.id) AS attachment_count, "
-        "ai_draft "
+        "ai_draft, m.suggested_subject "
         "FROM mail_processed m WHERE " + " AND ".join(other_where) + " "
         f"ORDER BY (m.status = 'pending') DESC, (m.priority = 'high') DESC, {col} {order} LIMIT ?"
     )
@@ -194,7 +198,7 @@ async def _fetch_mail(db: aiosqlite.Connection, mail_id: int) -> dict | None:
     async with db.execute(
         "SELECT id, mailbox_name, subject, sender, received_at, category, "
         "status, priority, ai_draft, human_draft, reviewed_by, reviewed_at, "
-        "sent_at, sent_by, body_preview, body "
+        "sent_at, sent_by, body_preview, body, suggested_subject "
         "FROM mail_processed WHERE id = ?",
         (mail_id,),
     ) as cursor:
@@ -205,10 +209,14 @@ async def _fetch_mail(db: aiosqlite.Connection, mail_id: int) -> dict | None:
         "id", "mailbox_name", "subject", "sender", "received_at", "category",
         "status", "priority", "ai_draft", "human_draft", "reviewed_by",
         "reviewed_at", "sent_at", "sent_by", "body_preview", "body",
+        "suggested_subject",
     ]
     mail = dict(zip(cols, row, strict=True))
     # v1.25.18 — affiche NO_EMAIL_IN_THE_FORM pour les forwarders WP sans email client.
     mail["sender"] = mask_forwarder_sender(mail.get("sender", ""), mail.get("body", ""))
+    # v1.25.28 — sujet lisible du brouillon prioritaire sur le sujet original. Cf. #643.
+    if mail.get("suggested_subject"):
+        mail["subject"] = mail["suggested_subject"]
     return mail
 
 

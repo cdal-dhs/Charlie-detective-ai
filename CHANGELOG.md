@@ -1,5 +1,52 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.26.0] — 2026-06-25 (sujet de brouillon lisible partout : cockpit + IMAP)
+
+### Contexte
+Fin du feature « sujet de brouillon lisible » ouvert en v1.25.28 (persistance DB)
+et v1.25.27 (cas `investigation_successorale`). Après la v1.25.28, le brouillon
+#643 était livré en Drafts IMAP avec un **sujet propre**
+(`Investigation successorale — Philippe Boeteman`), MAIS le **cockpit web**
+affichait encore le sujet original moche
+(`Nouveau Message De Détective privé Belgique - Prenons contact [NO_EMAIL_IN_THE_FORM]`)
+dans l'inbox et la page conversation. Incohérence entre le sujet vu par Daniel
+(Drafts IMAP) et celui vu par CDAL (cockpit).
+
+### Ajouté
+- **Affichage cockpit du `suggested_subject`** : l'inbox et la page conversation
+  affichent désormais le sujet lisible du brouillon (`suggested_subject`) en
+  priorité sur le sujet original (template WP absurde / tag
+  `[NO_EMAIL_IN_THE_FORM]`).
+  - `app/web/app_routes.py` `_fetch_mails` (inbox) : SELECT `suggested_subject`
+    + écrase `subject` affiché quand `suggested_subject` est non vide (logique
+    `display_subject = suggested_subject or subject`, symétrique à
+    `append_draft` côté IMAP).
+  - `app/web/app_routes.py` `_fetch_mail` (conversation) : idem — titre de page
+    + header `#mail-subject` affichent le sujet lisible.
+  - Zéro modification de template Jinja (les templates lisent `m.subject` /
+    `mail.subject`, écrasés côté Python).
+  - Le bouton `fix-subject` (v1.25.4, correction LLM manuelle) reste intact :
+    il lit le `subject` DB via son propre SELECT, indépendant du dict affiché.
+
+### Tests
+- `tests/test_web_inbox_suggested_subject.py` (3 tests) : inbox affiche
+  `suggested_subject` (et masque le tag), conversation idem, contrôle sans
+  `suggested_subject` garde le sujet original.
+- `tests/test_web_inbox_render.py` : colonne `suggested_subject` ajoutée au
+  schéma de test (le SELECT inbox l'inclut désormais).
+- 323 tests verts (non-régression). ruff : aucune erreur nouvelle.
+
+### Notes
+- Les anciens `demande_client` en DB avant la v1.25.28 n'ont pas de
+  `suggested_subject` (None) → ils affichent encore le sujet original. Les
+  nouveaux mails (poller v1.25.28+) et les mails re-traités par backfill ont
+  le sujet lisible. Un backfill bulk de `suggested_subject` est possible plus
+  tard si on veut nettoyer tout l'historique d'un coup.
+- Le bug secondaire `[NO_EMAIL_IN_THE_FORM]` dans le sujet original en DB
+  (tag posé par `mask_forwarder_sender`/`tag_no_email`) n'est pas retiré — le
+  `suggested_subject` le masque à l'affichage (cockpit + IMAP). Le tag reste
+  en DB pour le forensic/audit.
+
 ## [1.25.28] — 2026-06-25 (sujet brouillon lisible persisté — fix livreur backfill)
 
 ### Contexte
