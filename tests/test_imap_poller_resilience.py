@@ -107,6 +107,7 @@ def _setup_db(tmp_path):
             status TEXT,
             priority TEXT,
             reply_to TEXT,
+            suggested_subject TEXT,
             processed_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
         """

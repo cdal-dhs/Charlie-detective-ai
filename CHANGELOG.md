@@ -1,5 +1,68 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.25.28] — 2026-06-25 (sujet brouillon lisible persisté — fix livreur backfill)
+
+### Contexte
+Suite du fix #643 (v1.25.27). Après re-livraison du brouillon propre
+`investigation_successorale` via le livreur backfill (`deliver_pending_drafts`),
+le **body** du brouillon en Drafts IMAP était correct (8 questions succession,
+infos restituées, objectif non redemandé) MAIS le **sujet IMAP** restait moche :
+
+```
+DEMANDE D'Approbation - Reponse Demande Client : Nouveau Message De Détective privé Belgique - Prenons contact [NO_EMAIL_IN_THE_FORM]
+```
+
+au lieu du sujet lisible attendu :
+
+```
+DEMANDE D'Approbation - Reponse Demande Client : Investigation successorale — Philippe Boeteman
+```
+
+### Cause racine
+`scripts/deliver_pending_drafts.py` reconstruisait le `GenerationResult` depuis
+la ligne DB **sans** `suggested_subject` (champ non persisté en base) →
+`append_draft` (`app/delivery/imap_draft.py:240` `draft_subject = gen.suggested_subject
+or incoming.subject`) retombait sur `incoming.subject` (le sujet original du mail,
+template WP absurde + tag `[NO_EMAIL_IN_THE_FORM]`). Le poller live, lui, a le
+`GenerationResult` complet → sujets propres (ex. #629). Bug structurel du seul
+chemin livreur-backfill.
+
+### Fixé
+- **Persistance `suggested_subject`** en DB à la génération :
+  - `app/web/db_migrate.py` : colonne `suggested_subject TEXT` ajoutée à
+    `_MAIL_PROCESSED_COLS` (migration idempotente au démarrage via `main.py`).
+  - `app/workers/imap_poller.py` `_persist` : nouveau param `suggested_subject`,
+    stocké à l'INSERT (nouveau mail) et à l'UPDATE (COALESCE — n'écrase pas une
+    valeur existante). Appelant : `gen.suggested_subject if gen else ""`.
+  - `scripts/backfill_reclassify.py` : `_regenerate_draft` retourne désormais
+    `(old_cat, new_cat, draft, suggested_subject)` ; `_update_db` persiste
+    `suggested_subject` (COALESCE).
+- **Lecture par le livreur** : `scripts/deliver_pending_drafts.py`
+  `_fetch_pending` sélectionne `suggested_subject` ; le `GenerationResult`
+  reconstruit le passe à `append_draft` → sujet IMAP lisible.
+- `_ensure_column` (livreur) ajoute désormais aussi `suggested_subject`
+  idempotemment (défense si la DB n'a pas été migrée par le poller).
+
+### Ajouté
+- `tests/test_suggested_subject_v1_25_28.py` (7 tests) : persistance poller
+  `_persist` (INSERT + UPDATE COALESCE), persistance backfill `_update_db`
+  (écriture + non-écrasement), `_ensure_column` idempotent, `_fetch_pending`
+  retourne `suggested_subject`.
+- Schémas de test mis à jour (`test_imap_poller_resilience.py`,
+  `test_v1_25_22_fixes.py`) : colonne `suggested_subject` ajoutée aux
+  `CREATE TABLE mail_processed` (l'INSERT du poller l'inclut désormais).
+
+### Tests
+320 tests verts (non-régression). ruff : aucune erreur nouvelle sur les
+fichiers modifiés.
+
+### Note
+Le bug secondaire `[NO_EMAIL_IN_THE_FORM]` dans le sujet original en DB (tag
+posé par `mask_forwarder_sender` quand le sender technique n'a pas de Reply-To)
+n'est pas traité ici — le sujet lisible `suggested_subject` le masque dans le
+sujet du brouillon IMAP. Le tag reste visible dans l'inbox cockpit (champ
+subject original).
+
 ## [1.25.27] — 2026-06-25 (investigation successorale : objectif reconnu + cas métier dédié)
 
 ### Contexte

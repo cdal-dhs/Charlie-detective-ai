@@ -26,6 +26,11 @@ _MAIL_PROCESSED_COLS: list[tuple[str, str]] = [
     # v1.25.22 — header Reply-To du mail entrant. Pour les forwarders WP, le
     # vrai email client vit ici (cas #629 : ckremp@vo.lu). Vide sinon.
     ("reply_to", "TEXT"),
+    # v1.25.28 — sujet de brouillon lisible (ex. "Investigation successorale —
+    # Philippe Boeteman") persisté à la génération. Permet au livreur backfill
+    # (deliver_pending_drafts) de livrer un sujet propre au lieu du sujet original
+    # (template WP absurde / tag [NO_EMAIL_IN_THE_FORM]). Cf. #643.
+    ("suggested_subject", "TEXT"),
 ]
 
 

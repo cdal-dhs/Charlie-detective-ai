@@ -712,6 +712,7 @@ def _persist(
     priority: str = "normal",
     status: str = "pending",
     reply_to: str = "",
+    suggested_subject: str = "",
 ) -> int:
     """Persiste le mail. En cas de conflit, ne JAMAIS écraser category/priority/status cockpit.
 
@@ -725,6 +726,7 @@ def _persist(
     body = str(body) if body is not None else ""
     ai_draft = str(ai_draft) if ai_draft is not None else ""
     reply_to = str(reply_to) if reply_to is not None else ""
+    suggested_subject = str(suggested_subject) if suggested_subject is not None else ""
     # v1.25.24 — l'expéditeur stocké = expéditeur affiché : on masque le
     # forwarder/robot (newsletter@/wordpress@/mail@detective/noreply@) au
     # profit du vrai client (Reply-To valide, sinon email du body, sinon
@@ -749,10 +751,19 @@ def _persist(
                     body = COALESCE(NULLIF(?, ''), body),
                     ai_draft = COALESCE(NULLIF(?, ''), ai_draft),
                     reply_to = COALESCE(NULLIF(?, ''), reply_to),
+                    suggested_subject = COALESCE(NULLIF(?, ''), suggested_subject),
                     processed_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                 """,
-                (draft_generated, body_preview, body, ai_draft, reply_to, mail_id),
+                (
+                    draft_generated,
+                    body_preview,
+                    body,
+                    ai_draft,
+                    reply_to,
+                    suggested_subject,
+                    mail_id,
+                ),
             )
             conn.commit()
             return mail_id
@@ -762,8 +773,8 @@ def _persist(
             """
             INSERT INTO mail_processed
                 (imap_uid, mailbox_name, subject, sender, received_at, category, draft_generated,
-                 body_preview, body, ai_draft, status, priority, reply_to)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 body_preview, body, ai_draft, status, priority, reply_to, suggested_subject)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id
             """,
             (
@@ -780,6 +791,7 @@ def _persist(
                 status,
                 priority,
                 reply_to,
+                suggested_subject,
             ),
         )
         row = cursor.fetchone()
@@ -1393,6 +1405,7 @@ async def _process_single_mail(
             priority,
             status,
             reply_to,
+            gen.suggested_subject if gen else "",
         )
 
         # --- Sauvegarde locale des pièces jointes (tous les emails) ---

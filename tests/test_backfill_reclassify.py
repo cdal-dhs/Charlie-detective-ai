@@ -124,16 +124,23 @@ def test_regenerate_replaces_draft_when_reclassified_to_demande(
         return "demande_client"
 
     async def fake_generate(**kwargs):
-        return SimpleNamespace(draft="BROUILLON DETERMINISTE REFUS ILLEGAL")
+        return SimpleNamespace(
+            draft="BROUILLON DETERMINISTE REFUS ILLEGAL",
+            suggested_subject="Refus demande illégale — Serge M",
+        )
 
     monkeypatch.setattr("scripts.backfill_reclassify.classify", fake_classify)
     monkeypatch.setattr("scripts.backfill_reclassify.generate_draft", fake_generate)
 
-    old_cat, new_cat, draft = asyncio.run(_regenerate_draft(mail, mailbox, apply=True))
+    old_cat, new_cat, draft, suggested_subject = asyncio.run(
+        _regenerate_draft(mail, mailbox, apply=True)
+    )
 
     assert old_cat == "phishing"
     assert new_cat == "demande_client"
     assert draft == "BROUILLON DETERMINISTE REFUS ILLEGAL"
+    # v1.25.28 — suggested_subject propagé pour persistance + livreur backfill.
+    assert suggested_subject == "Refus demande illégale — Serge M"
 
 
 def test_regenerate_no_draft_when_still_not_demande(mailbox: MailboxConfig, monkeypatch) -> None:
@@ -151,7 +158,10 @@ def test_regenerate_no_draft_when_still_not_demande(mailbox: MailboxConfig, monk
 
     monkeypatch.setattr("scripts.backfill_reclassify.classify", fake_classify)
 
-    old_cat, new_cat, draft = asyncio.run(_regenerate_draft(mail, mailbox, apply=True))
+    old_cat, new_cat, draft, suggested_subject = asyncio.run(
+        _regenerate_draft(mail, mailbox, apply=True)
+    )
 
     assert new_cat == "spam"
     assert draft == ""
+    assert suggested_subject == ""

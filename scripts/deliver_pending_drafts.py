@@ -44,14 +44,15 @@ log = structlog.get_logger()
 
 
 async def _ensure_column(db_path: Path) -> None:
-    """Ajoute la colonne delivered_at si elle n'existe pas (idempotent)."""
+    """Ajoute les colonnes manquantes (delivered_at, suggested_subject) — idempotent."""
     async with aiosqlite.connect(db_path) as db:
         async with db.execute("PRAGMA table_info(mail_processed)") as cur:
             cols = [row[1] for row in await cur.fetchall()]
-        if "delivered_at" not in cols:
-            log.info("deliver.add_column", column="delivered_at")
-            await db.execute("ALTER TABLE mail_processed ADD COLUMN delivered_at TEXT")
-            await db.commit()
+        for col in ("delivered_at", "suggested_subject"):
+            if col not in cols:
+                log.info("deliver.add_column", column=col)
+                await db.execute(f"ALTER TABLE mail_processed ADD COLUMN {col} TEXT")
+                await db.commit()
 
 
 async def _fetch_pending(
@@ -61,7 +62,7 @@ async def _fetch_pending(
         db.row_factory = aiosqlite.Row
         sql = """
             SELECT id, imap_uid, mailbox_name, subject, sender, received_at,
-                   ai_draft, body
+                   ai_draft, body, suggested_subject
             FROM mail_processed
             WHERE category = 'demande_client'
               AND draft_generated = 1
@@ -164,6 +165,10 @@ async def main(apply: bool, limit: int | None, only_id: int | None) -> None:
             model_used="",  # non utilisé par append_draft
             category="demande_client",  # non utilisé par append_draft
             vault_notes=[],
+            # v1.25.28 — sujet lisible persisté à la génération (backfill/poller).
+            # Sans ça, append_draft retombe sur incoming.subject (template WP
+            # absurde / tag [NO_EMAIL_IN_THE_FORM]). Cf. #643.
+            suggested_subject=mail.get("suggested_subject") or None,
         )
 
         if not apply:

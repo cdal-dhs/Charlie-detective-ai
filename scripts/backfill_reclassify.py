@@ -106,8 +106,8 @@ def _is_backfill_followup(subject: str, body: str, sender: str) -> bool:
 
 async def _regenerate_draft(
     mail: dict, mailbox: MailboxConfig, apply: bool
-) -> tuple[str, str, str]:
-    """Reclassifie + génère brouillon. Retourne (old_cat, new_cat, draft)."""
+) -> tuple[str, str, str, str]:
+    """Reclassifie + génère brouillon. Retourne (old_cat, new_cat, draft, suggested_subject)."""
     body = mail["body"] or ""
     subject = mail["subject"] or ""
     sender = mail["sender"] or ""
@@ -115,6 +115,7 @@ async def _regenerate_draft(
     new_cat = await classify(subject, body, sender)
 
     draft = ""
+    suggested_subject = ""
     if new_cat == "demande_client" and apply:
         language = detect_language(body, default=mailbox.default_lang)
         # v1.25.11 — si c'est un suivi client, générer un ack court au lieu du
@@ -131,8 +132,11 @@ async def _regenerate_draft(
             is_followup_response=is_followup,
         )
         draft = result.draft
+        # v1.25.28 — persister le suggested_subject pour que le livreur backfill
+        # (deliver_pending_drafts) livre un sujet propre au lieu du sujet original.
+        suggested_subject = result.suggested_subject or ""
 
-    return mail["category"], new_cat, draft
+    return mail["category"], new_cat, draft, suggested_subject
 
 
 def _update_db(
@@ -141,8 +145,9 @@ def _update_db(
     new_category: str,
     draft: str,
     apply: bool,
+    suggested_subject: str = "",
 ) -> None:
-    """Update category + ai_draft + status + priority en base."""
+    """Update category + ai_draft + status + priority + suggested_subject en base."""
     if not apply:
         return
     import sqlite3
@@ -157,10 +162,11 @@ def _update_db(
                     status = 'pending',
                     priority = 'high',
                     ai_draft = ?,
-                    draft_generated = 1
+                    draft_generated = 1,
+                    suggested_subject = COALESCE(NULLIF(?, ''), suggested_subject)
                 WHERE id = ?
                 """,
-                (new_category, draft, mail_id),
+                (new_category, draft, suggested_subject, mail_id),
             )
         else:
             conn.execute(
@@ -203,7 +209,9 @@ async def main(apply: bool, limit: int | None, only_id: int | None) -> None:
             continue
 
         try:
-            old_cat, new_cat, draft = await _regenerate_draft(mail, mailbox, apply)
+            old_cat, new_cat, draft, suggested_subject = await _regenerate_draft(
+                mail, mailbox, apply
+            )
         except Exception as e:
             log.error(
                 "backfill.error",
@@ -232,7 +240,12 @@ async def main(apply: bool, limit: int | None, only_id: int | None) -> None:
         # Update DB
         try:
             _update_db(
-                settings.db_agent_state, mail["id"], new_cat, draft, apply
+                settings.db_agent_state,
+                mail["id"],
+                new_cat,
+                draft,
+                apply,
+                suggested_subject,
             )
         except Exception as e:
             log.error("backfill.db_update_failed", mail_id=mail["id"], error=str(e))
