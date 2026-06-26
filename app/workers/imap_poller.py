@@ -1043,7 +1043,7 @@ def _is_search_command_error(resp) -> bool:
 
 async def _search_unprocessed(
     client: aioimaplib.IMAP4_SSL, mailbox: MailboxConfig, settings
-) -> tuple[Response, bool]:
+) -> tuple[aioimaplib.Response, bool]:
     """Exécute SEARCH UNKEYWORD AgentProcessed avec fallbacks pour OVH.
 
     Retourne (response, needs_db_filter) où needs_db_filter=True signifie que

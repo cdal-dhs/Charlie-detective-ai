@@ -1,5 +1,22 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.27.3] — 2026-06-26 (fix NameError Response au import module — OVH search)
+
+### Contexte
+Le hotfix v1.27.2 fonctionnait en tests mais le module `app.workers.imap_poller.py`
+ne chargeait plus en prod : `NameError: name 'Response' is not defined` dans
+l'annotation de retour de `_search_unprocessed()`. Ce type n'était pas importé
+au niveau module.
+
+### Fixé
+- **`app/workers/imap_poller.py`** : annotation `_search_unprocessed() -> tuple[aioimaplib.Response, bool]`
+  (pas de symbole `Response` non défini).
+
+### Changé
+- `app/_version.py` : `VERSION = "1.27.3"`.
+
+---
+
 ## [1.27.2] — 2026-06-26 (hotfix SEARCH OVH — fallback ALL + filtrage DB)
 
 ### Contexte
