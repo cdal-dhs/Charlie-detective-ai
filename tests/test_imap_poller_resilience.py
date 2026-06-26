@@ -25,6 +25,7 @@ from app.workers.imap_poller import (
     _decode_header,
     _is_badcharset,
     _is_client_followup,
+    _is_search_command_error,
     _persist,
     _process_single_mail,
 )
@@ -775,3 +776,24 @@ def test_build_search_criteria_uses_agent_flag():
     settings = MagicMock()
     settings.process_since_date = ""
     assert _build_search_criteria(settings) == "UNKEYWORD AgentProcessed"
+
+
+def test_is_search_command_error_detects_badcharset_and_argument_error():
+    """_is_search_command_error détecte BADCHARSET et Command Argument Error."""
+    resp = MagicMock()
+    resp.result = "NO"
+    resp.lines = [b"[BADCHARSET (US-ASCII)] The specified charset is not supported."]
+    assert _is_search_command_error(resp) is True
+
+    resp2 = MagicMock()
+    resp2.result = "BAD"
+    resp2.lines = [b"Command Argument Error. 11"]
+    assert _is_search_command_error(resp2) is True
+
+
+def test_is_search_command_error_false_on_ok():
+    """Réponse SEARCH OK -> pas d'erreur."""
+    resp = MagicMock()
+    resp.result = "OK"
+    resp.lines = [b"1 2 3"]
+    assert _is_search_command_error(resp) is False

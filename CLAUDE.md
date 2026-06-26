@@ -45,7 +45,7 @@
 
 ## 3. Stack technique
 
-État au **2026-06-26 (v1.27.1)**. La SPEC.md d'origine est désalignée sur certains points — **cette section fait foi**.
+État au **2026-06-26 (v1.27.2)**. La SPEC.md d'origine est désalignée sur certains points — **cette section fait foi**.
 
 | Couche | Choix |
 |---|---|
@@ -216,7 +216,7 @@ ssh root@69.62.110.165 'cd /opt/DETECTIVE && git pull origin main && docker comp
 
 ## 7. État courant du projet
 
-État au **2026-06-26 — v1.27.1** déployée en prod. Voir `HANDOVER.md` pour le détail complet, `CHANGELOG.md` pour l'historique, `docs/ROADMAP.md` pour la roadmap à jour.
+État au **2026-06-26 — v1.27.2** déployée en prod. Voir `HANDOVER.md` pour le détail complet, `CHANGELOG.md` pour l'historique, `docs/ROADMAP.md` pour la roadmap à jour.
 
 ### ✅ Livré
 - **S1 → S4 terminées** : infra & data, pipeline IMAP, génération (RAG mis en pause v1.24.2 — approche déterministe), prod 24/7 sur KVM8.
@@ -234,8 +234,8 @@ ssh root@69.62.110.165 'cd /opt/DETECTIVE && git pull origin main && docker comp
 - **Réconcilieur Drafts IMAP v1.25.22 + bug P0 corrigé v1.25.23** : `app/workers/drafts_reconciler.py` (tâche 15 min) garantit que tout brouillon généré est physiquement présent dans `Drafts` de la boîte source — recherche par header `X-Detective-Mail-Id` (posé par `append_draft`, v1.25.22) puis fallback body `EMAIL #<id>`. Bug P0 v1.25.23 : `_draft_present` confondait la ligne de status aioimaplib `b"Search completed (...)"` (non-vide) avec un match → ne détectait jamais les manquants ; corrigé via `_has_search_match()` (n'accepte qu'un token numérique, ignore `completed`). Anti-doublon : `_fetch_candidates()` n'accepte que `delivered_at IS NULL` (vrai crash silencieux) — les brouillons déjà livrés puis envoyés par Daniel (status reste `pending`, le workflow V2a ne notifie pas le cockpit) ne sont PAS re-livrés. Garde-fou principal = `_verify_draft_present` post-APPEND (dans la minute) ; réconcilieur = filet 15 min.
 - **Expéditeur affiché = vrai client, jamais le forwarder v1.25.24 → v1.25.26** : `mask_forwarder_sender()` s'appuie **uniquement sur le Reply-To** (décision CDAL « Reply-To uniquement » — un email pioché dans le body est ambigu : `info@`/`support@`/`retail@` extraits de newsletters = faux clients) → sinon `NO_EMAIL_IN_THE_FORM` si sender technique → sinon sender direct inchangé. `_is_technical_sender()` capte `newsletter@`/`noreply@`/`bounce@` sur **tout** domaine (plus large que `is_wp_forwarder` qui exige `@detective*`). `_persist` stocke `mask_forwarder_sender(...)` comme `sender` en DB (nouveaux mails). `_extract_client_email_from_body()` conservé uniquement pour `has_client_email_in_body()`/`tag_no_email()` (tag du sujet). **Backfill prod appliqué** : 224 senders techniques → `NO_EMAIL_IN_THE_FORM`, 353 vrais clients intacts.
 - **#629 finalisé** (Christèle Kremp-Voinova, forwarder `newsletter@wikipreneurs.be`, Reply-To `ckremp@vo.lu`) : brouillon propre en Drafts IMAP (UID 6540, header `X-Detective-Mail-Id 629`, sujet `Recherche de personne — Christele Kremp-voinova`), `reply_to` + `delivered_at` set en DB, sender DB = `ckremp@vo.lu`. Cas de référence pour les 6 bugs A-F (sujet/sender fantaisistes, Reply-To non exploité, brouillon absent, faux nom extrait, sujet illisible).
-- **4ème boîte mail OVH v1.27.0** : ajout de `info@detectives-belgique.be` (brand Detectives Belgique, code cockpit `D_DS`, marque Cerveau2 `detectivesbelgique`, DB `boite4.sqlite`, serveur IMAP `ex5.mail.ovh.net`). Architecture IMAP host par boîte : `MailboxConfig` enrichi avec `imap_host`, `imap_port`, `short_code`, `cerveau2_marque`. Mappings statiques supprimés, domaines propres étendus, templates cockpit dynamiques. **323 tests verts**.
-- **Hotfix SEARCH OVH v1.27.1** : `ex5.mail.ovh.net` rejette le charset UTF-8 implicite de `SEARCH` (`[BADCHARSET (US-ASCII)]`). `_process_mailbox()` retente avec `charset="us-ascii"`. **326 tests verts**.
+- **4ème boîte mail OVH v1.27.2** : ajout de `info@detectives-belgique.be` (brand Detectives Belgique, code cockpit `D_DS`, marque Cerveau2 `detectivesbelgique`, DB `boite4.sqlite`, serveur IMAP `ex5.mail.ovh.net`). Architecture IMAP host par boîte : `MailboxConfig` enrichi avec `imap_host`, `imap_port`, `short_code`, `cerveau2_marque`. Mappings statiques supprimés, domaines propres étendus, templates cockpit dynamiques. **323 tests verts**.
+- **Hotfix SEARCH OVH v1.27.2** : `ex5.mail.ovh.net` rejette le charset UTF-8 implicite de `SEARCH` (`[BADCHARSET (US-ASCII)]`), refuse aussi `charset="us-ascii"` (`Command Argument Error. 11`) et semble rejeter `UNKEYWORD AgentProcessed`. `_search_unprocessed()` implémente 3 niveaux : (1) SEARCH normal, (2) SEARCH sans charset, (3) `SEARCH ALL` + filtrage côté DB via `_mail_exists()` pour écarter les UIDs déjà traités. **326 tests verts**.
 
 ### ⏳ En cours
 - **V2b — Polishing cockpit** : filtres inbox (4 boîtes cochées par défaut), latence Charlie < 5s (parallélisation Cerveau2 + SQL déjà faite).

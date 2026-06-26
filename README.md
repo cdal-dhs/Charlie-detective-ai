@@ -132,7 +132,7 @@ docker compose up -d --build      # si requirements.txt ou Dockerfile modifiés
 
 ---
 
-## Stack technique (état v1.27.1)
+## Stack technique (état v1.27.2)
 
 | Couche | Choix |
 |---|---|
@@ -277,7 +277,7 @@ DETECTIVE_BE/
 
 ## Statut
 
-✅ **Production active** — `detective.digitalhs.biz` — **v1.27.1**
+✅ **Production active** — `detective.digitalhs.biz` — **v1.27.2**
 
 - **Pipeline IMAP** : polling 4 boîtes toutes les 5 min (3 Infomaniak + 1 OVH), classification 8 catégories, priorité intelligente, flag `AgentProcessed` (succès) + `AgentAttempted` (libère la queue même en cas de crash, v1.21.3).
 - **Génération brouillon** : gemma4:31b (non-reasoning), style Daniel imité via few-shot learning (v1.22.0) + personnalité Cerveau2. **RAG sqlite-vec en pause (v1.24.2)** — remplacé par le brouillon qualifiant déterministe (`qualification_builder`) pour les `demande_client`/`prise_contact`.
@@ -301,7 +301,7 @@ DETECTIVE_BE/
 - **Audit périodique faux négatifs v1.25.17** : `scripts/review_missed_demande_client.py` détecte les formulaires WP passés à travers (#519).
 - **Investigation successorale v1.25.27** : nouveau cas métier `investigation_successorale` (`case_classifier.py` + `qualification_builder._build_succession_draft`) + `objective_check.py` enrichi (objectifs patrimoniaux reconnus clairs sans appel LLM). #643 (Boeteman) — le brouillon flou générique est remplacé par un brouillon dédié (accusé réception + 8 questions succession + coordination notaire).
 - **Sujet de brouillon lisible v1.25.28 → v1.26.0** : `suggested_subject` persisté en DB par le poller (`_persist` INSERT/UPDATE COALESCE) + écrit dans le sujet du brouillon IMAP par `append_draft` (le tag `[NO_EMAIL_IN_THE_FORM]` et les templates WP absurdes ne polluent plus le sujet vu par Daniel). v1.26.0 : le cockpit affiche ce sujet lisible dans l'inbox et la conversation (`display_subject = suggested_subject or subject`, zéro modif template). Symétrique IMAP/cockpit.
-- **4ème boîte mail OVH v1.27.0** : ajout de `info@detectives-belgique.be` (brand Detectives Belgique, code cockpit `D_DS`, marque Cerveau2 `detectivesbelgique`, DB `boite4.sqlite`, serveur IMAP `ex5.mail.ovh.net`). Architecture IMAP host par boîte : `MailboxConfig` enrichi avec `imap_host`, `imap_port`, `short_code`, `cerveau2_marque`. Templates cockpit et mappings métier mis à jour. 323 tests verts.
+- **4ème boîte mail OVH v1.27.2** : ajout de `info@detectives-belgique.be` (brand Detectives Belgique, code cockpit `D_DS`, marque Cerveau2 `detectivesbelgique`, DB `boite4.sqlite`, serveur IMAP `ex5.mail.ovh.net`). Architecture IMAP host par boîte : `MailboxConfig` enrichi avec `imap_host`, `imap_port`, `short_code`, `cerveau2_marque`. Templates cockpit et mappings métier mis à jour. 323 tests verts.
 - **Header `X-Detective-Mail-Id` v1.25.22** : identifie un brouillon précis en IMAP (réconcilieur + `append_draft`).
 - **Dashboard admin** : stats, settings LLM, audit logs, télémétrie poller, backup Cerveau2.
 - **4 niveaux anti-crash silencieux** : Slack + Resend in-app + cron watchdog externe + Healthchecks.io.

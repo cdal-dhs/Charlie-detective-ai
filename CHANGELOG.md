@@ -1,20 +1,47 @@
 # Changelog Charlie AI — Detective.be
 
-## [1.27.1] — 2026-06-26 (hotfix SEARCH OVH — charset US-ASCII)
+## [1.27.2] — 2026-06-26 (hotfix SEARCH OVH — fallback ALL + filtrage DB)
+
+### Contexte
+Le hotfix v1.27.1 (charset `us-ascii`) a été rejeté par OVH avec
+`Command Argument Error. 11`. Le serveur OVH (`ex5.mail.ovh.net`) n'accepte
+ni `SEARCH CHARSET utf-8 UNKEYWORD AgentProcessed`, ni la variante avec
+charset explicite, et semble refuser le critère `UNKEYWORD AgentProcessed`.
+
+### Fixé
+- **`app/workers/imap_poller.py`** :
+  - `_search_unprocessed()` encapsule la logique SEARCH avec 3 niveaux de fallback :
+    1. `SEARCH UNKEYWORD AgentProcessed` (charset UTF-8 implicite) — Infomaniak OK.
+    2. `SEARCH UNKEYWORD AgentProcessed` (sans charset explicite) — OVH partiel.
+    3. `SEARCH ALL` (sans charset) + filtrage DB via `_mail_exists()` pour
+       idempotence — fonctionne sur tout serveur IMAP.
+  - `_is_search_command_error()` détecte `BADCHARSET` et `Command Argument Error`.
+  - `_process_mailbox()` filtre les UIDs déjà traités quand le fallback `ALL`
+    est utilisé.
+- **Tests** : 5 tests ajoutés dans `tests/test_imap_poller_resilience.py`
+  (`_is_badcharset`, `_is_search_command_error`, `_build_search_criteria`).
+
+### Changé
+- `app/_version.py` : `VERSION = "1.27.2"`.
+
+---
+
+## [1.27.1] — 2026-06-26 (hotfix SEARCH OVH — charset US-ASCII — INTERMÉDIAIRE)
 
 ### Contexte
 Déploiement de la v1.27.0 en prod : la 4ème boîte OVH (`ex5.mail.ovh.net`)
 a immédiatement rejeté la commande `SEARCH UNKEYWORD AgentProcessed` avec
 `[BADCHARSET (US-ASCII)] The specified charset is not supported.`.
-Le serveur OVH n'accepte pas le charset UTF-8 implicite pour SEARCH, contrairement
-à Infomaniak. Les 3 premières boîtes continuaient de fonctionner.
 
 ### Fixé
 - **`app/workers/imap_poller.py`** : ajout d'un fallback `charset="us-ascii"`
   quand `client.search()` renvoie une réponse `[BADCHARSET]`. Détection via
   `_is_badcharset()`.
-- **Tests** : 3 tests ajoutés dans `tests/test_imap_poller_resilience.py`
-  (`_is_badcharset`, `_build_search_criteria`).
+- **Tests** : 3 tests ajoutés dans `tests/test_imap_poller_resilience.py`.
+
+### Notes
+- Ce hotfix s'est avéré insuffisant : OVH rejette aussi le charset explicite
+  (`Command Argument Error. 11`). Voir v1.27.2 pour le fix définitif.
 
 ### Changé
 - `app/_version.py` : `VERSION = "1.27.1"`.

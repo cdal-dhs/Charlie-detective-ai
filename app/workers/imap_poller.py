@@ -1029,6 +1029,61 @@ def _is_badcharset(resp) -> bool:
     return False
 
 
+def _is_search_command_error(resp) -> bool:
+    """Détecte une erreur de syntaxe de commande SEARCH (BAD/NO)."""
+    if getattr(resp, "result", "OK") == "OK":
+        return False
+    for line in getattr(resp, "lines", []) or []:
+        text = line.decode("utf-8", errors="ignore") if isinstance(line, bytes) else str(line)
+        upper = text.upper()
+        if "BADCHARSET" in upper or "ARGUMENT ERROR" in upper or "COMMAND ARGUMENT ERROR" in upper:
+            return True
+    return True
+
+
+async def _search_unprocessed(
+    client: aioimaplib.IMAP4_SSL, mailbox: MailboxConfig, settings
+) -> tuple[Response, bool]:
+    """Exécute SEARCH UNKEYWORD AgentProcessed avec fallbacks pour OVH.
+
+    Retourne (response, needs_db_filter) où needs_db_filter=True signifie que
+    le serveur n'accepte pas UNKEYWORD AgentProcessed et qu'on est tombé
+    sur SEARCH ALL : il faudra filtrer les UIDs déjà traités via la DB.
+    """
+    criteria = _build_search_criteria(settings)
+
+    # 1. Charset UTF-8 implicite (aioimaplib default) — Infomaniak OK.
+    resp = await client.search(criteria)
+    if resp.result == "OK":
+        return resp, False
+
+    # 2. Pas de charset explicite (critère ASCII pur) — OVH accepte parfois.
+    if _is_search_command_error(resp):
+        log.warning(
+            "imap.search.fallback_no_charset",
+            mailbox=mailbox.name,
+            imap_host=mailbox.imap_host,
+            original_error=str(resp),
+        )
+        resp = await client.search(criteria, charset=None)
+        if resp.result == "OK":
+            return resp, False
+
+    # 3. Fallback ultime : SEARCH ALL + filtrage DB pour idempotence.
+    if _is_search_command_error(resp):
+        log.warning(
+            "imap.search.fallback_all",
+            mailbox=mailbox.name,
+            imap_host=mailbox.imap_host,
+            reason="server rejects UNKEYWORD AgentProcessed; scanning ALL mails",
+        )
+        resp = await client.search("ALL", charset=None)
+        if resp.result == "OK":
+            return resp, True
+
+    raise RuntimeError(f"SEARCH failed: {resp}")
+
+
 async def _process_mailbox(mailbox: MailboxConfig) -> None:
     settings = get_settings()
     client = aioimaplib.IMAP4_SSL(mailbox.imap_host, mailbox.imap_port)
@@ -1044,22 +1099,23 @@ async def _process_mailbox(mailbox: MailboxConfig) -> None:
         if select_resp.result != "OK":
             raise RuntimeError(f"SELECT INBOX failed: {select_resp}")
 
-        search_criteria = _build_search_criteria(settings)
-        search_resp = await client.search(search_criteria)
-        # v1.27.0 — OVH ex5.mail.ovh.net ne supporte pas le charset UTF-8 implicite
-        # pour SEARCH (répond [BADCHARSET (US-ASCII)]). On retente en US-ASCII.
-        if search_resp.result != "OK" and _is_badcharset(search_resp):
-            log.warning(
-                "imap.search.badcharset_fallback",
-                mailbox=mailbox.name,
-                imap_host=mailbox.imap_host,
-                charset="us-ascii",
-            )
-            search_resp = await client.search(search_criteria, charset="us-ascii")
-        if search_resp.result != "OK":
-            raise RuntimeError(f"SEARCH failed: {search_resp}")
+        search_resp, needs_db_filter = await _search_unprocessed(client, mailbox, settings)
 
         uids = search_resp.lines[0].split() if search_resp.lines else []
+        if needs_db_filter:
+            before = len(uids)
+            uids = [
+                uid for uid in uids
+                if not await asyncio.to_thread(
+                    _mail_exists, settings.db_agent_state, uid.decode(), mailbox.name
+                )
+            ]
+            log.info(
+                "poller.all_filtered",
+                mailbox=mailbox.name,
+                scanned=before,
+                new=len(uids),
+            )
         log.info("poller.found", mailbox=mailbox.name, count=len(uids))
 
         # Limiter le traitement par cycle pour ne pas bloquer l'event loop
