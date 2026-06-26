@@ -1,5 +1,3 @@
-{% set box_short = {'detective_belgique': 'D_FR', 'detective_belgium': 'D_NL', 'dpdh_investigations': 'D_PD'} %}
-
 {% macro mail_row(m) %}
 {% set effective_status = m.status or 'pending' %}
 {% set is_hot = (m.category == 'demande_client' and m.priority == 'high' and effective_status == 'pending') %}

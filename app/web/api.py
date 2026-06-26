@@ -278,12 +278,14 @@ async def inbox_partial(
     hot_mails, other_mails = await _fetch_mails_partial(
         db, boxes, category, status, priority, q, sort_col, sort_order
     )
+    mailboxes = get_settings().mailboxes()
     return templates.TemplateResponse(
         request,
         "app/inbox_rows.html",
         {
             "hot_mails": hot_mails,
             "other_mails": other_mails,
+            "box_short": {mb.name: mb.short_code for mb in mailboxes},
             "filters": {
                 "box": box_raw,
                 "category": category,
@@ -879,7 +881,7 @@ def _format_rows_html(rows: list[dict]) -> str:
 
     headers = list(rows[0].keys())
     has_id = "id" in headers
-    # Les résultats historiques (archives boite1/2/3) ont une colonne source_db —
+    # Les résultats historiques (archives boite1/2/3/4) ont une colonne source_db —
     # leur id n'est PAS un mail_id de mail_processed, on ne crée pas de liens.
     is_historical = "source_db" in headers
     # Reorder: date first, then id, subject, sender, others

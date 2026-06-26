@@ -11,7 +11,7 @@
 
 - [ ] **Container actif** : `docker compose ps` sur VPS → `detective-agent` Up
 - [ ] **Healthcheck vert** : `curl https://detective.digitalhs.biz/health` → 200
-- [ ] **3 boîtes mail pollent** : dernier cycle dans les logs → `poller.cycle_empty` ou `poller.found`
+- [ ] **4 boîtes mail pollent** : dernier cycle dans les logs → `poller.cycle_empty` ou `poller.found`
 - [ ] **Bot Slack Charlie connecté** : vérifier présence online dans le workspace Slack
 - [ ] **Cerveau2 up** : `curl https://cerveau2-det.digitalhs.biz/health` → 200
 - [ ] **Navigateur propre** : vider le cache/HTMX pour éviter les vieux JS (Ctrl+Shift+R)
@@ -26,7 +26,7 @@
 - [ ] Pointer la version en bas de page : doit afficher **v1.13.4**
 
 ### 2. Inbox active (2 min)
-- [ ] Montrer les 3 onglets de boîtes (D_FR, D_NL, D_PD)
+- [ ] Montrer les 4 onglets de boîtes (D_FR, D_NL, D_PD, D_DS)
 - [ ] Filtrer par catégorie "demande_client" → montrer que les bons mails remontent
 - [ ] Ouvrir une conversation → montrer la classification + la priorité + le brouillon AI si présent
 
@@ -62,7 +62,7 @@
   - Attendu : réponse identitaire correcte
 
 ### 7. Pipeline email live (2 min) — si timing le permet
-- [ ] Envoyer un vrai email test à une des 3 boîtes (depuis Gmail perso)
+- [ ] Envoyer un vrai email test à une des 4 boîtes (depuis Gmail perso)
 - [ ] Attendre le cycle poller (max 5 min)
 - [ ] Rafraîchir l'inbox → le mail doit apparaître classé
 - [ ] Si `demande_client` : vérifier que CDAL reçoit le brouillon Resend

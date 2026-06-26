@@ -7,10 +7,10 @@ import asyncio
 import sys
 
 import structlog
+from aioimaplib import aioimaplib
 
 from app.config import get_settings
-from app.workers.imap_poller import _process_single_mail, _decode_header
-from aioimaplib import aioimaplib
+from app.workers.imap_poller import _decode_header, _process_single_mail
 
 log = structlog.get_logger()
 
@@ -20,6 +20,7 @@ _INTERNAL_DOMAINS = {
     "detectivebelgique.be",
     "detectivebelgium.com",
     "dpdhuinvestigations.be",
+    "detectives-belgique.be",
     "digitalhs.biz",
 }
 
@@ -44,7 +45,7 @@ async def main() -> int:
 
     log.info("simulate.start", mailbox=mailbox.name)
 
-    client = aioimaplib.IMAP4_SSL(settings.imap_host, settings.imap_port)
+    client = aioimaplib.IMAP4_SSL(mailbox.imap_host, mailbox.imap_port)
     await client.wait_hello_from_server()
     await client.login(mailbox.user, mailbox.app_password)
 
@@ -81,6 +82,7 @@ async def main() -> int:
                     continue
 
                 from email import message_from_bytes
+
                 msg = message_from_bytes(fetch_resp.lines[1])
                 sender_raw = msg.get("From", "")
                 subject_raw = msg.get("Subject", "")
@@ -100,7 +102,9 @@ async def main() -> int:
         print(f"\n{len(candidates)} mail(s) externe(s) trouvé(s) parmi les {max_scan} scannés.\n")
 
         if not candidates:
-            print("Aucun mail externe trouvé dans les 30 premiers. Essaye un autre mailbox ou augmente le scan.")
+            print(
+                "Aucun mail externe trouvé dans les 30 premiers. Essaye un autre mailbox ou augmente le scan."
+            )
             return 0
 
         # Proposer les 5 premiers candidats
@@ -120,7 +124,9 @@ async def main() -> int:
         elif auto:
             selected_idx = 0
             selected_uid, selected_sender, selected_subject = candidates[selected_idx]
-            print(f"\n[MODE AUTO] Sélection du candidat : UID={selected_uid} | {selected_sender} | {selected_subject}")
+            print(
+                f"\n[MODE AUTO] Sélection du candidat : UID={selected_uid} | {selected_sender} | {selected_subject}"
+            )
         else:
             choice = input("\nQuel numéro traiter ? (1-5, ou ENTREE pour le 1er) : ").strip()
             if not choice:
@@ -134,7 +140,9 @@ async def main() -> int:
 
         print(f"\n>>> Traitement du mail UID={selected_uid}...")
         await _process_single_mail(client, selected_uid, mailbox)
-        print(f">>> Mail UID={selected_uid} traité et brouillon TRIAL envoyé à {settings.draft_recipient}")
+        print(
+            f">>> Mail UID={selected_uid} traité et brouillon TRIAL envoyé à {settings.draft_recipient}"
+        )
 
         await client.logout()
         return 0

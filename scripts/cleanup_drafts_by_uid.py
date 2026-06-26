@@ -3,7 +3,7 @@
 Usage:
   python -m scripts.cleanup_drafts_by_uid --apply --mailbox detective_belgique --uid 1 3
   python -m scripts.cleanup_drafts_by_uid --apply \
-      --config detective_belgique:1,3;dpdh_investigations:5,9
+      --config detective_belgique:1,3;dpdh_investigations:5,9;detectives_belgique:12
 """
 
 from __future__ import annotations
@@ -35,13 +35,12 @@ def _parse_config(s: str) -> dict[str, list[str]]:
 
 
 async def _delete_uids(mb_name: str, uids: list[str], apply: bool) -> None:
-    settings = get_settings()
-    mb = next((m for m in settings.mailboxes() if m.name == mb_name), None)
+    mb = next((m for m in get_settings().mailboxes() if m.name == mb_name), None)
     if mb is None:
         log.warning("cleanup.unknown_mailbox", mailbox=mb_name)
         return
 
-    client = aioimaplib.IMAP4_SSL(settings.imap_host, settings.imap_port)
+    client = aioimaplib.IMAP4_SSL(mb.imap_host, mb.imap_port)
     await client.wait_hello_from_server()
     login = await client.login(mb.user, mb.app_password)
     if login.result != "OK":

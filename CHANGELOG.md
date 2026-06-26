@@ -1,5 +1,58 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.27.0] — 2026-06-26 (ajout 4ème boîte mail OVH — detectives-belgique.be)
+
+### Contexte
+Daniel a fourni une nouvelle boîte email à gérer par Charlie en plus des 3 boîtes
+Infomaniak existantes. Cette boîte est hébergée chez OVH et nécessite un serveur
+IMAP dédié, différent des boîtes Infomaniak.
+
+### Ajouté
+- **4ème boîte mail** `detectives_belgique` :
+  - Email : `info@detectives-belgique.be`
+  - Brand : `Detectives Belgique`
+  - Code cockpit : `D_DS`
+  - Marque Cerveau2 : `detectivesbelgique`
+  - DB historique : `boite4.sqlite`
+  - Serveur IMAP : `ex5.mail.ovh.net` (OVH, port 993)
+  - Langue par défaut : `fr` (à confirmer quand Daniel aura vu les premiers emails)
+- **Architecture IMAP host par boîte** (`v1.27.0`) :
+  - `MailboxConfig` enrichi avec `imap_host`, `imap_port`, `short_code`,
+    `cerveau2_marque`.
+  - L'`imap_host` est désormais configurable par boîte ; les 3 boîtes Infomaniak
+    conservent le fallback global `IMAP_HOST=mail.infomaniak.com`, la 4ème boîte
+    utilise `MAILBOX_4_IMAP_HOST=ex5.mail.ovh.net`.
+  - Tous les modules IMAP (`imap_poller`, `imap_draft`, `drafts_reconciler`,
+    `admin.py`, scripts utilitaires) utilisent `mailbox.imap_host`.
+- **Configuration** :
+  - `app/config.py` : nouveaux champs `mailbox_4_*`, `db_boite_4`, méthode
+    `_mailbox_config()` pour centraliser la construction des `MailboxConfig`.
+  - `.env.example` : section `MAILBOX_4_*` + `DB_BOITE_4`.
+  - `docker-compose.yml` : variable d'environnement `DB_BOITE_4`.
+- **Mappings métier** mis à jour pour la nouvelle marque :
+  - `app/workers/imap_poller.py` : `_MARQUE_CERVEAU2` remplacé par
+    `mailbox.cerveau2_marque`.
+  - `app/charlie.py` : `BOX_ABBR` remplacé par `mailbox.short_code` ; liste des DB
+    historiques dynamique.
+  - Domaines propres / internes : `app/cerveau_dossier.py`,
+    `app/pipeline/prefilter.py`, `app/pipeline/qualification_builder.py`,
+    `app/pipeline/subject_fixer.py`.
+- **Templates cockpit** : `box_labels` et `box_short` remplacés par `mb.brand` et
+  `mb.short_code`.
+
+### Changé
+- `app/_version.py` : `VERSION = "1.27.0"`.
+
+### Notes / garde-fous
+- Le fichier `.env` (gitignored, secrets) n'a pas été modifié ; il faudra ajouter
+  manuellement les variables `MAILBOX_4_*` dans `.env` et `.env.production` sur le
+  VPS avant le déploiement.
+- La DB `boite4.sqlite` n'existe pas encore côté CDAL. Elle doit être déposée dans
+  `data/` avant le déploiement (même vide avec le schéma des 3 autres, ou remplie
+  par CDAL). Charlie ignore silencieusement une DB historique manquante jusqu'à
+  ce qu'elle soit présente.
+- Aucune connexion IMAP réelle à la nouvelle boîte n'a été effectuée en dev.
+
 ## [1.26.0] — 2026-06-25 (sujet de brouillon lisible partout : cockpit + IMAP)
 
 ### Contexte

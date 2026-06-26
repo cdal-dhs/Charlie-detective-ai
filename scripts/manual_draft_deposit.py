@@ -11,31 +11,17 @@ et fait un IMAP APPEND dans les Drafts de la boîte source avec le sujet demand�
 
 import email.message
 import imaplib
-import os
 import sqlite3
+import sys
+from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv("/opt/DETECTIVE/.env.production")
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from app.config import get_settings
 
 DB_PATH = "/opt/DETECTIVE/data/agent_state.db"
-IMAP_HOST = os.getenv("IMAP_HOST", "mail.infomaniak.com")
-IMAP_PORT = int(os.getenv("IMAP_PORT", "993"))
-
-MAILBOXES = {
-    "detective_belgique": {
-        "user": os.getenv("MAILBOX_1_USER"),
-        "password": os.getenv("MAILBOX_1_APP_PASSWORD"),
-    },
-    "detective_belgium": {
-        "user": os.getenv("MAILBOX_2_USER"),
-        "password": os.getenv("MAILBOX_2_APP_PASSWORD"),
-    },
-    "dpdh_investigations": {
-        "user": os.getenv("MAILBOX_3_USER"),
-        "password": os.getenv("MAILBOX_3_APP_PASSWORD"),
-    },
-}
 
 TARGET_IDS = [121, 120, 101, 98, 91, 89, 83]
 
@@ -74,13 +60,15 @@ def _find_drafts_folder(imap: imaplib.IMAP4_SSL) -> str | None:
 
 
 def main() -> None:
+    load_dotenv("/opt/DETECTIVE/.env.production")
+    settings = get_settings()
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
 
     placeholders = ",".join("?" * len(TARGET_IDS))
     cur.execute(
-        f"SELECT id, mailbox_name, subject, sender, ai_draft "  # noqa: S608
+        "SELECT id, mailbox_name, subject, sender, ai_draft "
         f"FROM mail_processed WHERE id IN ({placeholders})",
         TARGET_IDS,
     )
@@ -91,9 +79,11 @@ def main() -> None:
         print("Aucun email trouvé pour les IDs demandés.")
         return
 
+    mailboxes_by_name = {mb.name: mb for mb in settings.mailboxes()}
+
     for row in rows:
         mail_id = row["id"]
-        mailbox = row["mailbox_name"]
+        mailbox_name = row["mailbox_name"]
         subject = row["subject"]
         sender = row["sender"]
         draft = row["ai_draft"]
@@ -102,14 +92,14 @@ def main() -> None:
             print(f"SKIP {mail_id}: pas de ai_draft en base.")
             continue
 
-        cfg = MAILBOXES.get(mailbox)
-        if not cfg or not cfg["user"] or not cfg["password"]:
-            print(f"SKIP {mail_id}: config IMAP manquante pour {mailbox}.")
+        mb = mailboxes_by_name.get(mailbox_name)
+        if not mb or not mb.user or not mb.app_password:
+            print(f"SKIP {mail_id}: config IMAP manquante pour {mailbox_name}.")
             continue
 
         try:
-            imap = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT)
-            imap.login(cfg["user"], cfg["password"])
+            imap = imaplib.IMAP4_SSL(mb.imap_host, mb.imap_port)
+            imap.login(mb.user, mb.app_password)
 
             drafts_folder = _find_drafts_folder(imap)
             if not drafts_folder:
@@ -118,7 +108,7 @@ def main() -> None:
                 continue
 
             msg = email.message.EmailMessage()
-            msg["From"] = cfg["user"]
+            msg["From"] = mb.user
             msg["To"] = sender
             msg["Subject"] = f"PROPOSITION DE REPONSE EMAIL N° {mail_id} / {subject}"
             msg.set_content(draft)
@@ -128,7 +118,7 @@ def main() -> None:
             )
             if status == "OK":
                 print(
-                    f"OK {mail_id} -> {drafts_folder} ({mailbox}) | "
+                    f"OK {mail_id} -> {drafts_folder} ({mailbox_name}) | "
                     f"Sujet: {msg['Subject']}"
                 )
             else:

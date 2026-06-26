@@ -63,6 +63,7 @@ _SERVICE_SENDERS = (
 _INTERNAL_OR_KNOWN_SENDERS = (
     "cdal@digitalhs.biz",
     "info@dpdhuinvestigations.be",
+    "info@detectives-belgique.be",
     "maintenance@upartner.agency",
 )
 
@@ -388,23 +389,27 @@ async def main(apply: bool, since: str, limit: int | None) -> None:
                 continue
 
             _update_db(settings.db_agent_state, mail["id"], new_cat, draft, apply)
-            found.append({
-                "id": mail["id"],
-                "old_category": old_cat,
-                "sender": mail["sender"] or "",
-                "subject": mail["subject"] or "",
-                "reason": reason,
-            })
+            found.append(
+                {
+                    "id": mail["id"],
+                    "old_category": old_cat,
+                    "sender": mail["sender"] or "",
+                    "subject": mail["subject"] or "",
+                    "reason": reason,
+                }
+            )
         else:
             # Le signal était fort mais le LLM confirme une autre catégorie.
             # On met à jour si la catégorie a changé, mais on ne génère pas de brouillon.
             if new_cat != old_cat:
                 _update_db(settings.db_agent_state, mail["id"], new_cat, "", apply)
-                reclassed_other.append({
-                    "id": mail["id"],
-                    "old_category": old_cat,
-                    "new_category": new_cat,
-                })
+                reclassed_other.append(
+                    {
+                        "id": mail["id"],
+                        "old_category": old_cat,
+                        "new_category": new_cat,
+                    }
+                )
 
         if i % 10 == 0:
             log.info("review.progress", processed=i, total=len(candidates))

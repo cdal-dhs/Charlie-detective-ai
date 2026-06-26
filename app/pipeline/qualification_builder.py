@@ -56,10 +56,15 @@ _CLIENT_INFO_LABELS = {
     ),
     "prenom": re.compile(rf"\bpr[ée]nom\b{_INFO_SEP}(.+?){_INFO_STOP}", re.IGNORECASE | re.DOTALL),
     "telephone": re.compile(
-        rf"(?:\bt[ée]l[ée]phone\b|\bgsm\b|\bportable\b){_INFO_SEP}([\d\s./+\-]{{6,}})", re.IGNORECASE
+        rf"(?:\bt[ée]l[ée]phone\b|\bgsm\b|\bportable\b){_INFO_SEP}([\d\s./+\-]{{6,}})",
+        re.IGNORECASE,
     ),
-    "email": re.compile(rf"(?:\be[-\s]?mail\b|\bcourriel\b){_INFO_SEP}([^\s]+@[^\s]+)", re.IGNORECASE),
-    "adresse": re.compile(rf"\badresse\b{_INFO_SEP_STRICT}(.+?){_INFO_STOP_ADDRESS}", re.IGNORECASE | re.DOTALL),
+    "email": re.compile(
+        rf"(?:\be[-\s]?mail\b|\bcourriel\b){_INFO_SEP}([^\s]+@[^\s]+)", re.IGNORECASE
+    ),
+    "adresse": re.compile(
+        rf"\badresse\b{_INFO_SEP_STRICT}(.+?){_INFO_STOP_ADDRESS}", re.IGNORECASE | re.DOTALL
+    ),
     "heure_contact": re.compile(
         # "Heure de contact" (label explicite) ou "créneau/horaire:" avec séparateur strict
         # pour éviter de capturer les horaires de la cible dans le body libre.
@@ -294,6 +299,7 @@ def _is_internal_email(email: str) -> bool:
         "detectivebelgique.be",
         "detectivebelgium.com",
         "dpdhuinvestigations.be",
+        "detectives-belgique.be",
         "digitalhs.biz",
     }
     domain = lowered.split("@")[-1] if "@" in lowered else ""
@@ -577,9 +583,22 @@ def _extract_case_info(body: str, case: str) -> dict[str, str | None]:
     if case == "infidelite_filature":
         # Mots communs de lieux qu'on ne veut pas traiter comme un nom de cible.
         _LIEU_WORDS = {
-            "cité", "verte", "selembao", "kinshasa", "liège", "bruxelles",
-            "charleroi", "waterloo", "belgique", "france", "luxembourg",
-            "rue", "avenue", "boulevard", "place", "square",
+            "cité",
+            "verte",
+            "selembao",
+            "kinshasa",
+            "liège",
+            "bruxelles",
+            "charleroi",
+            "waterloo",
+            "belgique",
+            "france",
+            "luxembourg",
+            "rue",
+            "avenue",
+            "boulevard",
+            "place",
+            "square",
         }
 
         # Nom de la cible (recherche plus large que le label "Nom:").
@@ -625,8 +644,14 @@ def _extract_case_info(body: str, case: str) -> dict[str, str | None]:
         if veh_match:
             info["vehicule_cible"] = _clean_snippet(veh_match.group(1))
         # Mention explicite "pas de voiture / pas de véhicule".
-        if re.search(r"(?:pas\s+de\s+(?:voiture|véhicule)|n'a\s+pas\s+de\s+(?:voiture|véhicule))", clean_body, re.IGNORECASE):
-            info["vehicule_cible"] = info.get("vehicule_cible") or "aucun (transport en commun / taxi)"
+        if re.search(
+            r"(?:pas\s+de\s+(?:voiture|véhicule)|n'a\s+pas\s+de\s+(?:voiture|véhicule))",
+            clean_body,
+            re.IGNORECASE,
+        ):
+            info["vehicule_cible"] = (
+                info.get("vehicule_cible") or "aucun (transport en commun / taxi)"
+            )
 
         # Adresse de départ / lieu de travail / domicile de la cible.
         # 1. Labels explicites : "Coordonnées de madame", "Adresse de la cible", "Elle habite".
@@ -662,7 +687,9 @@ def _extract_case_info(body: str, case: str) -> dict[str, str | None]:
             info["horaires_cible"] = " ; ".join(_clean_snippet(h) for h in horaires)
 
         # Habitudes : priorité aux indices forts.
-        habitudes_match = _HABITUDES_SPECIFIQUES.search(clean_body) or _HABITUDES_GENERALES.search(clean_body)
+        habitudes_match = _HABITUDES_SPECIFIQUES.search(clean_body) or _HABITUDES_GENERALES.search(
+            clean_body
+        )
         if habitudes_match:
             # Extrait un court extrait autour du keyword, en s'alignant sur les mots.
             start = max(0, habitudes_match.start() - 25)
@@ -817,31 +844,64 @@ def _extract_case_info(body: str, case: str) -> dict[str, str | None]:
 _CASE_QUESTION_SPECS: dict[str, list[tuple[str, list[str]]]] = {
     "incapacite_travail": [
         ("Vos nom et prénom complets", ["nom", "prenom", "nom_complet"]),
-        ("Votre adresse complète (ou société + administrateur + TVA si professionnel)", ["adresse"]),
+        (
+            "Votre adresse complète (ou société + administrateur + TVA si professionnel)",
+            ["adresse"],
+        ),
         ("Votre GSM de contact direct", ["telephone"]),
-        ("Nom, prénom et adresse connue de la personne concernée", ["nom_cible", "prenom_cible", "adresse_cible"]),
+        (
+            "Nom, prénom et adresse connue de la personne concernée",
+            ["nom_cible", "prenom_cible", "adresse_cible"],
+        ),
         ("Photo récente de la personne concernée", ["photo_cible"]),
-        ("Véhicule de la personne concernée (marque, modèle, couleur) si connu", ["vehicule_cible"]),
-        ("Copie ou dates de validité du certificat d'incapacité de travail", ["certificat_incapacite"]),
-        ("Horaire souhaité pour la mise en place du dispositif devant le domicile", ["horaire_surveillance"]),
+        (
+            "Véhicule de la personne concernée (marque, modèle, couleur) si connu",
+            ["vehicule_cible"],
+        ),
+        (
+            "Copie ou dates de validité du certificat d'incapacité de travail",
+            ["certificat_incapacite"],
+        ),
+        (
+            "Horaire souhaité pour la mise en place du dispositif devant le domicile",
+            ["horaire_surveillance"],
+        ),
         ("Indices sur un éventuel lieu de chantier ou type de travail suspecté", ["lieu_suspect"]),
     ],
     "infidelite_filature": [
         ("Vos nom et prénom complets", ["nom", "prenom", "nom_complet"]),
-        ("Votre adresse complète (ou société + administrateur + TVA si professionnel)", ["adresse"]),
+        (
+            "Votre adresse complète (ou société + administrateur + TVA si professionnel)",
+            ["adresse"],
+        ),
         ("Votre GSM de contact direct", ["telephone"]),
-        ("Nom, prénom et adresse de départ connue de la personne concernée", ["nom_cible", "prenom_cible", "adresse_depart_cible"]),
+        (
+            "Nom, prénom et adresse de départ connue de la personne concernée",
+            ["nom_cible", "prenom_cible", "adresse_depart_cible"],
+        ),
         ("Photo récente de la personne concernée", ["photo_cible"]),
-        ("Véhicule de la personne concernée (marque, modèle, couleur) si connu", ["vehicule_cible"]),
+        (
+            "Véhicule de la personne concernée (marque, modèle, couleur) si connu",
+            ["vehicule_cible"],
+        ),
         ("Adresse précise de départ pour le début de la surveillance", ["adresse_depart_cible"]),
         ("Créneau horaire souhaité (heure d'arrivée et estimation de fin)", ["horaires_cible"]),
-        ("Habitudes de la cible (lieux fréquentés, horaires de bureau, restaurants, clubs)", ["habitudes_cible"]),
+        (
+            "Habitudes de la cible (lieux fréquentés, horaires de bureau, restaurants, clubs)",
+            ["habitudes_cible"],
+        ),
     ],
     "recherche_personne": [
         ("Vos nom et prénom complets", ["nom", "prenom", "nom_complet"]),
-        ("Votre adresse complète (ou société + administrateur + TVA si professionnel)", ["adresse"]),
+        (
+            "Votre adresse complète (ou société + administrateur + TVA si professionnel)",
+            ["adresse"],
+        ),
         ("Votre GSM de contact direct", ["telephone"]),
-        ("Nom et prénom exacts (orthographe) de la personne recherchée", ["nom_recherche", "prenom_recherche", "nom_cible", "prenom_cible"]),
+        (
+            "Nom et prénom exacts (orthographe) de la personne recherchée",
+            ["nom_recherche", "prenom_recherche", "nom_cible", "prenom_cible"],
+        ),
         ("Date de naissance exacte ou estimation de l'âge", ["date_naissance"]),
         ("Région ou pays de recherche (Belgique, France, Luxembourg)", ["region_recherche"]),
     ],
@@ -854,18 +914,30 @@ _CASE_QUESTION_SPECS: dict[str, list[tuple[str, list[str]]]] = {
     ],
     "securite_passé_violences": [
         ("Vos nom et prénom complets", ["nom", "prenom", "nom_complet"]),
-        ("Votre adresse complète (ou société + administrateur + TVA si professionnel)", ["adresse"]),
+        (
+            "Votre adresse complète (ou société + administrateur + TVA si professionnel)",
+            ["adresse"],
+        ),
         ("Votre GSM de contact direct", ["telephone"]),
-        ("Nom, prénom et adresse connue de la cible", ["nom_cible", "prenom_cible", "adresse_cible"]),
+        (
+            "Nom, prénom et adresse connue de la cible",
+            ["nom_cible", "prenom_cible", "adresse_cible"],
+        ),
         ("Anciens employeurs ou villes de résidence passées de la cible", ["passe_violences"]),
         ("Adresse professionnelle éventuelle de la cible", ["passe_violences"]),
     ],
     "contre_espionnage_micros": [
         ("Vos nom et prénom complets", ["nom", "prenom", "nom_complet"]),
-        ("Votre adresse complète (ou société + administrateur + TVA si professionnel)", ["adresse"]),
+        (
+            "Votre adresse complète (ou société + administrateur + TVA si professionnel)",
+            ["adresse"],
+        ),
         ("Votre GSM de contact direct", ["telephone"]),
         ("Nombre exact de pièces à inspecter", ["micros_contexte"]),
-        ("Présence d'un réseau Wi-Fi fonctionnel et prises électriques accessibles", ["micros_contexte"]),
+        (
+            "Présence d'un réseau Wi-Fi fonctionnel et prises électriques accessibles",
+            ["micros_contexte"],
+        ),
     ],
 }
 
@@ -962,14 +1034,20 @@ def _format_received_info(
 
     # --- Infos spécifiques au cas ---
     if case == "infidelite_filature":
-        cible_parts = [p for p in [
-            _capitalize_name(case_info.get("prenom_cible")),
-            _capitalize_name(case_info.get("nom_cible")),
-        ] if p]
+        cible_parts = [
+            p
+            for p in [
+                _capitalize_name(case_info.get("prenom_cible")),
+                _capitalize_name(case_info.get("nom_cible")),
+            ]
+            if p
+        ]
         if cible_parts:
             lines.append(f"- Personne concernée : {' '.join(cible_parts)}")
         if case_info.get("adresse_depart_cible"):
-            lines.append(f"- Adresse de départ / lieu de travail : {case_info['adresse_depart_cible']}")
+            lines.append(
+                f"- Adresse de départ / lieu de travail : {case_info['adresse_depart_cible']}"
+            )
         if case_info.get("horaires_cible"):
             lines.append(f"- Horaires / créneaux : {case_info['horaires_cible']}")
         if case_info.get("habitudes_cible"):
@@ -978,10 +1056,14 @@ def _format_received_info(
             lines.append(f"- Véhicule : {case_info['vehicule_cible']}")
 
     elif case == "recherche_personne":
-        cible_parts = [p for p in [
-            _capitalize_name(case_info.get("prenom_recherche")),
-            _capitalize_name(case_info.get("nom_recherche")),
-        ] if p]
+        cible_parts = [
+            p
+            for p in [
+                _capitalize_name(case_info.get("prenom_recherche")),
+                _capitalize_name(case_info.get("nom_recherche")),
+            ]
+            if p
+        ]
         if cible_parts:
             lines.append(f"- Personne recherchée : {' '.join(cible_parts)}")
         if case_info.get("date_naissance"):
@@ -990,10 +1072,14 @@ def _format_received_info(
             lines.append(f"- Région / pays de recherche : {case_info['region_recherche']}")
 
     elif case == "incapacite_travail":
-        cible_parts = [p for p in [
-            _capitalize_name(case_info.get("prenom_cible")),
-            _capitalize_name(case_info.get("nom_cible")),
-        ] if p]
+        cible_parts = [
+            p
+            for p in [
+                _capitalize_name(case_info.get("prenom_cible")),
+                _capitalize_name(case_info.get("nom_cible")),
+            ]
+            if p
+        ]
         if cible_parts:
             lines.append(f"- Personne concernée : {' '.join(cible_parts)}")
         if case_info.get("adresse_cible"):
@@ -1063,68 +1149,82 @@ def _build_standard_draft(
     lines = [greeting, "", need, ""]
 
     if received:
-        lines.extend([
-            "Merci pour les éléments suivants :",
-            "",
-            *received,
-            "",
-        ])
+        lines.extend(
+            [
+                "Merci pour les éléments suivants :",
+                "",
+                *received,
+                "",
+            ]
+        )
 
     if missing:
-        lines.extend([
-            (
-                "Afin de préparer votre dossier dans les meilleures conditions, et pouvoir "
-                "vous donner une estimation de devis fiable, pourriez-vous me transmettre "
-                "les éléments suivants :"
-            ),
-        ])
+        lines.extend(
+            [
+                (
+                    "Afin de préparer votre dossier dans les meilleures conditions, et pouvoir "
+                    "vous donner une estimation de devis fiable, pourriez-vous me transmettre "
+                    "les éléments suivants :"
+                ),
+            ]
+        )
         for i, q in enumerate(missing, 1):
             lines.append(f"{i}. {q}.")
     else:
-        lines.extend([
-            "J'ai bien noté tous les éléments utiles à ce stade. "
-            "Je vous recontacte très prochainement par téléphone pour finaliser le devis "
-            "et convenir d'un échange sur ce dossier.",
-        ])
+        lines.extend(
+            [
+                "J'ai bien noté tous les éléments utiles à ce stade. "
+                "Je vous recontacte très prochainement par téléphone pour finaliser le devis "
+                "et convenir d'un échange sur ce dossier.",
+            ]
+        )
         # Pas de bloc tarifaire si le dossier est déjà complet? On le garde quand même
         # pour la transparence, mais on l'insère avant le closing.
         lines.append("")
 
     # Tarifs (toujours présents, sauf si dossier déjà complet et qu'on veut alléger).
     # On les garde systématiquement car Daniel veut que le client sache.
-    lines.extend([
-        "Sur le plan tarifaire :",
-        f"- Ouverture de dossier : {settings.dossier_opening_fee} € HTVA.",
-        f"- Rapport final : {settings.report_fee} € HTVA.",
-        f"- Heure de détective : {settings.hourly_rate_day} €/h HTVA "
-        f"({settings.hourly_rate_night_weekend} €/h nuit/week-end).",
-    ])
+    lines.extend(
+        [
+            "Sur le plan tarifaire :",
+            f"- Ouverture de dossier : {settings.dossier_opening_fee} € HTVA.",
+            f"- Rapport final : {settings.report_fee} € HTVA.",
+            f"- Heure de détective : {settings.hourly_rate_day} €/h HTVA "
+            f"({settings.hourly_rate_night_weekend} €/h nuit/week-end).",
+        ]
+    )
 
     # Mention 2 détectives pour les cas filature / surveillance mobile.
     if case == "infidelite_filature":
-        lines.extend([
-            "",
-            "Pour toute filature ou surveillance mobile, nous déployons systématiquement "
-            "deux détectives afin d'assurer l'efficacité et la discrétion.",
-        ])
+        lines.extend(
+            [
+                "",
+                "Pour toute filature ou surveillance mobile, nous déployons systématiquement "
+                "deux détectives afin d'assurer l'efficacité et la discrétion.",
+            ]
+        )
 
     if missing:
-        lines.extend([
-            "",
-            "Dès réception de ces éléments, je reprendrai contact avec vous "
-            "pour finaliser le devis et convenir d'un échange téléphonique "
-            "sur ce nouveau dossier.",
-        ])
+        lines.extend(
+            [
+                "",
+                "Dès réception de ces éléments, je reprendrai contact avec vous "
+                "pour finaliser le devis et convenir d'un échange téléphonique "
+                "sur ce nouveau dossier.",
+            ]
+        )
 
-    lines.extend([
-        "",
-        "Bien à vous,",
-        "",
-        "Daniel Hurchon",
-        f"{mailbox.brand}",
-        "GSM 0471/31.81.20",
-        "contact@detectivebelgique.be",
-    ])
+    lines.extend(
+        [
+            "",
+            "Bien à vous,",
+            "",
+            "Daniel Hurchon",
+            f"{mailbox.brand}",
+            "GSM 0471/31.81.20",
+            "contact@detectivebelgique.be",
+        ]
+    )
     return lines
 
 
@@ -1332,8 +1432,7 @@ _ILLEGAL_QUESTION_SPECS: list[tuple[str, list[str]]] = [
     ("L'objectif final de votre démarche", ["objectif_final"]),
     ("Votre lien avec la personne concernée", ["relation_cible"]),
     (
-        "Le contexte succinct : depuis quand, événement déclencheur, "
-        "signalements précédents",
+        "Le contexte succinct : depuis quand, événement déclencheur, signalements précédents",
         ["contexte"],
     ),
     ("Avez-vous déjà évoqué le problème avec la personne concernée", ["deja_evoque"]),
@@ -1396,16 +1495,14 @@ _LEGAL_ALTERNATIVE: dict[str, str] = {
         "d'incapacité alléguée, dans le respect du cadre légal"
     ),
     "securite_passé_violences": (
-        "mener une enquête de passé par des sources légales dans le respect "
-        "du cadre réglementaire"
+        "mener une enquête de passé par des sources légales dans le respect du cadre réglementaire"
     ),
     "contre_espionnage_micros": (
         "inspecter vos locaux pour détecter d'éventuels micros ou caméras "
         "cachés — prestation légale que nous proposons"
     ),
     "recuperation_dette": (
-        "retrouver la personne et établir un dossier de créance dans le "
-        "respect du cadre légal"
+        "retrouver la personne et établir un dossier de créance dans le respect du cadre légal"
     ),
     "investigation_successorale": (
         "mener une investigation patrimoniale par des sources légales "
@@ -1458,73 +1555,87 @@ def _build_illegal_refusal_draft(
             seen.add(q)
 
     lines = [greeting, ""]
-    lines.extend([
-        "Nous accusons bonne réception de votre demande. Je comprends la "
-        "situation que vous décrivez et je prends votre démarche très au "
-        "sérieux.",
-        "",
-    ])
-    lines.extend([
-        "Je dois toutefois être transparent avec vous sur un point essentiel : "
-        "en Belgique, nous ne pouvons pas accéder aux communications privées "
-        "d'une personne (WhatsApp, SMS, e-mails, comptes téléphoniques ou "
-        "réseaux sociaux) sans son consentement. L'extraction de conversations, "
-        "le piratage d'un téléphone ou d'un compte, l'installation d'un logiciel "
-        "espion, la mise sur écoute ou la localisation non consentie via le "
-        "numéro de téléphone constituent des infractions pénales (atteinte à la "
-        "vie privée, accès frauduleux à un système informatique). En tant que "
-        "détectives agréés, nous sommes tenus de respecter scrupuleusement la "
-        "loi et ne proposons jamais ce type de prestation.",
-        "",
-    ])
-    lines.extend([
-        "Cela ne signifie pas que nous ne pouvons pas vous aider. Ce que nous "
-        "pouvons faire en revanche, dans un cadre parfaitement légal et éprouvé, "
-        f"c'est {alternative}.",
-        "",
-        "Pour cela, je dois qualifier précisément votre dossier et comprendre "
-        "l'objectif final que vous poursuivez. Plus les éléments ci-dessous seront "
-        "complets, plus je pourrai vous proposer une intervention adaptée et un "
-        "budget réaliste.",
-        "",
-    ])
+    lines.extend(
+        [
+            "Nous accusons bonne réception de votre demande. Je comprends la "
+            "situation que vous décrivez et je prends votre démarche très au "
+            "sérieux.",
+            "",
+        ]
+    )
+    lines.extend(
+        [
+            "Je dois toutefois être transparent avec vous sur un point essentiel : "
+            "en Belgique, nous ne pouvons pas accéder aux communications privées "
+            "d'une personne (WhatsApp, SMS, e-mails, comptes téléphoniques ou "
+            "réseaux sociaux) sans son consentement. L'extraction de conversations, "
+            "le piratage d'un téléphone ou d'un compte, l'installation d'un logiciel "
+            "espion, la mise sur écoute ou la localisation non consentie via le "
+            "numéro de téléphone constituent des infractions pénales (atteinte à la "
+            "vie privée, accès frauduleux à un système informatique). En tant que "
+            "détectives agréés, nous sommes tenus de respecter scrupuleusement la "
+            "loi et ne proposons jamais ce type de prestation.",
+            "",
+        ]
+    )
+    lines.extend(
+        [
+            "Cela ne signifie pas que nous ne pouvons pas vous aider. Ce que nous "
+            "pouvons faire en revanche, dans un cadre parfaitement légal et éprouvé, "
+            f"c'est {alternative}.",
+            "",
+            "Pour cela, je dois qualifier précisément votre dossier et comprendre "
+            "l'objectif final que vous poursuivez. Plus les éléments ci-dessous seront "
+            "complets, plus je pourrai vous proposer une intervention adaptée et un "
+            "budget réaliste.",
+            "",
+        ]
+    )
 
     if missing:
-        lines.extend([
-            "Pourriez-vous me transmettre les informations suivantes :",
-        ])
+        lines.extend(
+            [
+                "Pourriez-vous me transmettre les informations suivantes :",
+            ]
+        )
         for i, q in enumerate(missing, 1):
             lines.append(f"{i}. {q}.")
         lines.append("")
 
-    lines.extend([
-        "Sur le plan tarifaire, en guise d'indication :",
-        f"- Ouverture de dossier : {settings.dossier_opening_fee} € HTVA.",
-        f"- Rapport final : {settings.report_fee} € HTVA.",
-        f"- Heure de détective : {settings.hourly_rate_day} €/h HTVA "
-        f"({settings.hourly_rate_night_weekend} €/h nuit/week-end).",
-    ])
+    lines.extend(
+        [
+            "Sur le plan tarifaire, en guise d'indication :",
+            f"- Ouverture de dossier : {settings.dossier_opening_fee} € HTVA.",
+            f"- Rapport final : {settings.report_fee} € HTVA.",
+            f"- Heure de détective : {settings.hourly_rate_day} €/h HTVA "
+            f"({settings.hourly_rate_night_weekend} €/h nuit/week-end).",
+        ]
+    )
     if case == "infidelite_filature":
-        lines.extend([
-            "",
-            "Pour toute filature ou surveillance mobile, nous déployons "
-            "systématiquement deux détectives afin d'assurer l'efficacité et "
-            "la discrétion.",
-        ])
+        lines.extend(
+            [
+                "",
+                "Pour toute filature ou surveillance mobile, nous déployons "
+                "systématiquement deux détectives afin d'assurer l'efficacité et "
+                "la discrétion.",
+            ]
+        )
 
-    lines.extend([
-        "",
-        "Dès réception de ces éléments, je reprendrai contact avec vous pour "
-        "échanger sur la stratégie d'enquête la plus pertinente et vous adresser "
-        "un devis adapté.",
-        "",
-        "Bien à vous,",
-        "",
-        "Daniel Hurchon",
-        f"{mailbox.brand}",
-        "GSM 0471/31.81.20",
-        "contact@detectivebelgique.be",
-    ])
+    lines.extend(
+        [
+            "",
+            "Dès réception de ces éléments, je reprendrai contact avec vous pour "
+            "échanger sur la stratégie d'enquête la plus pertinente et vous adresser "
+            "un devis adapté.",
+            "",
+            "Bien à vous,",
+            "",
+            "Daniel Hurchon",
+            f"{mailbox.brand}",
+            "GSM 0471/31.81.20",
+            "contact@detectivebelgique.be",
+        ]
+    )
     return lines
 
 
@@ -1552,9 +1663,16 @@ def build_qualification_draft(
             case=case,
             first_name=first_name,
         )
-        return "\n".join(_build_illegal_refusal_draft(
-            greeting, first_name, mailbox, case, client_info, case_info,
-        ))
+        return "\n".join(
+            _build_illegal_refusal_draft(
+                greeting,
+                first_name,
+                mailbox,
+                case,
+                client_info,
+                case_info,
+            )
+        )
 
     client_info = _extract_client_info(body, sender, reply_to=reply_to)
     case_info = _extract_case_info(body, case)
@@ -1568,9 +1686,16 @@ def build_qualification_draft(
     # qu'il souhaite obtenir concrètement. Cf. #515 (Nathalie) / #615 (douane).
     if _is_vague_request(body, case, case_info, client_info, objective_clear):
         log.info("qualification.vague_request_detected", case=case, objective_clear=objective_clear)
-        return "\n".join(_build_vague_request_draft(
-            greeting, first_name, mailbox, case, client_info, case_info,
-        ))
+        return "\n".join(
+            _build_vague_request_draft(
+                greeting,
+                first_name,
+                mailbox,
+                case,
+                client_info,
+                case_info,
+            )
+        )
 
     need = _rephrase_need(subject, body, case)
 
@@ -1583,7 +1708,12 @@ def build_qualification_draft(
         # stratégie d'investigation patrimoniale dépend des éléments reçus.
         questions = _CASE_QUESTIONS.get(case, [])
         lines = _build_succession_draft(
-            greeting, first_name, questions, mailbox, client_info, case_info,
+            greeting,
+            first_name,
+            questions,
+            mailbox,
+            client_info,
+            case_info,
         )
     else:
         lines = _build_standard_draft(
@@ -1654,9 +1784,8 @@ def suggested_subject_for_draft(
     Sinon retourne ``"{cas_label} — {Prénom NOM}"`` (ou juste le libellé si pas de
     nom extrait). Cf. v1.25.1 — #515.
     """
-    is_absurd = (
-        bool(_WP_TEMPLATE_SUBJECT_PATTERNS.search(subject or ""))
-        or bool(_FORWARDER_PATTERNS.search(_extract_sender_email(sender)))
+    is_absurd = bool(_WP_TEMPLATE_SUBJECT_PATTERNS.search(subject or "")) or bool(
+        _FORWARDER_PATTERNS.search(_extract_sender_email(sender))
     )
     if not is_absurd:
         return None
@@ -1752,50 +1881,58 @@ def _build_vague_request_draft(
     received = _format_received_info(client_info, case_info, case)
 
     lines = [greeting, ""]
-    lines.extend([
-        "Je vous remercie pour votre message et accuse bonne réception de "
-        "votre demande. Je prends le temps de vous lire avec attention.",
-        "",
-    ])
+    lines.extend(
+        [
+            "Je vous remercie pour votre message et accuse bonne réception de "
+            "votre demande. Je prends le temps de vous lire avec attention.",
+            "",
+        ]
+    )
 
     if received:
         lines.extend(["Vous m'avez déjà communiqué les éléments suivants :", "", *received, ""])
 
-    lines.extend([
-        "Afin de bien comprendre votre demande et de pouvoir vous proposer un "
-        "devis adapté, pourriez-vous me préciser ce que vous souhaitez obtenir "
-        "concrètement de notre intervention ?",
-        "",
-    ])
+    lines.extend(
+        [
+            "Afin de bien comprendre votre demande et de pouvoir vous proposer un "
+            "devis adapté, pourriez-vous me préciser ce que vous souhaitez obtenir "
+            "concrètement de notre intervention ?",
+            "",
+        ]
+    )
 
     # Task #4 (partiel) : pour les formulaires WP relayés par un forwarder, le
     # vrai contact du client est le téléphone extrait du body. On propose un
     # échange au numéro fourni plutôt que de répondre au forwarder email.
     tel = client_info.get("telephone")
     if tel:
-        lines.extend([
-            f"Je me permets également de vous recontacter au {tel} pour en "
-            f"discuter de vive voix, si vous le souhaitez.",
-            "",
-        ])
+        lines.extend(
+            [
+                f"Je me permets également de vous recontacter au {tel} pour en "
+                f"discuter de vive voix, si vous le souhaitez.",
+                "",
+            ]
+        )
 
-    lines.extend([
-        "Sur le plan tarifaire :",
-        f"- Ouverture de dossier : {settings.dossier_opening_fee} € HTVA.",
-        f"- Rapport final : {settings.report_fee} € HTVA.",
-        f"- Heure de détective : {settings.hourly_rate_day} €/h HTVA "
-        f"({settings.hourly_rate_night_weekend} €/h nuit/week-end).",
-        "",
-        "Dès que vous m'aurez précisé votre demande, je reprendrai contact avec "
-        "vous pour finaliser le devis et convenir d'un échange téléphonique.",
-        "",
-        "Bien à vous,",
-        "",
-        "Daniel Hurchon",
-        f"{mailbox.brand}",
-        "GSM 0471/31.81.20",
-        "contact@detectivebelgique.be",
-    ])
+    lines.extend(
+        [
+            "Sur le plan tarifaire :",
+            f"- Ouverture de dossier : {settings.dossier_opening_fee} € HTVA.",
+            f"- Rapport final : {settings.report_fee} € HTVA.",
+            f"- Heure de détective : {settings.hourly_rate_day} €/h HTVA "
+            f"({settings.hourly_rate_night_weekend} €/h nuit/week-end).",
+            "",
+            "Dès que vous m'aurez précisé votre demande, je reprendrai contact avec "
+            "vous pour finaliser le devis et convenir d'un échange téléphonique.",
+            "",
+            "Bien à vous,",
+            "",
+            "Daniel Hurchon",
+            f"{mailbox.brand}",
+            "GSM 0471/31.81.20",
+            "contact@detectivebelgique.be",
+        ]
+    )
     return lines
 
 
@@ -1884,22 +2021,26 @@ def _build_dette_draft(
     ]
 
     if received:
-        lines.extend([
-            "Voici les éléments que nous avons bien reçus de votre part :",
-            "",
-            *received,
-            "",
-        ])
+        lines.extend(
+            [
+                "Voici les éléments que nous avons bien reçus de votre part :",
+                "",
+                *received,
+                "",
+            ]
+        )
 
-    lines.extend([
-        "Afin de pouvoir évaluer la situation et vous proposer une stratégie adaptée, "
-        "pourriez-vous nous communiquer :",
-        "",
-        "Concernant la créance :",
-        f"- {questions[0]};",
-        "",
-        "Concernant la personne concernée :",
-    ])
+    lines.extend(
+        [
+            "Afin de pouvoir évaluer la situation et vous proposer une stratégie adaptée, "
+            "pourriez-vous nous communiquer :",
+            "",
+            "Concernant la créance :",
+            f"- {questions[0]};",
+            "",
+            "Concernant la personne concernée :",
+        ]
+    )
     for q in questions[1:]:
         lines.append(f"- {q};")
 
@@ -1911,36 +2052,44 @@ def _build_dette_draft(
         )
 
     if missing_client:
-        lines.extend([
-            "",
-            "De votre côté, pour finaliser le dossier :",
-        ])
+        lines.extend(
+            [
+                "",
+                "De votre côté, pour finaliser le dossier :",
+            ]
+        )
         lines.extend(missing_client)
 
-    lines.extend([
-        "",
-        "Sur base de ces éléments, nous pourrons analyser votre dossier et vous proposer "
-        "une stratégie d'intervention adaptée, dans le respect du cadre légal applicable aux "
-        "activités de détective privé en Belgique.",
-        "",
-        "Nous restons à votre disposition pour toute information complémentaire.",
-        "",
-        "Bien à vous,",
-    ])
+    lines.extend(
+        [
+            "",
+            "Sur base de ces éléments, nous pourrons analyser votre dossier et vous proposer "
+            "une stratégie d'intervention adaptée, dans le respect du cadre légal applicable aux "
+            "activités de détective privé en Belgique.",
+            "",
+            "Nous restons à votre disposition pour toute information complémentaire.",
+            "",
+            "Bien à vous,",
+        ]
+    )
 
     if first_name:
-        lines.extend([
-            "",
-            first_name,
-        ])
+        lines.extend(
+            [
+                "",
+                first_name,
+            ]
+        )
 
-    lines.extend([
-        "",
-        "Daniel Hurchon",
-        f"{mailbox.brand}",
-        "GSM 0471/31.81.20",
-        "contact@detectivebelgique.be",
-    ])
+    lines.extend(
+        [
+            "",
+            "Daniel Hurchon",
+            f"{mailbox.brand}",
+            "GSM 0471/31.81.20",
+            "contact@detectivebelgique.be",
+        ]
+    )
     return lines
 
 
@@ -1972,18 +2121,22 @@ def _build_succession_draft(
     ]
 
     if received:
-        lines.extend([
-            "Voici les éléments que nous avons bien reçus de votre part :",
-            "",
-            *received,
-            "",
-        ])
+        lines.extend(
+            [
+                "Voici les éléments que nous avons bien reçus de votre part :",
+                "",
+                *received,
+                "",
+            ]
+        )
 
-    lines.extend([
-        "Afin de pouvoir évaluer la situation et vous proposer une stratégie adaptée, "
-        "pourriez-vous nous communiquer :",
-        "",
-    ])
+    lines.extend(
+        [
+            "Afin de pouvoir évaluer la situation et vous proposer une stratégie adaptée, "
+            "pourriez-vous nous communiquer :",
+            "",
+        ]
+    )
     for q in questions:
         lines.append(f"- {q};")
 
@@ -1995,35 +2148,43 @@ def _build_succession_draft(
         )
 
     if missing_client:
-        lines.extend([
-            "",
-            "De votre côté, pour finaliser le dossier :",
-        ])
+        lines.extend(
+            [
+                "",
+                "De votre côté, pour finaliser le dossier :",
+            ]
+        )
         lines.extend(missing_client)
 
-    lines.extend([
-        "",
-        "Sur base de ces éléments, nous pourrons analyser votre dossier et vous proposer "
-        "une stratégie d'intervention adaptée, dans le respect du cadre légal applicable "
-        "aux activités de détective privé en Belgique (et en coordination avec le notaire "
-        "compétent le cas échéant).",
-        "",
-        "Nous restons à votre disposition pour toute information complémentaire.",
-        "",
-        "Bien à vous,",
-    ])
+    lines.extend(
+        [
+            "",
+            "Sur base de ces éléments, nous pourrons analyser votre dossier et vous proposer "
+            "une stratégie d'intervention adaptée, dans le respect du cadre légal applicable "
+            "aux activités de détective privé en Belgique (et en coordination avec le notaire "
+            "compétent le cas échéant).",
+            "",
+            "Nous restons à votre disposition pour toute information complémentaire.",
+            "",
+            "Bien à vous,",
+        ]
+    )
 
     if first_name:
-        lines.extend([
-            "",
-            first_name,
-        ])
+        lines.extend(
+            [
+                "",
+                first_name,
+            ]
+        )
 
-    lines.extend([
-        "",
-        "Daniel Hurchon",
-        f"{mailbox.brand}",
-        "GSM 0471/31.81.20",
-        "contact@detectivebelgique.be",
-    ])
+    lines.extend(
+        [
+            "",
+            "Daniel Hurchon",
+            f"{mailbox.brand}",
+            "GSM 0471/31.81.20",
+            "contact@detectivebelgique.be",
+        ]
+    )
     return lines

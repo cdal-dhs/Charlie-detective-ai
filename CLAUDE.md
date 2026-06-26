@@ -6,11 +6,11 @@
 
 ## 1. Contexte projet (TL;DR)
 
-**Client** : Daniel Hurchon, détective privé belge — cabinet **Detective.be** avec 3 marques (Detective Belgique FR, Detective Belgium EN/multi, DPDH Investigations).
+**Client** : Daniel Hurchon, détective privé belge — cabinet **Detective.be** avec 4 marques (Detective Belgique FR, Detective Belgium EN/multi, DPDH Investigations, Detectives Belgique).
 
 **Intégrateur** : CDAL (`cdal@digitalhs.biz`) — c'est l'utilisateur que tu assistes.
 
-**But du projet** : agent IA Python qui poll les 3 boîtes mail Infomaniak toutes les 5 min, classifie les mails entrants en **8 catégories** (pré-filtre règles + LLM), et **uniquement pour les `demande_client`** génère un brouillon de réponse "à la Daniel" via RAG sur ~2000 paires Q/R historiques anonymisées (3 DB SQLite + `sqlite-vec`).
+**But du projet** : agent IA Python qui poll 4 boîtes email toutes les 5 min (3 boîtes Infomaniak + 1 boîte OVH), classifie les mails entrants en **8 catégories** (pré-filtre règles + LLM), et **uniquement pour les `demande_client`** génère un brouillon de réponse "à la Daniel" via RAG sur ~2000 paires Q/R historiques anonymisées (4 DB SQLite + `sqlite-vec`).
 
 **Livraison V2a (livrée v1.17+)** : les brouillons sont **déposés directement dans le dossier `Drafts` IMAP de la boîte source** (auto-découverte via `LIST`, flag `\Draft`, sujet `DEMANDE D'Approbation - Reponse Demande Client : ...`). Resend est conservé **uniquement** comme fallback si l'APPEND IMAP échoue, et pour les alertes système. Daniel approuve/rejette depuis sa propre boîte mail — pas de transfert par CDAL.
 
@@ -45,7 +45,7 @@
 
 ## 3. Stack technique
 
-État au **2026-06-24 (v1.25.26)**. La SPEC.md d'origine est désalignée sur certains points — **cette section fait foi**.
+État au **2026-06-26 (v1.27.0)**. La SPEC.md d'origine est désalignée sur certains points — **cette section fait foi**.
 
 | Couche | Choix |
 |---|---|
@@ -216,7 +216,7 @@ ssh root@69.62.110.165 'cd /opt/DETECTIVE && git pull origin main && docker comp
 
 ## 7. État courant du projet
 
-État au **2026-06-24 — v1.25.26** déployée en prod. Voir `HANDOVER.md` pour le détail complet, `CHANGELOG.md` pour l'historique, `docs/ROADMAP.md` pour la roadmap à jour.
+État au **2026-06-26 — v1.27.0** prête pour déploiement. Voir `HANDOVER.md` pour le détail complet, `CHANGELOG.md` pour l'historique, `docs/ROADMAP.md` pour la roadmap à jour.
 
 ### ✅ Livré
 - **S1 → S4 terminées** : infra & data, pipeline IMAP, génération (RAG mis en pause v1.24.2 — approche déterministe), prod 24/7 sur KVM8.
@@ -230,13 +230,14 @@ ssh root@69.62.110.165 'cd /opt/DETECTIVE && git pull origin main && docker comp
 - **LLM gemma4:31b principal + glm-5.2:cloud fallback (v1.25.0)** : bascule depuis kimi-k2.6:cloud (v1.21.1→v1.24.x) vers gemma4:31b (non-reasoning, réponse dans `content`) comme modèle principal sur toutes les tâches. glm-5.2:cloud remplace glm-5.1:cloud comme fallback (reasoning model). Extraction `reasoning_content` + post-traitement `_clean_reasoning()` v1.21.2 (filtre 30+ patterns, reste utile pour le fallback reasoning glm-5.2:cloud).
 - **Hardening classifier v1.24.0** (meeting Daniel 2026-06-22) : 3 règles déterministes où le body l'emporte sur le sujet — `_is_wp_contact_form()` (formulaires WordPress toutes boîtes), `_is_reply_to_daniel()` (Re:+citation signée Daniel), `_has_strong_human_demand()` (exception au « jamais remonter depuis phishing »). Rattrape #515 (formulaire WP classé facture), #606 (Re:+devis classé facture), #614 (homoglyphes itsme classé phishing). #515 + #606 reclassés et livrés en prod. Règle d'or : faux positifs acceptables, faux négatifs intolérables.
 - **Brouillon hors-légalité v1.24.1** : `_detect_illegal_request()` (11 regex FR/NL/EN) court-circuite le brouillon qualifiant si le client demande un piratage / accès non autorisé aux communications (WhatsApp, téléphone, compte, logiciel espion) → `_build_illegal_refusal_draft()` = refus poli + cadre légal belge (infractions pénales) + alternative légale (filature/surveillance/constat). Pour #614 (Serge M / « faire sortir les conversations WhatsApp »).
-- **RAG mis en pause v1.24.2** : `rag_enabled: bool = False` dans `config.py` (env `RAG_ENABLED`). `retrieve()` court-circuite avant tout appel embedding. L'approche déterministe (`qualification_builder` + few-shot Daniel) est plus fiable et remplace le RAG pour les brouillons `demande_client`/`prise_contact`. Le RAG était de plus cassé sur les 3 boîtes depuis 2026-05-28 (`pairs_vec` vide/missing). Code conservé intact pour réactivation. Voir point de vigilance #1 du HANDOVER.
+- **RAG mis en pause v1.24.2** : `rag_enabled: bool = False` dans `config.py` (env `RAG_ENABLED`). `retrieve()` court-circuite avant tout appel embedding. L'approche déterministe (`qualification_builder` + few-shot Daniel) est plus fiable et remplace le RAG pour les brouillons `demande_client`/`prise_contact`. Le RAG était de plus cassé sur les 4 boîtes depuis 2026-05-28 (`pairs_vec` vide/missing). Code conservé intact pour réactivation. Voir point de vigilance #1 du HANDOVER.
 - **Réconcilieur Drafts IMAP v1.25.22 + bug P0 corrigé v1.25.23** : `app/workers/drafts_reconciler.py` (tâche 15 min) garantit que tout brouillon généré est physiquement présent dans `Drafts` de la boîte source — recherche par header `X-Detective-Mail-Id` (posé par `append_draft`, v1.25.22) puis fallback body `EMAIL #<id>`. Bug P0 v1.25.23 : `_draft_present` confondait la ligne de status aioimaplib `b"Search completed (...)"` (non-vide) avec un match → ne détectait jamais les manquants ; corrigé via `_has_search_match()` (n'accepte qu'un token numérique, ignore `completed`). Anti-doublon : `_fetch_candidates()` n'accepte que `delivered_at IS NULL` (vrai crash silencieux) — les brouillons déjà livrés puis envoyés par Daniel (status reste `pending`, le workflow V2a ne notifie pas le cockpit) ne sont PAS re-livrés. Garde-fou principal = `_verify_draft_present` post-APPEND (dans la minute) ; réconcilieur = filet 15 min.
 - **Expéditeur affiché = vrai client, jamais le forwarder v1.25.24 → v1.25.26** : `mask_forwarder_sender()` s'appuie **uniquement sur le Reply-To** (décision CDAL « Reply-To uniquement » — un email pioché dans le body est ambigu : `info@`/`support@`/`retail@` extraits de newsletters = faux clients) → sinon `NO_EMAIL_IN_THE_FORM` si sender technique → sinon sender direct inchangé. `_is_technical_sender()` capte `newsletter@`/`noreply@`/`bounce@` sur **tout** domaine (plus large que `is_wp_forwarder` qui exige `@detective*`). `_persist` stocke `mask_forwarder_sender(...)` comme `sender` en DB (nouveaux mails). `_extract_client_email_from_body()` conservé uniquement pour `has_client_email_in_body()`/`tag_no_email()` (tag du sujet). **Backfill prod appliqué** : 224 senders techniques → `NO_EMAIL_IN_THE_FORM`, 353 vrais clients intacts.
 - **#629 finalisé** (Christèle Kremp-Voinova, forwarder `newsletter@wikipreneurs.be`, Reply-To `ckremp@vo.lu`) : brouillon propre en Drafts IMAP (UID 6540, header `X-Detective-Mail-Id 629`, sujet `Recherche de personne — Christele Kremp-voinova`), `reply_to` + `delivered_at` set en DB, sender DB = `ckremp@vo.lu`. Cas de référence pour les 6 bugs A-F (sujet/sender fantaisistes, Reply-To non exploité, brouillon absent, faux nom extrait, sujet illisible).
+- **4ème boîte mail OVH v1.27.0** : ajout de `info@detectives-belgique.be` (brand Detectives Belgique, code cockpit `D_DS`, marque Cerveau2 `detectivesbelgique`, DB `boite4.sqlite`, serveur IMAP `ex5.mail.ovh.net`). Architecture IMAP host par boîte : `MailboxConfig` enrichi avec `imap_host`, `imap_port`, `short_code`, `cerveau2_marque`. Mappings statiques supprimés, domaines propres étendus, templates cockpit dynamiques. **323 tests verts**.
 
 ### ⏳ En cours
-- **V2b — Polishing cockpit** : filtres inbox (3 boîtes cochées par défaut), latence Charlie < 5s (parallélisation Cerveau2 + SQL déjà faite).
+- **V2b — Polishing cockpit** : filtres inbox (4 boîtes cochées par défaut), latence Charlie < 5s (parallélisation Cerveau2 + SQL déjà faite).
 - **V2c — Feedback loop qualité Daniel** : détecter les mails `Sent` qui correspondent à un brouillon V2a, calculer le diff, taux d'acceptation, affiner `personality_daniel.txt` avec les patterns d'édition. **Démarrage lundi 2026-05-25** (cf. mémoire `project_v2_drafts_approval`).
 - **Reclassement #614 (post-v1.24.1)** : `backfill_reclassify.py --apply --only-id 614` puis `deliver_pending_drafts.py --only-id 614 --apply` — à valider avec CDAL (brouillon = refus poli, confronter au ton de Daniel).
 - **Task #4 — Extraction vrai contact client formulaires WP** : les formulaires WP ne demandent jamais l'email — le vrai contact = téléphone (`Telefoonnummer`). `mask_forwarder_sender` s'appuie désormais sur le **Reply-To uniquement** (v1.25.26) — un forwarder sans Reply-To affiche `NO_EMAIL_IN_THE_FORM`. Reste à orienter le wording du brouillon qualifiant vers « je vous appelle au 04xx » quand le vrai contact est un téléphone extrait du body (`Telefoonnummer`).

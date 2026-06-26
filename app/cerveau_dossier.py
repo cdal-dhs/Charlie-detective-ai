@@ -5,6 +5,7 @@ soit un identifiant client stable dérivé de l'expéditeur ou du nom
 anonymisé. Cela garantit que toute la correspondance d'un même client
 se retrouve dans un seul dossier Cerveau2.
 """
+
 from __future__ import annotations
 
 import re
@@ -19,33 +20,59 @@ log = structlog.get_logger()
 _DOSSIER_REF_RE = re.compile(r"\b([A-Z][A-Z0-9]{2,})\b")
 
 # Mots courants à ignorer (faux positifs dans les sujets d'emails)
-_IGNORE_REFS = frozenset({
-    "TEST", "TESTING", "DEMO", "EXAMPLE", "SAMPLE",
-    "RE", "FW", "FWD", "R", "TR", "VS", "ND", "N",
-    "URGENT", "IMPORTANT", "PRIORITY",
-    "HELLO", "BONJOUR", "SALUT", "HI",
-})
+_IGNORE_REFS = frozenset(
+    {
+        "TEST",
+        "TESTING",
+        "DEMO",
+        "EXAMPLE",
+        "SAMPLE",
+        "RE",
+        "FW",
+        "FWD",
+        "R",
+        "TR",
+        "VS",
+        "ND",
+        "N",
+        "URGENT",
+        "IMPORTANT",
+        "PRIORITY",
+        "HELLO",
+        "BONJOUR",
+        "SALUT",
+        "HI",
+    }
+)
 
 # Dossiers déjà connus de Cerveau2 — peuvent être référencés explicitement
 _KNOWN_PREFIXES = frozenset({"DOSSIER", "AFFAIRE", "PROJET", "ENQUETE", "INVESTIGATION"})
 
 # Expéditeurs internes — pas de dossier client à créer pour ces adresses
-_INTERNAL_DOMAINS = frozenset({
-    "digitalhs.biz",
-    "detectivebelgique.be",
-    "detectivebelgium.com",
-    "dpdhuinvestigations.be",
-})
-_INTERNAL_SENDERS = frozenset({
-    "cdal@digitalhs.biz",
-    "daniel@detectivebelgique.be",
-    "daniel@detectivebelgium.com",
-    "daniel@dpdhuinvestigations.be",
-    "support@detectivebelgique.be",
-    "info@detectivebelgique.be",
-    "support@detectivebelgium.com",
-    "info@detectivebelgium.com",
-})
+_INTERNAL_DOMAINS = frozenset(
+    {
+        "digitalhs.biz",
+        "detectivebelgique.be",
+        "detectivebelgium.com",
+        "dpdhuinvestigations.be",
+        "detectives-belgique.be",
+    }
+)
+_INTERNAL_SENDERS = frozenset(
+    {
+        "cdal@digitalhs.biz",
+        "daniel@detectivebelgique.be",
+        "daniel@detectivebelgium.com",
+        "daniel@dpdhuinvestigations.be",
+        "daniel@detectives-belgique.be",
+        "support@detectivebelgique.be",
+        "info@detectivebelgique.be",
+        "support@detectivebelgium.com",
+        "info@detectivebelgium.com",
+        "support@detectives-belgique.be",
+        "info@detectives-belgique.be",
+    }
+)
 
 
 def _slug(text: str) -> str:
@@ -107,7 +134,7 @@ def derive_dossier_id(
         sender: Adresse email complète ou champ From.
         subject: Sujet du mail (optionnel, pour extraire une référence).
         anonymized_name: Nom anonymisé du client (ex: "D*****e").
-        marque: Identifiant de la marque (ex: detective_belgique).
+        marque: Identifiant de la marque (ex: detective_belgique, detectives_belgique).
         date: Date ISO du mail (optionnel, pour regroupement mensuel).
 
     Returns:

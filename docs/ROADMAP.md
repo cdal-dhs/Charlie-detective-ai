@@ -19,10 +19,10 @@
 **Objectif** : environnement local opérationnel + 1200 paires indexées + guide de style Daniel généré.
 
 ### Pré-requis bloquants (côté CDAL)
-- [x] Déposer `boite1.sqlite`, `boite2.sqlite`, `boite3.sqlite` dans `data/`
+- [x] Déposer `boite1.sqlite`, `boite2.sqlite`, `boite3.sqlite` dans `data/` (+ `boite4.sqlite` ajoutée v1.27.0)
 - [x] Partager le schéma de chaque DB (`sqlite3 data/boiteX.sqlite ".schema"`)
 - [x] Remplir `.env` :
-  - [x] 3 `MAILBOX_*_APP_PASSWORD` (Infomaniak)
+  - [x] 4 `MAILBOX_*_APP_PASSWORD` (Infomaniak ×3 + OVH ×1, v1.27.0)
   - [x] `OLLAMA_PRO_API_KEY` (optionnel — fallback OpenRouter actif)
   - [x] `RESEND_API_KEY` + domaine `noreply@resend.digitalhs.biz` vérifié
   - [x] `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` (test : compte CDAL ; prod : compte Daniel)
@@ -63,7 +63,7 @@ Les 3 DB indexées avec embeddings, le guide de style validé, l'environnement l
 - [ ] Tests unitaires : mock IMAP, vérifier le filtrage sur 5 mails-fixtures *(reporté V2)*
 
 ### Livrable S2
-3 boîtes pollées toutes les 5 min, mails classés et taggés `$AgentProcessed`. Pipeline stable en local. Newsletter digest branché sur Slack.
+4 boîtes pollées toutes les 5 min (3 Infomaniak + 1 OVH depuis v1.27.0), mails classés et taggés `$AgentProcessed`. Pipeline stable en local. Newsletter digest branché sur Slack.
 
 ---
 

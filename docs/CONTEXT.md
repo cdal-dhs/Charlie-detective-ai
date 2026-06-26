@@ -6,13 +6,14 @@
 
 ## Le client
 
-**Daniel Hurchon** — détective privé belge, dirige seul un cabinet d'enquêtes privées exerçant sous **3 marques** :
+**Daniel Hurchon** — détective privé belge, dirige seul un cabinet d'enquêtes privées exerçant sous **4 marques** :
 
 | Marque | Domaine email | Langue par défaut | Public |
 |---|---|---|---|
 | Detective Belgique | `contact@detectivebelgique.be` | FR | clients francophones BE |
 | Detective Belgium | `contact@detectivebelgium.com` | EN (mais multilingue) | clients internationaux + NL |
 | DPDH Investigations | `info@dpdhuinvestigations.be` | FR | dossiers spécifiques |
+| Detectives Belgique | `info@detectives-belgique.be` | FR (à confirmer) | clients francophones BE |
 
 Daniel répond personnellement à tous les mails entrants. Pas de collaborateurs intermédiaires, pas d'assistant. Aujourd'hui, il utilise **Outlook ou Apple Mail** sur Mac (à confirmer côté Daniel).
 
@@ -26,7 +27,7 @@ Daniel répond personnellement à tous les mails entrants. Pas de collaborateurs
 
 ## Les emails — typologie observée
 
-Volume estimé : **~50 mails/jour** au total sur les 3 boîtes, mélangeant :
+Volume estimé : **~50 mails/jour** au total sur les 4 boîtes, mélangeant :
 
 1. **Demandes clients** (cible prioritaire de l'agent)
    - Nouveau prospect qui décrit un soupçon (infidélité, fraude, recherche de personne, surveillance, etc.)

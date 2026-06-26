@@ -26,6 +26,10 @@ async def test_generate_draft_fr_includes_original_body(monkeypatch) -> None:
                         brand="Detective Belgique FR",
                         default_lang="fr",
                         db_path=Path("data/boite1.sqlite"),
+                        imap_host="mail.infomaniak.com",
+                        imap_port=993,
+                        short_code="D_FR",
+                        cerveau2_marque="detectivebelgique",
                     )
                 ]
             )

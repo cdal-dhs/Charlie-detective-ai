@@ -35,6 +35,10 @@ class FakeMailbox:
     user = "contact@detectivebelgique.be"
     default_lang = "fr"
     brand = "Detective Belgique"
+    imap_host = "mail.infomaniak.com"
+    imap_port = 993
+    short_code = "D_FR"
+    cerveau2_marque = "detectivebelgique"
 
 
 @pytest.fixture

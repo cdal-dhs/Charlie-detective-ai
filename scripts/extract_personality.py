@@ -4,7 +4,7 @@ représentatif de réponses de Daniel.
 Usage : python -m scripts.extract_personality [--sample-size 50]
 
 Le script :
-  1. Échantillonne ~`sample_size` réponses depuis les 3 DB (couvrant FR/NL/EN, marques variées)
+  1. Échantillonne ~`sample_size` réponses depuis toutes les DB (couvrant FR/NL/EN, marques variées)
   2. Nettoie le texte cité pour ne garder que la prose de Daniel
   3. Demande au LLM principal d'analyser le ton, formules récurrentes, longueur, signature
   4. Sauvegarde le guide produit dans app/prompts/personality_daniel.txt
@@ -15,7 +15,6 @@ Le script :
 import argparse
 import asyncio
 import random
-import re
 import sqlite3
 from pathlib import Path
 
@@ -60,7 +59,9 @@ def _clean_quoted_text(body: str) -> str:
     return "\n".join(cleaned).strip()
 
 
-def _fetch_responses(db_path: Path, brand: str, default_lang: str, limit: int) -> list[tuple[str, str, str]]:
+def _fetch_responses(
+    db_path: Path, brand: str, default_lang: str, limit: int
+) -> list[tuple[str, str, str]]:
     """Retourne (response_clean, brand, lang) depuis sent_emails."""
     conn = sqlite3.connect(db_path)
     try:

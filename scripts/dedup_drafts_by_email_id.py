@@ -27,8 +27,7 @@ log = structlog.get_logger()
 
 
 async def _dedup_mailbox(mb, apply: bool) -> tuple[int, int]:
-    settings = get_settings()
-    client = aioimaplib.IMAP4_SSL(host=settings.imap_host, port=settings.imap_port)
+    client = aioimaplib.IMAP4_SSL(host=mb.imap_host, port=mb.imap_port)
     await client.wait_hello_from_server()
     login = await client.login(mb.user, mb.app_password)
     if login.result != "OK":

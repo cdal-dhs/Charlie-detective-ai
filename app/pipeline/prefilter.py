@@ -6,32 +6,79 @@ from email.utils import parseaddr
 # ── Newsletter ────────────────────────────────────────────────
 NEWSLETTER_HEADERS = ("List-Unsubscribe", "List-Id", "Precedence")
 NEWSLETTER_KEYWORDS = (
-    "unsubscribe", "désinscrire", "desinscrire", "se désinscrire",
-    "mailing", "newsletter", "promotion", "offre spéciale",
-    "abonnement", "mailchimp", "sendinblue", "brevo", "campaign",
-    "ne plus recevoir", "paramètres d'e-mail", "parametres d'email",
-    "préférences de communication", "mise à jour produit", "nouveauté",
-    "témoignage client", "success story", "bulletin", "lettre d'information",
-    "decouvrez nos", "decouvrez nos offres", "promo", "black friday",
-    "soldes", "remise", "code promo", "early access", "vip", "exclusive",
+    "unsubscribe",
+    "désinscrire",
+    "desinscrire",
+    "se désinscrire",
+    "mailing",
+    "newsletter",
+    "promotion",
+    "offre spéciale",
+    "abonnement",
+    "mailchimp",
+    "sendinblue",
+    "brevo",
+    "campaign",
+    "ne plus recevoir",
+    "paramètres d'e-mail",
+    "parametres d'email",
+    "préférences de communication",
+    "mise à jour produit",
+    "nouveauté",
+    "témoignage client",
+    "success story",
+    "bulletin",
+    "lettre d'information",
+    "decouvrez nos",
+    "decouvrez nos offres",
+    "promo",
+    "black friday",
+    "soldes",
+    "remise",
+    "code promo",
+    "early access",
+    "vip",
+    "exclusive",
 )
 NEWSLETTER_SENDERS = (
-    "mailchimp", "sendinblue", "brevo", "hubspot", "mailjet",
-    "constantcontact", "getresponse", "activecampaign", "aweber",
-    "convertkit", "klaviyo", "substack", "mailerlite", "campaign",
+    "mailchimp",
+    "sendinblue",
+    "brevo",
+    "hubspot",
+    "mailjet",
+    "constantcontact",
+    "getresponse",
+    "activecampaign",
+    "aweber",
+    "convertkit",
+    "klaviyo",
+    "substack",
+    "mailerlite",
+    "campaign",
 )
 # Sous-domaines marketing : les vraies demandes clients ne viennent jamais
 # de info.*/news.*/email.* (plateformes d'envoi type Eloqua, Mailchimp, etc.).
 NEWSLETTER_DOMAINS = (
-    "info.", "news.", "newsletter.", "email.", "marketing.",
-    "communications.", "mailing.", "campaign.", "edm.",
+    "info.",
+    "news.",
+    "newsletter.",
+    "email.",
+    "marketing.",
+    "communications.",
+    "mailing.",
+    "campaign.",
+    "edm.",
 )
 # Signatures URL de plateformes marketing dans le body (détection robuste,
 # indépendante du sender). Eloqua = elqTrackId/elqaid, Mailchimp = mc_cid/mc_eid.
 NEWSLETTER_MARKETING_URLS = (
-    "elqtrackid", "elqaid", "elq=",
-    "mc_cid", "mc_eid",
-    "xtrk=", "trk_",
+    "elqtrackid",
+    "elqaid",
+    "elq=",
+    "mc_cid",
+    "mc_eid",
+    "xtrk=",
+    "trk_",
 )
 
 
@@ -39,90 +86,234 @@ def _unaccent(s: str) -> str:
     """Normalise en ASCII (découvrez → decouvrez) pour matching accent-insensible."""
     return unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
 
+
 # ── Phishing ───────────────────────────────────────────────────
 PHISHING_KEYWORDS = (
-    "votre compte a été suspendu", "votre compte sera suspendu",
-    "suspension immédiate", "confirmer votre identité",
-    "vérifier votre compte", "valider vos informations",
-    "mise à jour de sécurité requise", "fraude détectée",
-    "activité suspecte", "accès non autorisé", "compte compromis",
-    "phishing", "hameçonnage", "arnaque", "escroquerie",
-    "cliquez sur le lien ci-dessous", "cliquez ici immédiatement",
-    "votre mot de passe expire", "expiration imminente",
-    "délai de 24h", "délai de 48h", "sanction", "pénalité",
-    "réclamation en attente", "plainte déposée", "tribunal",
-    "huissier", "gendarmerie", "police fédérale", "interpol",
+    "votre compte a été suspendu",
+    "votre compte sera suspendu",
+    "suspension immédiate",
+    "confirmer votre identité",
+    "vérifier votre compte",
+    "valider vos informations",
+    "mise à jour de sécurité requise",
+    "fraude détectée",
+    "activité suspecte",
+    "accès non autorisé",
+    "compte compromis",
+    "phishing",
+    "hameçonnage",
+    "arnaque",
+    "escroquerie",
+    "cliquez sur le lien ci-dessous",
+    "cliquez ici immédiatement",
+    "votre mot de passe expire",
+    "expiration imminente",
+    "délai de 24h",
+    "délai de 48h",
+    "sanction",
+    "pénalité",
+    "réclamation en attente",
+    "plainte déposée",
+    "tribunal",
+    "huissier",
+    "gendarmerie",
+    "police fédérale",
+    "interpol",
 )
 PHISHING_SENDERS = (
-    "noreply-", "no-reply-", "alerte-", "securite-", "security-",
-    "support-urgent", "verification-", "confirm-", "validate-",
+    "noreply-",
+    "no-reply-",
+    "alerte-",
+    "securite-",
+    "security-",
+    "support-urgent",
+    "verification-",
+    "confirm-",
+    "validate-",
 )
 SUSPICIOUS_DOMAINS = (
-    "gmail.com", "yahoo.com", "hotmail.com", "outlook.com",
+    "gmail.com",
+    "yahoo.com",
+    "hotmail.com",
+    "outlook.com",
 )
 
 # ── Rappel ─────────────────────────────────────────────────────
 RAPPEL_KEYWORDS = (
-    "rappel", "relance", "échéance", "echeance", "deadline",
-    "impayé", "impaye", "non payé", "non paye", "en retard",
-    "retard de paiement", "paiement en attente", "solde débiteur",
-    "facture en souffrance", "dû depuis", "du depuis", "date limite",
-    "dernier délai", "dernier rappel", "avant recours", "avant poursuite",
-    "rendez-vous", "rdv", "rappel de rendez-vous", "rappel consultation",
-    "convocation", "audience", "déposition", "deposition",
+    "rappel",
+    "relance",
+    "échéance",
+    "echeance",
+    "deadline",
+    "impayé",
+    "impaye",
+    "non payé",
+    "non paye",
+    "en retard",
+    "retard de paiement",
+    "paiement en attente",
+    "solde débiteur",
+    "facture en souffrance",
+    "dû depuis",
+    "du depuis",
+    "date limite",
+    "dernier délai",
+    "dernier rappel",
+    "avant recours",
+    "avant poursuite",
+    "rendez-vous",
+    "rdv",
+    "rappel de rendez-vous",
+    "rappel consultation",
+    "convocation",
+    "audience",
+    "déposition",
+    "deposition",
 )
 
 # ── Autre / à ignorer ─────────────────────────────────────────
 AUTRE_KEYWORDS = (
-    "updated invitation", "invitation updated", "calendar",
-    "ical", "vcalendar", "event invitation", "meeting request",
-    "accepté", "refusé", "tentative", "provisoire",
-    "notification", "noreply", "no-reply", "donotreply",
+    "updated invitation",
+    "invitation updated",
+    "calendar",
+    "ical",
+    "vcalendar",
+    "event invitation",
+    "meeting request",
+    "accepté",
+    "refusé",
+    "tentative",
+    "provisoire",
+    "notification",
+    "noreply",
+    "no-reply",
+    "donotreply",
     # Emails automatiques de services / transactions
     # NOTE : "renouvellement" retiré — géré par is_facture() quand combiné avec "facture"
-    "renewal", "votre abonnement", "your subscription",
-    "confirmation de", "confirmation de commande", "confirmation de paiement",
-    "reçu de", "reçu de paiement", "payment receipt", "receipt",
-    "votre commande", "your order", "commande confirmée",
-    "mise à jour de votre", "mise a jour de votre", "update to your",
-    "état de votre", "etat de votre", "status of your",
-    "facture disponible", "invoice available", "your invoice",
-    "alerte de sécurité", "security alert", "connexion détectée", "new sign-in",
-    "2-step verification", "authentification à deux facteurs", "code de vérification",
-    "bienvenue", "welcome to", "création de compte", "account created",
-    "désabonnement", "désinscription", "unsubscribe", "subscription canceled",
-    "votre espace client", "your customer area", "portail client",
-    "message automatique", "email automatique", "automatic email", "do not reply",
+    "renewal",
+    "votre abonnement",
+    "your subscription",
+    "confirmation de",
+    "confirmation de commande",
+    "confirmation de paiement",
+    "reçu de",
+    "reçu de paiement",
+    "payment receipt",
+    "receipt",
+    "votre commande",
+    "your order",
+    "commande confirmée",
+    "mise à jour de votre",
+    "mise a jour de votre",
+    "update to your",
+    "état de votre",
+    "etat de votre",
+    "status of your",
+    "facture disponible",
+    "invoice available",
+    "your invoice",
+    "alerte de sécurité",
+    "security alert",
+    "connexion détectée",
+    "new sign-in",
+    "2-step verification",
+    "authentification à deux facteurs",
+    "code de vérification",
+    "bienvenue",
+    "welcome to",
+    "création de compte",
+    "account created",
+    "désabonnement",
+    "désinscription",
+    "unsubscribe",
+    "subscription canceled",
+    "votre espace client",
+    "your customer area",
+    "portail client",
+    "message automatique",
+    "email automatique",
+    "automatic email",
+    "do not reply",
 )
 
 SERVICE_SENDERS = (
-    "infomaniak", "ovh", "stripe", "paypal", "amazon", "microsoft",
-    "google", "apple", "meta", "facebook", "linkedin", "twitter", "x.com",
-    "github", "gitlab", "sendgrid", "mailgun", "brevo", "mailchimp",
-    "hubspot", "zendesk", "intercom", "freshdesk", "noreply", "no-reply",
-    "donotreply", "ne-pas-repondre", "ne pas répondre", "alerte", "notification",
+    "infomaniak",
+    "ovh",
+    "stripe",
+    "paypal",
+    "amazon",
+    "microsoft",
+    "google",
+    "apple",
+    "meta",
+    "facebook",
+    "linkedin",
+    "twitter",
+    "x.com",
+    "github",
+    "gitlab",
+    "sendgrid",
+    "mailgun",
+    "brevo",
+    "mailchimp",
+    "hubspot",
+    "zendesk",
+    "intercom",
+    "freshdesk",
+    "noreply",
+    "no-reply",
+    "donotreply",
+    "ne-pas-repondre",
+    "ne pas répondre",
+    "alerte",
+    "notification",
 )
 
 # ── Demande client ────────────────────────────────────────────
 DEMANDE_KEYWORDS = (
-    "demande d'information", "demande de renseignement",
-    "demande de devis", "demande de prix", "demande de suivi",
-    "demande d'enquête", "demande d'enquete",
-    "demande de mission", "demande de consultation",
-    "filature", "détective privé", "detective prive",
-    "surveillance", "investigation", "enquête privée", "enquete privee",
-    "je souhaite", "je voudrais", "je cherche", "je désire",
-    "prenons contact", "premier rendez-vous",
-    "nouveau message de", "formulaire de contact",
+    "demande d'information",
+    "demande de renseignement",
+    "demande de devis",
+    "demande de prix",
+    "demande de suivi",
+    "demande d'enquête",
+    "demande d'enquete",
+    "demande de mission",
+    "demande de consultation",
+    "filature",
+    "détective privé",
+    "detective prive",
+    "surveillance",
+    "investigation",
+    "enquête privée",
+    "enquete privee",
+    "je souhaite",
+    "je voudrais",
+    "je cherche",
+    "je désire",
+    "prenons contact",
+    "premier rendez-vous",
+    "nouveau message de",
+    "formulaire de contact",
 )
 DEMANDE_SUBJECTS = (
-    "demande", "filature", "surveillance", "investigation",
-    "enquête", "enquete", "mission", "devis",
-    "consultation", "renseignement",
+    "demande",
+    "filature",
+    "surveillance",
+    "investigation",
+    "enquête",
+    "enquete",
+    "mission",
+    "devis",
+    "consultation",
+    "renseignement",
 )
 FORM_SUBJECTS = (
-    "nouveau message de", "contact form", "formulaire de contact",
-    "demande de contact", "prise de contact",
+    "nouveau message de",
+    "contact form",
+    "formulaire de contact",
+    "demande de contact",
+    "prise de contact",
 )
 
 # ── WordPress contact form (detectivebelgium.com / detectivebelgique.be) ──
@@ -136,17 +327,41 @@ _WP_FORM_NL_MARKER = "hoe kunnen wij u helpen"
 
 # ── Facture ──────────────────────────────────────────────────
 FACTURE_KEYWORDS = (
-    "facture", "invoice", "vat", "tva", "acompte",
-    "pro forma", "proforma", "bon de commande", "purchase order",
-    "pièce jointe : facture", "pièce jointe: facture",
-    "facture n°", "facture numero", "numero de facture",
-    "renouvellement", "renewal", "renouveler", "régler", "regler",
-    "paiement en ligne", "pay online", "règlement",
+    "facture",
+    "invoice",
+    "vat",
+    "tva",
+    "acompte",
+    "pro forma",
+    "proforma",
+    "bon de commande",
+    "purchase order",
+    "pièce jointe : facture",
+    "pièce jointe: facture",
+    "facture n°",
+    "facture numero",
+    "numero de facture",
+    "renouvellement",
+    "renewal",
+    "renouveler",
+    "régler",
+    "regler",
+    "paiement en ligne",
+    "pay online",
+    "règlement",
 )
 FACTURE_SENDERS = (
-    "ovh", "infomaniak", "stripe", "paypal", "amazon",
-    "microsoft", "google", "accounting", "comptable",
-    "bureau comptable", "fiduciaire",
+    "ovh",
+    "infomaniak",
+    "stripe",
+    "paypal",
+    "amazon",
+    "microsoft",
+    "google",
+    "accounting",
+    "comptable",
+    "bureau comptable",
+    "fiduciaire",
 )
 
 
@@ -219,15 +434,21 @@ def is_newsletter(msg: Message) -> bool:
 
 def _is_own_domain(sender: str) -> bool:
     """Vérifie si l'expéditeur appartient à un des domaines de Detective.be."""
-    own_domains = ("detectivebelgique.be", "detectivebelgium.com", "dpdhuinvestigations.be")
+    own_domains = (
+        "detectivebelgique.be",
+        "detectivebelgium.com",
+        "dpdhuinvestigations.be",
+        "detectives-belgique.be",
+    )
     return any(d in sender.lower() for d in own_domains)
 
 
 def _is_wp_contact_form(body: str) -> bool:
-    """Détecte un formulaire de contact WordPress (detectivebelgium.com NL ou
-    detectivebelgique.be FR). Ces mails arrivent via un expéditeur technique
-    (mail@/wordpress@/contact@detective*) avec un sujet parfois trompeur, mais
-    le body structuré en champs est la signature fiable d'une vraie demande client.
+    """Détecte un formulaire de contact WordPress (detectivebelgium.com NL,
+    detectivebelgique.be FR ou detectives-belgique.be FR). Ces mails arrivent
+    via un expéditeur technique (mail@/wordpress@/contact@detective*) avec un
+    sujet parfois trompeur, mais le body structuré en champs est la signature
+    fiable d'une vraie demande client.
     """
     b = body.lower()
     nl_hits = sum(1 for f in _WP_FORM_NL_FIELDS if f in b)
@@ -268,7 +489,7 @@ def _get_body_text(msg: Message, max_chars: int = 8000) -> str:
 
 # Domaines d'outils métiers connus (compta, banque, logiciels internes)
 _KNOWN_LEGIT_DOMAINS = (
-    "mailer.falco-app.be",   # Logiciel de comptabilité FALCO
+    "mailer.falco-app.be",  # Logiciel de comptabilité FALCO
 )
 
 
@@ -388,7 +609,7 @@ def is_demande_client(msg: Message) -> bool:
 
 def is_wordpress_contact_form(msg: Message) -> bool:
     """True si le body contient les champs structurés d'un formulaire WP
-    detectivebelgium.com (NL) ou detectivebelgique.be (FR).
+    detectivebelgium.com (NL), detectivebelgique.be (FR) ou detectives-belgique.be (FR).
     """
     return _is_wp_contact_form(_get_body_text(msg, max_chars=8000))
 

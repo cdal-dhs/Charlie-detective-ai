@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Backfill historique : ingère les emails des 3 DB SQLite (boite1/2/3) dans Cerveau2.
+"""Backfill historique : ingère les emails des DB SQLite (boite1/2/3/4) dans Cerveau2.
 
 Tourne séquentiellement pour éviter de saturer Cerveau2.
 Utilise une table de tracking locale pour reprendre en cas d'interruption.
@@ -15,6 +15,7 @@ Le script est CPU-friendly : une seule requête HTTP à la fois, pause 0.5s entr
 chaque email. Cerveau2 met 40-120s par email (embeddings), donc le rythme est
 imposé par la latence de Cerveau2.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -29,7 +30,7 @@ import structlog
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from app.cerveau_client import feed_correspondance, _map_priority, _trim_body
+from app.cerveau_client import _map_priority, _trim_body, feed_correspondance
 from app.config import get_settings
 
 log = structlog.get_logger()
@@ -39,6 +40,7 @@ DB_MARQUE_MAP = {
     "boite1.sqlite": "detectivebelgique",
     "boite2.sqlite": "detectivebelgium",
     "boite3.sqlite": "dpdhu",
+    "boite4.sqlite": "detectivesbelgique",
 }
 
 # Mapping depuis colonne account (si présente dans la DB)
@@ -46,6 +48,7 @@ ACCOUNT_MAP = {
     "contact@detectivebelgique.be": "detectivebelgique",
     "contact@detectivebelgium.com": "detectivebelgium",
     "contact@dpdh-investigations.be": "dpdhu",
+    "info@detectives-belgique.be": "detectivesbelgique",
 }
 
 # Catégories à skipper (bruit inutile pour Cerveau2)
@@ -105,7 +108,45 @@ def _parse_date_rfc2822(date_str: str | None) -> tuple[str, str]:
 
 
 # Codes pays / marques à ne PAS considérer comme dossier_id
-_EXCLUDED_CODES = {"NL", "BE", "FR", "EN", "VS", "UK", "DE", "IT", "ES", "US", "AU", "CA", "EU", "AI", "API", "URL", "HTTP", "HTTPS", "SMS", "GSM", "TV", "CD", "DVD", "VIP", "CEO", "SARL", "SPRL", "SCRL", "ASBL", "NV", "BV", "SA", "SAS", "SASU", "EURL", "SARL", "SC", "SCOP"}
+_EXCLUDED_CODES = {
+    "NL",
+    "BE",
+    "FR",
+    "EN",
+    "VS",
+    "UK",
+    "DE",
+    "IT",
+    "ES",
+    "US",
+    "AU",
+    "CA",
+    "EU",
+    "AI",
+    "API",
+    "URL",
+    "HTTP",
+    "HTTPS",
+    "SMS",
+    "GSM",
+    "TV",
+    "CD",
+    "DVD",
+    "VIP",
+    "CEO",
+    "SARL",
+    "SPRL",
+    "SCRL",
+    "ASBL",
+    "NV",
+    "BV",
+    "SA",
+    "SAS",
+    "SASU",
+    "EURL",
+    "SC",
+    "SCOP",
+}
 
 
 def _extract_dossier_id_from_subject(subject: str | None) -> str | None:
@@ -130,10 +171,16 @@ def _detect_langue(subject: str | None, body: str | None) -> str:
     text = (subject or "") + " " + (body or "")
     text_lower = text.lower()
     # NL — mots caractéristiques
-    if any(w in text_lower for w in ("het", "de", "een", "en", "voor", "met", "van", "bij", "naar", "bedankt", "groet")):
+    if any(
+        w in text_lower
+        for w in ("het", "de", "een", "en", "voor", "met", "van", "bij", "naar", "bedankt", "groet")
+    ):
         return "nl"
     # EN — mots caractéristiques
-    if any(w in text_lower for w in ("the", "and", "for", "with", "from", "to", "of", "in", "on", "thank", "regards")):
+    if any(
+        w in text_lower
+        for w in ("the", "and", "for", "with", "from", "to", "of", "in", "on", "thank", "regards")
+    ):
         return "en"
     return "fr"
 
@@ -259,7 +306,15 @@ async def _ingest_db(
         priorite = _map_priority("high" if urgency else "normal")
 
         if dry_run:
-            log.info("backfill.dry_run", db=db_name, id=id_, message_id=message_id, marque=marque, dossier_id=dossier_id, subject=subject[:60])
+            log.info(
+                "backfill.dry_run",
+                db=db_name,
+                id=id_,
+                message_id=message_id,
+                marque=marque,
+                dossier_id=dossier_id,
+                subject=subject[:60],
+            )
             success += 1
             continue
 
@@ -285,7 +340,9 @@ async def _ingest_db(
             _mark_ingested(tracking_db, message_id, db_name)
             success += 1
         except Exception as e:
-            log.warning("backfill.ingest_failed", db=db_name, id=id_, message_id=message_id, error=str(e))
+            log.warning(
+                "backfill.ingest_failed", db=db_name, id=id_, message_id=message_id, error=str(e)
+            )
             errors += 1
 
         # Progress log
@@ -313,10 +370,17 @@ async def _ingest_db(
 
 async def main():
     import argparse
+
     parser = argparse.ArgumentParser(description="Backfill emails historiques vers Cerveau2")
-    parser.add_argument("--limit", type=int, default=None, help="Nombre max d'emails à traiter par DB (test mode)")
-    parser.add_argument("--dry-run", action="store_true", help="Ne pas ingérer, juste logger ce qui serait fait")
-    parser.add_argument("--db", type=str, default=None, help="Traiter une seule DB (ex: boite2.sqlite)")
+    parser.add_argument(
+        "--limit", type=int, default=None, help="Nombre max d'emails à traiter par DB (test mode)"
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Ne pas ingérer, juste logger ce qui serait fait"
+    )
+    parser.add_argument(
+        "--db", type=str, default=None, help="Traiter une seule DB (ex: boite2.sqlite)"
+    )
     args = parser.parse_args()
 
     settings = get_settings()
@@ -325,11 +389,7 @@ async def main():
     _init_tracking(tracking_db)
 
     data_dir = Path("./data")
-    all_dbs = [
-        (data_dir / "boite1.sqlite", "boite1.sqlite"),
-        (data_dir / "boite2.sqlite", "boite2.sqlite"),
-        (data_dir / "boite3.sqlite", "boite3.sqlite"),
-    ]
+    all_dbs = [(data_dir / mb.db_path.name, mb.db_path.name) for mb in settings.mailboxes()]
 
     if args.db:
         dbs = [(data_dir / args.db, args.db)]
@@ -345,7 +405,10 @@ async def main():
             log.warning("backfill.skip", db=db_name, reason="not_found")
             continue
         s, sk, e = await _ingest_db(
-            db_path, db_name, settings, tracking_db,
+            db_path,
+            db_name,
+            settings,
+            tracking_db,
             limit=args.limit,
             dry_run=args.dry_run,
         )
@@ -359,7 +422,7 @@ async def main():
         total_skipped=total_skipped,
         total_errors=total_errors,
     )
-    print(f"\n=== BACKFILL TERMINÉ ===")
+    print("\n=== BACKFILL TERMINÉ ===")
     print(f"Succès : {total_success}")
     print(f"Déjà présents / skip : {total_skipped}")
     print(f"Erreurs : {total_errors}")

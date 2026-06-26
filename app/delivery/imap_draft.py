@@ -251,7 +251,7 @@ async def append_draft(
     client = imap_client
     if client is None:
         own_client = True
-        client = aioimaplib.IMAP4_SSL(settings.imap_host, settings.imap_port)
+        client = aioimaplib.IMAP4_SSL(mailbox.imap_host, mailbox.imap_port)
         try:
             await client.wait_hello_from_server()
             login_resp = await client.login(mailbox.user, mailbox.app_password)

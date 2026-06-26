@@ -2,7 +2,7 @@
 `received_at` est antérieur à une date seuil (défaut: 2026-01-02).
 
 Contexte : suite au backfill + deliver v1.22.1/1.22.2, Charlie a déposé
-153 brouillons dans les Drafts des 3 boîtes Infomaniak. Daniel veut
+153 brouillons dans les Drafts des 4 boîtes Infomaniak. Daniel veut
 archiver/nettoyer les vieux brouillons pour ne pas avoir une liste
 infernale à parcourir dans sa boîte mail.
 
@@ -10,7 +10,7 @@ Ce script :
   1. Liste les mails avec delivered_at IS NOT NULL + received_at < cutoff
   2. Pour chaque mail, ouvre une connexion IMAP, va dans Drafts
   3. Cherche le brouillon par subject (préfixe 'DEMANDE D'Approbation')
-  4. Le marque \Deleted + EXPUNGE
+  4. Le marque \\Deleted + EXPUNGE
   5. Met delivered_at à NULL (ou un timestamp d'expunge) en DB
 
 Usage :
@@ -43,20 +43,26 @@ def _parse_received_at(text: str | None) -> datetime | None:
     """Parse 'Wed, 5 Feb 2025 12:16:58 +0100' en datetime."""
     if not text:
         return None
-    m = re.match(
-        r"[A-Za-z]{3},\s+(\d+)\s+(\w+)\s+(\d{4})\s+(\d{2}):(\d{2}):(\d{2})", text
-    )
+    m = re.match(r"[A-Za-z]{3},\s+(\d+)\s+(\w+)\s+(\d{4})\s+(\d{2}):(\d{2}):(\d{2})", text)
     if not m:
         return None
     day, mon_s, year, hh, mm, ss = m.groups()
     months = {
-        "Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6,
-        "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12,
+        "Jan": 1,
+        "Feb": 2,
+        "Mar": 3,
+        "Apr": 4,
+        "May": 5,
+        "Jun": 6,
+        "Jul": 7,
+        "Aug": 8,
+        "Sep": 9,
+        "Oct": 10,
+        "Nov": 11,
+        "Dec": 12,
     }
     try:
-        return datetime(
-            int(year), months[mon_s], int(day), int(hh), int(mm), int(ss)
-        )
+        return datetime(int(year), months[mon_s], int(day), int(hh), int(mm), int(ss))
     except (KeyError, ValueError):
         return None
 
@@ -68,9 +74,7 @@ def _find_mailbox(name: str) -> object | None:
     return None
 
 
-async def _fetch_candidates(
-    db_path, cutoff_date: str, mailbox_filter: str | None
-) -> list[dict]:
+async def _fetch_candidates(db_path, cutoff_date: str, mailbox_filter: str | None) -> list[dict]:
     import aiosqlite
 
     async with aiosqlite.connect(db_path) as db:
@@ -97,14 +101,9 @@ async def _fetch_candidates(
     return result
 
 
-async def _delete_draft_in_imap(
-    mailbox, subject_marker: str
-) -> tuple[bool, str]:
+async def _delete_draft_in_imap(mailbox, subject_marker: str) -> tuple[bool, str]:
     """Cherche et supprime le brouillon dans Drafts. Retourne (ok, info)."""
-    client = aioimaplib.IMAP4_SSL(
-        mailbox.imap_host if hasattr(mailbox, "imap_host") else "imap.infomaniak.com",
-        mailbox.imap_port if hasattr(mailbox, "imap_port") else 993,
-    )
+    client = aioimaplib.IMAP4_SSL(mailbox.imap_host, mailbox.imap_port)
     try:
         await client.wait_hello_from_server()
         login_resp = await client.login(mailbox.user, mailbox.app_password)
@@ -127,7 +126,7 @@ async def _delete_draft_in_imap(
         clean_subject = subject_marker.replace("\r", " ").replace("\n", " ").strip()
         # Le subject du brouillon stocké est l'original ; le APPEND ajoute le préfixe.
         # On cherche le subject complet reconstitué.
-        full_subject = f'DEMANDE D\'Approbation - Reponse Demande Client : {clean_subject}'
+        full_subject = f"DEMANDE D'Approbation - Reponse Demande Client : {clean_subject}"
 
         # SEARCH SUBJECT — comme dans _verify_draft_present
         search_resp = await client.search(f'SUBJECT "{full_subject}"')
@@ -159,6 +158,7 @@ async def _delete_draft_in_imap(
 
 async def _mark_unset_delivered(db_path, mail_id: int) -> None:
     import aiosqlite
+
     async with aiosqlite.connect(db_path) as db:
         await db.execute(
             "UPDATE mail_processed SET delivered_at = NULL WHERE id = ?",
@@ -177,9 +177,7 @@ async def main(apply: bool, cutoff: str, mailbox_filter: str | None) -> None:
         db=str(settings.db_agent_state),
     )
 
-    candidates = await _fetch_candidates(
-        settings.db_agent_state, cutoff, mailbox_filter
-    )
+    candidates = await _fetch_candidates(settings.db_agent_state, cutoff, mailbox_filter)
     log.info("cleanup.candidates", count=len(candidates))
 
     deleted = 0
@@ -260,6 +258,4 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    asyncio.run(
-        main(apply=args.apply, cutoff=args.cutoff, mailbox_filter=args.mailbox)
-    )
+    asyncio.run(main(apply=args.apply, cutoff=args.cutoff, mailbox_filter=args.mailbox))

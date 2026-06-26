@@ -46,12 +46,6 @@ _CONTACT_SIGNALS_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Mapping mailbox.name → marque Cerveau2
-_MARQUE_CERVEAU2 = {
-    "detective_belgique": "detectivebelgique",
-    "detective_belgium": "detectivebelgium",
-    "dpdh_investigations": "dpdhu",
-}
 
 log = structlog.get_logger()
 
@@ -1028,7 +1022,7 @@ def _build_search_criteria(settings) -> str:
 
 async def _process_mailbox(mailbox: MailboxConfig) -> None:
     settings = get_settings()
-    client = aioimaplib.IMAP4_SSL(settings.imap_host, settings.imap_port)
+    client = aioimaplib.IMAP4_SSL(mailbox.imap_host, mailbox.imap_port)
     await client.wait_hello_from_server()
     login_resp = await client.login(mailbox.user, mailbox.app_password)
     if login_resp.result != "OK":
@@ -1443,8 +1437,6 @@ async def _process_single_mail(
                 date_str = received_at[:10] if received_at else ""
                 heure_str = ""
 
-            _marque = _MARQUE_CERVEAU2.get(mailbox.name, mailbox.name)
-
             _task = asyncio.create_task(  # noqa: RUF006
                 feed_correspondance(
                     message_id=message_id or f"{mailbox.name}_{uid}",
@@ -1455,7 +1447,7 @@ async def _process_single_mail(
                     destinataire=mailbox.user,
                     objet=subject,
                     body=body,
-                    marque=_marque,
+                    marque=mailbox.cerveau2_marque,
                     dossier_id=dossier_id,
                     categorie=category,
                     zone="jaune",
@@ -1472,7 +1464,7 @@ async def _process_single_mail(
                     text=body,
                     subject=subject,
                     dossier_id=dossier_id,
-                    marque=_marque,
+                    marque=mailbox.cerveau2_marque,
                     date_str=date_str,
                     base_url=settings.cerveau2_base_url,
                     api_secret=settings.cerveau2_api_secret,
@@ -1487,7 +1479,7 @@ async def _process_single_mail(
                     subject=subject,
                     sender=sender,
                     dossier_id=dossier_id,
-                    marque=_marque,
+                    marque=mailbox.cerveau2_marque,
                     date_str=date_str,
                     base_url=settings.cerveau2_base_url,
                     api_secret=settings.cerveau2_api_secret,
@@ -1528,7 +1520,7 @@ async def _process_single_mail(
                             doc_id=att_id,
                             type="document",
                             dossier_id=dossier_id,
-                            marque=_marque,
+                            marque=mailbox.cerveau2_marque,
                             date=date_str,
                             titre=f"[PJ] {att_filename}",
                             body=att_text,
@@ -1561,7 +1553,7 @@ async def _process_single_mail(
                                 text=att_text,
                                 subject=att_filename,
                                 dossier_id=dossier_id,
-                                marque=_marque,
+                                marque=mailbox.cerveau2_marque,
                                 date_str=date_str,
                                 base_url=settings.cerveau2_base_url,
                                 api_secret=settings.cerveau2_api_secret,
@@ -1577,7 +1569,7 @@ async def _process_single_mail(
                                 subject=att_filename,
                                 sender=sender,
                                 dossier_id=dossier_id,
-                                marque=_marque,
+                                marque=mailbox.cerveau2_marque,
                                 date_str=date_str,
                                 base_url=settings.cerveau2_base_url,
                                 api_secret=settings.cerveau2_api_secret,

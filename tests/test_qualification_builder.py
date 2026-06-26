@@ -26,6 +26,10 @@ def mailbox() -> MailboxConfig:
         brand="Detective Belgique",
         default_lang="fr",
         db_path=Path("./data/boite1.sqlite"),
+        imap_host="mail.infomaniak.com",
+        imap_port=993,
+        short_code="D_FR",
+        cerveau2_marque="detectivebelgique",
     )
 
 

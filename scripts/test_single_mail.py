@@ -30,7 +30,7 @@ async def main() -> int:
 
     log.info("test.start", mailbox=mailbox.name)
 
-    client = aioimaplib.IMAP4_SSL(settings.imap_host, settings.imap_port)
+    client = aioimaplib.IMAP4_SSL(mailbox.imap_host, mailbox.imap_port)
     await client.wait_hello_from_server()
     await client.login(mailbox.user, mailbox.app_password)
 

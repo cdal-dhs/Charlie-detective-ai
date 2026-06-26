@@ -9,12 +9,12 @@ Garde-fous :
 - Mode --dry-run pour prévisualiser sans toucher au fichier
 - Seuls les ajouts sont auto-appliqués ; suppressions = warning
 """
+
 from __future__ import annotations
 
 import argparse
 import asyncio
 import difflib
-import re
 import sys
 from dataclasses import dataclass
 from datetime import datetime
@@ -37,12 +37,14 @@ MARQUE_MAP = {
     "detective_belgique": "detectivebelgique",
     "detective_belgium": "detectivebelgium",
     "dpdh_investigations": "dpdhu",
+    "detectives_belgique": "detectivesbelgique",
 }
 
 MARQUE_BRAND = {
     "detective_belgique": "Detective Belgique",
     "detective_belgium": "Detective Belgium",
     "dpdh_investigations": "DPDH Investigations",
+    "detectives_belgique": "Detectives Belgique",
 }
 
 
@@ -54,7 +56,9 @@ class EmailSample:
     date: str
 
 
-async def _fetch_outgoing(base_url: str, api_secret: str, marque: str, limit: int = 20) -> list[dict]:
+async def _fetch_outgoing(
+    base_url: str, api_secret: str, marque: str, limit: int = 20
+) -> list[dict]:
     url = f"{base_url.rstrip('/')}/query"
     payload = {"question": f"emails sortants direction out marque {marque}", "limit": limit}
     try:
@@ -109,12 +113,7 @@ def _sanitize_for_prompt(samples: list[EmailSample]) -> str:
     blocks = []
     for i, s in enumerate(samples, 1):
         body = s.body[:800]
-        blocks.append(
-            f"Email #{i} [{s.langue}]\n"
-            f"Sujet: {s.objet[:100]}\n"
-            f"---\n"
-            f"{body}\n"
-        )
+        blocks.append(f"Email #{i} [{s.langue}]\nSujet: {s.objet[:100]}\n---\n{body}\n")
     return "\n".join(blocks)
 
 
@@ -150,7 +149,10 @@ async def _evolve_soul(soul_current: str, samples: list[EmailSample]) -> str:
         samples=_sanitize_for_prompt(samples),
     )
     messages = [
-        {"role": "system", "content": "Tu es un linguiste expert en évolution de guide de style professionnel."},
+        {
+            "role": "system",
+            "content": "Tu es un linguiste expert en évolution de guide de style professionnel.",
+        },
         {"role": "user", "content": prompt},
     ]
     try:
@@ -229,7 +231,9 @@ async def main(dry_run: bool = False) -> None:
         return
 
     log.info("evolve.analyzing", total_emails=len(all_samples), soul_len=len(soul_current))
-    print(f"Analyse de {len(all_samples)} emails vs SOUL.md actuel ({len(soul_current)} caractères)...")
+    print(
+        f"Analyse de {len(all_samples)} emails vs SOUL.md actuel ({len(soul_current)} caractères)..."
+    )
 
     try:
         soul_new = await _evolve_soul(soul_current, all_samples)
@@ -240,7 +244,7 @@ async def main(dry_run: bool = False) -> None:
     summary = _summarize_changes(soul_current, soul_new)
     risks = _detect_risky_changes(summary["diff"])
 
-    print(f"\n📊 Résumé des changements :")
+    print("\n📊 Résumé des changements :")
     print(f"   +{summary['added_lines']} lignes ajoutées")
     print(f"   -{summary['removed_lines']} lignes supprimées")
     if risks:
@@ -249,23 +253,30 @@ async def main(dry_run: bool = False) -> None:
             print(f"   • {r}")
 
     if dry_run:
-        print(f"\n🔍 MODE DRY-RUN — aucune écriture.")
+        print("\n🔍 MODE DRY-RUN — aucune écriture.")
         preview_path = Path("/tmp/SOUL_proposed.md")
         preview_path.write_text(soul_new, encoding="utf-8")
         print(f"   Aperçu écrit dans {preview_path}")
         return
 
     if risks and summary["removed_lines"] > 10:
-        print(f"\n⛔ Évolution bloquée : trop de suppressions ({summary['removed_lines']} lignes) + risques détectés.")
-        print(f"   Relance avec --force pour forcer, ou relis l'aperçu dans /tmp/SOUL_proposed.md")
+        print(
+            f"\n⛔ Évolution bloquée : trop de suppressions ({summary['removed_lines']} lignes) + risques détectés."
+        )
+        print("   Relance avec --force pour forcer, ou relis l'aperçu dans /tmp/SOUL_proposed.md")
         preview_path = Path("/tmp/SOUL_proposed.md")
         preview_path.write_text(soul_new, encoding="utf-8")
         return
 
     bak = _backup_soul()
     SOUL_PATH.write_text(soul_new, encoding="utf-8")
-    log.info("evolve.written", path=str(SOUL_PATH), backup=str(bak) if bak else None,
-             added=summary["added_lines"], removed=summary["removed_lines"])
+    log.info(
+        "evolve.written",
+        path=str(SOUL_PATH),
+        backup=str(bak) if bak else None,
+        added=summary["added_lines"],
+        removed=summary["removed_lines"],
+    )
     print(f"\n✅ SOUL.md mis à jour : {SOUL_PATH}")
     if bak:
         print(f"   Backup : {bak}")

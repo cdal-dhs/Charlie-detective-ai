@@ -5,6 +5,7 @@ Usage:
     python -m scripts.bootstrap_cerveau2 --dry-run --limit 20
     python -m scripts.bootstrap_cerveau2
 """
+
 from __future__ import annotations
 
 import argparse
@@ -43,6 +44,7 @@ _ACCOUNT_MARQUE: dict[str, str] = {
     "contact@detectivebelgique.be": "detectivebelgique",
     "contact@detectivebelgium.com": "detectivebelgium",
     "info@dpdhuinvestigations.be": "dpdhu",
+    "info@detectives-belgique.be": "detectivesbelgique",
 }
 
 _EXCLUDE_CATEGORIES = {"newsletter", "phishing"}
@@ -52,6 +54,7 @@ def _marque_from_account(account: str | None, db_name: str = "") -> str:
     if account:
         # Extraire l'email si le format est "Nom <email>"
         import re
+
         m = re.search(r"<([^>]+)>", account)
         email = m.group(1) if m else account
         return _ACCOUNT_MARQUE.get(email, email)
@@ -60,6 +63,8 @@ def _marque_from_account(account: str | None, db_name: str = "") -> str:
         return "detectivebelgium"
     if db_name == "boite3":
         return "dpdhu"
+    if db_name == "boite4":
+        return "detectivesbelgique"
     return "detectivebelgique"
 
 
@@ -289,7 +294,7 @@ async def _process_db(
 
 
 async def main():
-    parser = argparse.ArgumentParser(description="Bootstrap Cerveau2-Det depuis les 3 DB")
+    parser = argparse.ArgumentParser(description="Bootstrap Cerveau2-Det depuis les DB historiques")
     parser.add_argument("--dry-run", action="store_true", help="Logger les payloads sans envoyer")
     parser.add_argument("--limit", type=int, default=None, help="Limiter le nombre d'emails par DB")
     parser.add_argument("--batch-size", type=int, default=50, help="Taille des batchs avec pause")
@@ -300,11 +305,7 @@ async def main():
         log.error("bootstrap.missing_config", base_url=settings.cerveau2_base_url)
         sys.exit(1)
 
-    dbs = [
-        (settings.db_boite_1, "boite1"),
-        (settings.db_boite_2, "boite2"),
-        (settings.db_boite_3, "boite3"),
-    ]
+    dbs = [(mb.db_path, f"boite{idx}") for idx, mb in enumerate(settings.mailboxes(), start=1)]
 
     total = {"created": 0, "duplicates": 0, "errors": 0, "skipped": 0}
     for db_path, db_name in dbs:

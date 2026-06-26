@@ -2,7 +2,7 @@
 
 Agent IA Python qui assiste **Daniel Hurchon** (Detective.be, cabinet d'enquêtes privées) dans le traitement de ses emails clients.
 
-L'agent surveille 3 boîtes Infomaniak (3 marques : Detective Belgique FR, Detective Belgium EN/multi, DPDH Investigations), classifie les mails entrants en 8 catégories, assigne une priorité intelligente, et génère des brouillons de réponse "à la Daniel" pour les demandes clients. **Multilingue** : TOUJOURS en français (langue de travail), avec aide lecture 4 blocs pour mails NL/EN/DE/ES/etc.
+L'agent surveille 4 boîtes email (3 boîtes Infomaniak : Detective Belgique FR, Detective Belgium EN/multi, DPDH Investigations + 1 boîte OVH : Detectives Belgique), classifie les mails entrants en 8 catégories, assigne une priorité intelligente, et génère des brouillons de réponse "à la Daniel" pour les demandes clients. **Multilingue** : TOUJOURS en français (langue de travail), avec aide lecture 4 blocs pour mails NL/EN/DE/ES/etc.
 
 > **Pour Claude Code** : lis `CLAUDE.md` en premier pour le contexte, les conventions et les garde-fous.
 > **Pour un nouvel agent** : lis `HANDOVER.md` (état complet, bugs, procédures urgence).
@@ -13,7 +13,7 @@ L'agent surveille 3 boîtes Infomaniak (3 marques : Detective Belgique FR, Detec
 ## Architecture en une image
 
 ```
-[3 boîtes Infomaniak IMAP]
+[4 boîtes email IMAP — 3 Infomaniak + 1 OVH]
          ↓ polling 5 min
 [Worker asyncio Python]
          ↓
@@ -132,7 +132,7 @@ docker compose up -d --build      # si requirements.txt ou Dockerfile modifiés
 
 ---
 
-## Stack technique (état v1.25.26)
+## Stack technique (état v1.27.0)
 
 | Couche | Choix |
 |---|---|
@@ -155,7 +155,7 @@ docker compose up -d --build      # si requirements.txt ou Dockerfile modifiés
 | Service prod | **Docker + Docker Compose + Traefik** (VPS Hostinger KVM8) |
 | Logs | `structlog` (JSON structuré, rotation 7j) |
 | Config | `pydantic-settings` depuis `.env` |
-| Version | Source unique `app/_version.py` (`VERSION = "1.25.26"`) — `pyproject.toml` figé en 1.9.5 (volontaire) |
+| Version | Source unique `app/_version.py` (`VERSION = "1.27.0"`) — `pyproject.toml` figé en 1.9.5 (volontaire) |
 
 **Ne PAS introduire** sans discussion : Kubernetes, Swarm, Celery, Redis, Postgres, ORM lourd, framework JS front (React/Vue/Angular). Le périmètre Docker actuel (1 service Compose + Traefik externe) est figé.
 
@@ -277,9 +277,9 @@ DETECTIVE_BE/
 
 ## Statut
 
-✅ **Production active** — `detective.digitalhs.biz` — **v1.25.26**
+✅ **Production active** — `detective.digitalhs.biz` — **v1.27.0**
 
-- **Pipeline IMAP** : polling 3 boîtes toutes les 5 min, classification 8 catégories, priorité intelligente, flag `AgentProcessed` (succès) + `AgentAttempted` (libère la queue même en cas de crash, v1.21.3).
+- **Pipeline IMAP** : polling 4 boîtes toutes les 5 min (3 Infomaniak + 1 OVH), classification 8 catégories, priorité intelligente, flag `AgentProcessed` (succès) + `AgentAttempted` (libère la queue même en cas de crash, v1.21.3).
 - **Génération brouillon** : gemma4:31b (non-reasoning), style Daniel imité via few-shot learning (v1.22.0) + personnalité Cerveau2. **RAG sqlite-vec en pause (v1.24.2)** — remplacé par le brouillon qualifiant déterministe (`qualification_builder`) pour les `demande_client`/`prise_contact`.
 - **Aide lecture multilingue v1.21.0** : pour mails NL/EN/DE/ES/etc., brouillon enrichi avec 4 blocs (email d'origine + traduction FR + proposition FR + traduction langue source). Réponse TOUJOURS en FR.
 - **Livraison V2a — Drafts IMAP (v1.17+)** : dépôt direct dans la boîte source, flag `\Draft`, sujet `DEMANDE D'Approbation - Reponse Demande Client : ...`. Resend conservé en fallback uniquement.
@@ -299,6 +299,10 @@ DETECTIVE_BE/
 - **Réconcilieur Drafts IMAP v1.25.22 + bug P0 corrigé v1.25.23** : `app/workers/drafts_reconciler.py` (15 min) garantit la présence physique de chaque brouillon dans `Drafts` — recherche par header `X-Detective-Mail-Id` (posé par `append_draft`) puis body `EMAIL #<id>`. Bug P0 : `_draft_present` confondait la ligne de status aioimaplib `Search completed` avec un match → corrigé via `_has_search_match()`. Anti-doublon `_fetch_candidates` (`delivered_at IS NULL` uniquement).
 - **Expéditeur = vrai client v1.25.24 → v1.25.26** : `mask_forwarder_sender` s'appuie **uniquement sur le Reply-To** (décision CDAL — extraction body ambiguë `info@`/`support@`/`retail@` = faux clients) → `NO_EMAIL_IN_THE_FORM` si sender technique → sender direct sinon. `_is_technical_sender` capte `newsletter@`/`noreply@` sur tout domaine. `_persist` stocke le sender masqué. **Backfill prod** : 224 senders techniques → `NO_EMAIL_IN_THE_FORM`, 353 vrais clients intacts. **#629 finalisé** (Christèle Kremp-Voinova, Reply-To `ckremp@vo.lu`, brouillon UID 6540).
 - **Audit périodique faux négatifs v1.25.17** : `scripts/review_missed_demande_client.py` détecte les formulaires WP passés à travers (#519).
+- **Investigation successorale v1.25.27** : nouveau cas métier `investigation_successorale` (`case_classifier.py` + `qualification_builder._build_succession_draft`) + `objective_check.py` enrichi (objectifs patrimoniaux reconnus clairs sans appel LLM). #643 (Boeteman) — le brouillon flou générique est remplacé par un brouillon dédié (accusé réception + 8 questions succession + coordination notaire).
+- **Sujet de brouillon lisible v1.25.28 → v1.26.0** : `suggested_subject` persisté en DB par le poller (`_persist` INSERT/UPDATE COALESCE) + écrit dans le sujet du brouillon IMAP par `append_draft` (le tag `[NO_EMAIL_IN_THE_FORM]` et les templates WP absurdes ne polluent plus le sujet vu par Daniel). v1.26.0 : le cockpit affiche ce sujet lisible dans l'inbox et la conversation (`display_subject = suggested_subject or subject`, zéro modif template). Symétrique IMAP/cockpit.
+- **4ème boîte mail OVH v1.27.0** : ajout de `info@detectives-belgique.be` (brand Detectives Belgique, code cockpit `D_DS`, marque Cerveau2 `detectivesbelgique`, DB `boite4.sqlite`, serveur IMAP `ex5.mail.ovh.net`). Architecture IMAP host par boîte : `MailboxConfig` enrichi avec `imap_host`, `imap_port`, `short_code`, `cerveau2_marque`. Templates cockpit et mappings métier mis à jour. 323 tests verts.
+- **Header `X-Detective-Mail-Id` v1.25.22** : identifie un brouillon précis en IMAP (réconcilieur + `append_draft`).
 - **Dashboard admin** : stats, settings LLM, audit logs, télémétrie poller, backup Cerveau2.
 - **4 niveaux anti-crash silencieux** : Slack + Resend in-app + cron watchdog externe + Healthchecks.io.
 
@@ -308,7 +312,7 @@ Voir `docs/ROADMAP.md` pour la roadmap V2b/V2c (polishing cockpit, feedback loop
 
 ## Versions
 
-Version source de vérité : **`app/_version.py`** (`VERSION = "1.25.26"`).
+Version source de vérité : **`app/_version.py`** (`VERSION = "1.27.0"`).
 
 Le badge affiché dans le cockpit est lu dynamiquement depuis `app/_version.py`. **Tolérance zéro** sur la désynchronisation.
 

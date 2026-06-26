@@ -46,7 +46,7 @@ def _extract_text(msg: Message) -> str:
 
 
 async def inspect_mailbox(mb, settings, db_path):
-    client = aioimaplib.IMAP4_SSL(host=settings.imap_host, port=settings.imap_port)
+    client = aioimaplib.IMAP4_SSL(host=mb.imap_host, port=mb.imap_port)
     await client.wait_hello_from_server()
     await client.login(mb.user, mb.app_password)
     draft_folder = await _find_drafts_folder(client)

@@ -65,8 +65,9 @@ def is_wp_forwarder(sender: str) -> bool:
     """True si l'expéditeur est un forwarder WordPress (mail@/wordpress@/contact@detective*).
 
     Ex: wordpress@detectivebelgium.com, mail@detectivebelgique.be,
-    contact@detectivebelgium.com. Ces mails n'ont pas d'email client → le vrai
-    contact est le téléphone (champ Telefoonnummer du formulaire).
+    contact@detectivebelgium.com, mail@detectives-belgique.be. Ces mails n'ont
+    pas d'email client → le vrai contact est le téléphone (champ Telefoonnummer
+    du formulaire).
     """
     return bool(_WP_FORWARDER_RE.match((sender or "").strip()))
 
@@ -75,6 +76,7 @@ _CLIENT_OWN_DOMAINS = (
     "detectivebelgique.be",
     "detectivebelgium.com",
     "dpdhuinvestigations.be",
+    "detectives-belgique.be",
 )
 # Locales d'expéditeurs techniques (non-humains) : newsletters, robots, forwarders.
 _TECHNICAL_LOCALS = (

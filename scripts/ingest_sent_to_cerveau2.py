@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Ingestion batch des emails sortants (Sent) dans Cerveau2 — un par un pour fiabilité."""
+
 from __future__ import annotations
 
 import asyncio
 import sqlite3
 import sys
-from datetime import datetime
 from email import message_from_bytes
 from email.utils import parseaddr, parsedate_to_datetime
 from pathlib import Path
@@ -87,7 +87,7 @@ def _get_body_text(msg) -> str:
 
 
 async def _ingest_mailbox(mb, settings) -> tuple[int, int, int]:
-    client = aioimaplib.IMAP4_SSL(settings.imap_host, settings.imap_port)
+    client = aioimaplib.IMAP4_SSL(mb.imap_host, mb.imap_port)
     await client.wait_hello_from_server()
     await client.login(mb.user, mb.app_password)
 
@@ -158,7 +158,7 @@ async def _ingest_mailbox(mb, settings) -> tuple[int, int, int]:
                 destinataire=parseaddr(dest_raw)[1] or dest_raw,
                 objet=subject,
                 body=body,
-                marque={"detective_belgique": "detectivebelgique", "detective_belgium": "detectivebelgium", "dpdh_investigations": "dpdhu"}.get(mb.name, mb.name),
+                marque=mb.cerveau2_marque,
                 dossier_id="",
                 categorie="demande_client",
                 zone="jaune",
@@ -209,7 +209,7 @@ async def main():
         total_skipped=total_skipped,
         total_errors=total_errors,
     )
-    print(f"\n=== INGESTION TERMINÉE ===")
+    print("\n=== INGESTION TERMINÉE ===")
     print(f"Succès : {total_success}")
     print(f"Déjà présents : {total_skipped}")
     print(f"Erreurs : {total_errors}")

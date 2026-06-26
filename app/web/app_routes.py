@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from app import __version__
-from app.config import get_settings
+from app.config import MailboxConfig, get_settings
 from app.pipeline.subject_fixer import mask_forwarder_sender
 from app.web.deps import get_db, require_operator
 
@@ -21,8 +21,14 @@ templates = Jinja2Templates(directory="app/web/templates")
 _CUTOFF_DATE = "2026-05-20"
 
 _CATEGORIES = [
-    "demande_client", "urgent", "newsletter", "facture",
-    "spam", "phishing", "rappel", "autre",
+    "demande_client",
+    "urgent",
+    "newsletter",
+    "facture",
+    "spam",
+    "phishing",
+    "rappel",
+    "autre",
 ]
 _STATUSES = ["pending", "approved", "rejected", "sent", "reviewed"]
 _PRIORITIES = ["high", "normal", "low"]
@@ -131,9 +137,20 @@ async def _fetch_mails(
     col = _SORTABLE_COLS.get(sort_col, "processed_at")
     order = "DESC" if sort_order.lower() == "desc" else "ASC"
     cols = [
-        "id", "mailbox_name", "subject", "sender", "received_at",
-        "category", "status", "priority", "processed_at", "body_preview",
-        "body", "attachment_count", "ai_draft", "suggested_subject",
+        "id",
+        "mailbox_name",
+        "subject",
+        "sender",
+        "received_at",
+        "category",
+        "status",
+        "priority",
+        "processed_at",
+        "body_preview",
+        "body",
+        "attachment_count",
+        "ai_draft",
+        "suggested_subject",
     ]
 
     def _mask_sender(row_dict: dict) -> dict:
@@ -188,10 +205,10 @@ async def _fetch_mails(
     return hot_mails, other_mails
 
 
-async def _fetch_mailboxes() -> list[str]:
-    """Retourne les noms des boîtes configurées (toujours 3, pas seulement celles avec mails)."""
+async def _fetch_mailboxes() -> list[MailboxConfig]:
+    """Retourne les boîtes configurées (pas seulement celles avec mails)."""
     settings = get_settings()
-    return [mb.name for mb in settings.mailboxes()]
+    return settings.mailboxes()
 
 
 async def _fetch_mail(db: aiosqlite.Connection, mail_id: int) -> dict | None:
@@ -206,9 +223,22 @@ async def _fetch_mail(db: aiosqlite.Connection, mail_id: int) -> dict | None:
     if row is None:
         return None
     cols = [
-        "id", "mailbox_name", "subject", "sender", "received_at", "category",
-        "status", "priority", "ai_draft", "human_draft", "reviewed_by",
-        "reviewed_at", "sent_at", "sent_by", "body_preview", "body",
+        "id",
+        "mailbox_name",
+        "subject",
+        "sender",
+        "received_at",
+        "category",
+        "status",
+        "priority",
+        "ai_draft",
+        "human_draft",
+        "reviewed_by",
+        "reviewed_at",
+        "sent_at",
+        "sent_by",
+        "body_preview",
+        "body",
         "suggested_subject",
     ]
     mail = dict(zip(cols, row, strict=True))
@@ -284,11 +314,17 @@ async def app_index(
             "hot_mails": hot_mails,
             "other_mails": other_mails,
             "filters": {
-                "box": box_raw, "category": category, "status": status,
-                "priority": priority, "q": q, "sort": sort_col, "order": sort_order,
+                "box": box_raw,
+                "category": category,
+                "status": status,
+                "priority": priority,
+                "q": q,
+                "sort": sort_col,
+                "order": sort_order,
             },
             "categories": _CATEGORIES,
             "mailboxes": mailboxes,
+            "box_short": {mb.name: mb.short_code for mb in mailboxes},
             "statuses": _STATUSES,
             "priorities": _PRIORITIES,
             "counts": counts,

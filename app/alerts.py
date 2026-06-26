@@ -224,11 +224,13 @@ async def notify_startup(version: str) -> None:
     revenir sur Slack et sait qu'il y a peut-être eu un incident.
     """
     try:
+        from app.config import get_settings
         from app.delivery.slack_notifier import send_slack_message
 
+        n_mailboxes = len(get_settings().mailboxes())
         text = (
             f":white_check_mark: *Charlie AI démarré* — v{version}\n"
-            f"_Poller IMAP actif, 3 boîtes surveillées, ingest Cerveau2 OK._"
+            f"_Poller IMAP actif, {n_mailboxes} boîtes surveillées, ingest Cerveau2 OK._"
         )
         await send_slack_message(text)
         log.info("alert.slack_startup_sent", version=version)

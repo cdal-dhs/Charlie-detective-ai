@@ -1,14 +1,14 @@
 # HANDOVER — Detective.be Agent IA (Charlie)
 
 > Document de transfert pour tout agent (Claude Sonnet/Opus 4.X, GPT, etc.).
-> **Dernière mise à jour**: 2026-06-24 · **Version courante**: v1.25.26 · **Déployé sur** : `detective.digitalhs.biz`
+> **Dernière mise à jour**: 2026-06-26 · **Version courante**: v1.27.0 · **Déployé sur** : `detective.digitalhs.biz`
 
 ---
 
 ## TABLE DES MATIÈRES (TL;DR)
 
 1. [Qui, quoi, pourquoi](#1-qui-quoi-pourquoi)
-2. [Architecture actuelle v1.25.26](#2-architecture-actuelle-v12526)
+2. [Architecture actuelle v1.27.0](#2-architecture-actuelle-v1270)
 3. [Le pipeline Charlie AI](#3-le-pipeline-charlie-ai)
 4. [Stack technique détaillée](#4-stack-technique-détaillée)
 5. [Cerveau2-Det — second cerveau](#5-cerveau2-det--second-cerveau)
@@ -27,9 +27,9 @@
 
 | | |
 |---|---|
-| **Client** | Daniel Hurchon — détective privé belge, cabinet **Detective.be** (3 marques : Detective Belgique FR, Detective Belgium EN/multi, DPDH Investigations) |
+| **Client** | Daniel Hurchon — détective privé belge, cabinet **Detective.be** (4 marques : Detective Belgique FR, Detective Belgium EN/multi, DPDH Investigations, Detectives Belgique) |
 | **Intégrateur & ops** | CDAL (`cdal@digitalhs.biz`) — c'est l'utilisateur que tu assistes |
-| **Produit** | Agent IA Python qui poll 3 boîtes Infomaniak toutes les 5 min, classifie les mails en 8 catégories, et **uniquement** pour les `demande_client` génère un brouillon "à la Daniel" via RAG sur ~2000 paires Q/R historiques (3 DB SQLite + sqlite-vec) |
+| **Produit** | Agent IA Python qui poll 4 boîtes email toutes les 5 min (3 Infomaniak + 1 OVH), classifie les mails en 8 catégories, et **uniquement** pour les `demande_client` génère un brouillon "à la Daniel" via RAG sur ~2000 paires Q/R historiques (4 DB SQLite + sqlite-vec) |
 | **Livraison V2a** (depuis v1.17) | Brouillons déposés **directement dans Drafts IMAP de la boîte source** (flag `\Draft`, sujet `DEMANDE D'Approbation - Reponse Demande Client : ...`). Resend conservé **uniquement** comme fallback. Daniel approuve/rejette depuis sa boîte mail. |
 | **Cerveau2-Det** | Vault Markdown + API FastAPI sur `cerveau2-det.digitalhs.biz` (sqlite-vec + E5-large, ingestion 100% emails + PJ) |
 | **Cockpit web** | `detective.digitalhs.biz` — FastAPI + HTMX + Tailwind CDN. Inbox filtrable, conversation détaillée, chat AI Charlie, dashboard admin |
@@ -38,10 +38,10 @@
 
 ---
 
-## 2. Architecture actuelle (v1.25.26)
+## 2. Architecture actuelle (v1.27.0)
 
 ```
-[3 boîtes Infomaniak IMAP] ──polling 5min──► [Worker asyncio Python]
+[4 boîtes email IMAP — 3 Infomaniak + 1 OVH] ──polling 5min──► [Worker asyncio Python]
                                                     │
                     ┌───────────────────────────────┼───────────────────────────────┐
                     ▼                               ▼                               ▼
@@ -63,7 +63,7 @@
 
 | Fichier | Rôle critique | À savoir |
 |---|---|---|
-| `app/_version.py` | **Source unique de vérité** version | `VERSION = "1.25.26"` — tolérance zéro, ne JAMAIS utiliser `importlib.metadata`. |
+| `app/_version.py` | **Source unique de vérité** version | `VERSION = "1.26.0"` — tolérance zéro, ne JAMAIS utiliser `importlib.metadata`. |
 | `app/charlie.py` | **Cœur intelligent Charlie AI** | `ask_charlie()` : extraction entités → SQL programmatique (bypass LLM) + vault Cerveau2 (fallback direct GET) + archives + corrections + mémoire → nuage de liaison familial → **résumé de dossier narratif LLM** (v1.19.1) → garde anti-vide + garde anti-"pas trouvé" |
 | `app/charlie_memory.py` | **Mémoire persistante** | Table `charlie_memory` (feedback good/bad, corrections, auto-save) |
 | `app/cerveau_client.py` | **Client HTTP Cerveau2** | `query_vault()`, `get_vault_note()` (fallback direct), `feed_correspondance()`, `feed_document()`. Bearer Token statique. **Dégradation silencieuse** (retourne `[]` si Cerveau2 down) |
@@ -80,10 +80,10 @@
 | `app/pipeline/language.py` | **Détection langue** | `Language = str` (toutes BCP-47), `language_label()` pour affichage humain |
 | `app/web/api.py` | **Endpoints HTMX + Charlie** | `charlie_ask()`, `charlie_feedback()`, `draft_generate()`, **`POST /api/drafts/{id}/retry`** (régénération manuelle) |
 | `app/workers/imap_poller.py` | **Polling IMAP** | 1 task asyncio par boîte, flag `AgentProcessed` (sans `$`) + flag `AgentAttempted` (libère la queue même en cas de crash, v1.21.3). Appelle `generate_draft()` pour `demande_client` → brouillon enrichi |
-| `app/delivery/imap_draft.py` | **Dépôt brouillon IMAP** (V2a) | `append_draft()` : flag `\Draft`, SELECT probe pour auto-découverte dossier Drafts (v1.21.9 fix Infomaniak), header custom `X-Detective-Mail-Id` posé si `mail_id` (v1.25.22) pour identifier un brouillon précis en IMAP + `_verify_draft_present` post-APPEND (garde-fou anti-crash silencieux dans la minute). Bandeau affiche `mask_forwarder_sender(reply_to)` (vrai client via Reply-To, v1.25.26). |
-| `app/pipeline/subject_fixer.py` | **Nettoyage sujet + masquage expéditeur** (v1.25.7 → v1.25.26) | Nettoie les sujets pollués par des homoglyphes (`itsme` cyrillique). `mask_forwarder_sender()` : **Reply-To uniquement** (v1.25.26, décision CDAL — extraction body ambiguë `info@`/`support@`/`retail@` = faux clients) → `NO_EMAIL_IN_THE_FORM` si `_is_technical_sender` (capte `newsletter@`/`noreply@`/`bounce@` sur tout domaine, plus large que `is_wp_forwarder`) → sender direct sinon. `_extract_client_email_from_body` conservé pour `has_client_email_in_body`/`tag_no_email` (tag du sujet) uniquement. |
+| `app/delivery/imap_draft.py` | **Dépôt brouillon IMAP** (V2a) | `append_draft()` : flag `\Draft`, SELECT probe pour auto-découverte dossier Drafts (v1.21.9 fix Infomaniak), header custom `X-Detective-Mail-Id` posé si `mail_id` (v1.25.22) pour identifier un brouillon précis en IMAP + `_verify_draft_present` post-APPEND (garde-fou anti-crash silencieux dans la minute). Sujet du brouillon = `suggested_subject or subject` (v1.25.28 — le tag `[NO_EMAIL_IN_THE_FORM]` et les templates WP absurdes ne polluent plus le sujet vu par Daniel). Bandeau affiche `mask_forwarder_sender(reply_to)` (vrai client via Reply-To, v1.25.26). |
+| `app/pipeline/subject_fixer.py` | **Nettoyage sujet + masquage expéditeur** (v1.25.7 → v1.25.28) | Nettoie les sujets pollués par des homoglyphes (`itsme` cyrillique) + calcule `suggested_subject` (sujet lisible persisté en DB par le poller, affiché cockpit + IMAP — v1.25.28/v1.26.0). `mask_forwarder_sender()` : **Reply-To uniquement** (v1.25.26, décision CDAL — extraction body ambiguë `info@`/`support@`/`retail@` = faux clients) → `NO_EMAIL_IN_THE_FORM` si `_is_technical_sender` (capte `newsletter@`/`noreply@`/`bounce@` sur tout domaine, plus large que `is_wp_forwarder`) → sender direct sinon. `_extract_client_email_from_body` conservé pour `has_client_email_in_body`/`tag_no_email` (tag du sujet) uniquement. |
 | `app/workers/drafts_reconciler.py` | **Réconcilieur Drafts IMAP** (v1.25.22 + bug P0 v1.25.23) | Tâche 15 min garantit la présence physique de chaque brouillon dans `Drafts` de la boîte source — recherche par header `X-Detective-Mail-Id` puis body `EMAIL #<id>`. Bug P0 v1.25.23 : `_draft_present` confondait la ligne de status aioimaplib `Search completed` (non-vide) avec un match → `_has_search_match()` (token numérique uniquement). Anti-doublon `_fetch_candidates` n'accepte que `delivered_at IS NULL` (le workflow V2a ne notifie pas le cockpit, status reste `pending` même après envoi Daniel). |
-| `app/pipeline/case_classifier.py` | **Classification fine du cas métier** | Détermine le cas métier (`infidelite_filature`, `recherche_personne`, `incapacite_travail`, etc.) pour orienter le `qualification_builder`. |
+| `app/pipeline/case_classifier.py` | **Classification fine du cas métier** | Détermine le cas métier (`infidelite_filature`, `recherche_personne`, `incapacite_travail`, `recuperation_dette`, `investigation_successorale` v1.25.27, etc.) pour orienter le `qualification_builder`. Fallback keywords si le LLM ne reconnaît pas le cas. |
 | `app/pipeline/priority.py` | **Priorité intelligente** | `HIGH` pour les demandes client chaudes (prénom signé, question tarif, vocabulaire enquête), `LOW` pour les newsletters/factures. |
 | `app/pipeline/prefilter.py` | **Pré-filtre règles** | Règles headers/expéditeurs : newsletters, factures, phishing, rappels, demandes évidentes. |
 | `app/settings_store.py` | **Overrides runtime** | Persistance/lecture des `app_settings` en DB (LLM model, etc.). ⚠️ purge obligatoire si modification des défauts dans `app/config.py`. |
@@ -108,7 +108,7 @@
 
 ---
 
-## 3. Le pipeline Charlie AI (état v1.25.26)
+## 3. Le pipeline Charlie AI (état v1.27.0)
 
 Le fichier `app/charlie.py` contient `ask_charlie()`. Flow exact :
 
@@ -193,7 +193,7 @@ if not response and rows:
 
 ---
 
-## 4. Stack technique détaillée (v1.25.26)
+## 4. Stack technique détaillée (v1.27.0)
 
 | Couche | Outil | Version / Détail |
 |---|---|---|
@@ -403,7 +403,7 @@ Le poller IMAP ne traite que les mails reçus depuis cette date. Les archives hi
 
 ### Règle 8 — Provider LLM pour Ollama Cloud = `openai/<model>` + `api_base=https://ollama.com/v1`
 - **JAMAIS** `ollama_chat/<model>` (force litellm vers `localhost:11434`).
-- **Modèles actuels (v1.25.26)** : `gemma4:31b` (principal, non-reasoning — réponse dans `message.content`), `glm-5.2:cloud` (fallback, reasoning model — réponse dans `reasoning_content`, extrait automatiquement par `complete()`).
+- **Modèles actuels (v1.27.0)** : `gemma4:31b` (principal, non-reasoning — réponse dans `message.content`), `glm-5.2:cloud` (fallback, reasoning model — réponse dans `reasoning_content`, extrait automatiquement par `complete()`).
 - **JAMAIS** `kimi-k2` (404), `ollama_chat/<model>` (Ollama local inexistant sur le VPS).
 - Si un nouveau modèle ne répond pas, vérifier immédiatement provider + api_base + nom.
 
@@ -418,9 +418,9 @@ Le poller IMAP ne traite que les mails reçus depuis cette date. Les archives hi
 
 ---
 
-## 9. Bugs résolus et points de vigilance (état au 2026-06-24, v1.25.26)
+## 9. Bugs résolus et points de vigilance (état au 2026-06-26, v1.27.0)
 
-### ✅ Bugs résolus récents (v1.22.0 → v1.25.26)
+### ✅ Bugs résolus récents (v1.22.0 → v1.27.0)
 
 | # | Problème | Statut | Fichier | Notes |
 |---|---|---|---|---|
@@ -452,16 +452,21 @@ Le poller IMAP ne traite que les mails reçus depuis cette date. Les archives hi
 | 10 | **Traces de raisonnement kimi-k2.6 polluent les brouillons** — "L'utilisateur demande...", "The user wants...", "Refonte :", "Version plus X :", "C'est mieux.", etc. | ✅ **Corrigé v1.21.2** | `app/llm/router.py::_clean_reasoning()` | 30+ patterns regex filtrent les artefacts. EN + FR + listes + guillemets + auto-critique post-mail. |
 | 11 | **Poller IMAP crash en boucle** sur boîte `detective_belgique` (3 bugs cumulés) | ✅ **Corrigé v1.21.3** | `app/workers/imap_poller.py` + `app/alerts.py` | Bug 1 : `_decode_header` crash sur charset `unknown-8bit`. Bug 2 : `_persist` crash sur `Header` objects. Bug 3 : retry éternel. Fix : try/except englobant + nouveau flag `AgentAttempted`. 19 tests de résilience. Alerte Resend si ≥5 crashes/boîte (anti-spam 1h/boîte). |
 | 12 | **Filtre date hardcodé incohérent** — code dit `2026-06-01`, .env disait `2026-05-01` (régression silencieuse) | ✅ **Corrigé v1.21.4** | `app/workers/imap_poller.py` + `.env.example` + `.env.production` | Tous alignés à `2026-06-01`. |
+| 29 | **#643 — investigation successorale classée « demande floue »** (Boeteman, 24/06) : « connaître l'ampleur de sa succession et réserver nos droits ». Aucun cas métier `investigation_successorale` → `classify_case` retournait `non_determine` + `objective_check` ne couvrait pas les objectifs patrimoniaux → gemma répondait `OBJECTIF_FLOU` → brouillon générique qui redemandait ce que le client vient d'écrire. Faux négatif intolérable. | ✅ **Corrigé v1.25.27** | `app/pipeline/case_classifier.py` + `app/pipeline/objective_check.py` + `app/pipeline/qualification_builder.py` + `app/pipeline/generator.py` | Nouveau cas métier `investigation_successorale` (CASE_TYPES, fallback keywords `succession`/`héritage`/`patrimoine`) + `_build_succession_draft` (accusé réception + restitution infos + 8 questions succession + coordination notaire, modèle `_build_dette_draft`). `objective_check.py` : `_CLEAR_OBJECTIVE_RE` enrichi (succession, héritier, patrimoine, défunt, décès, réserver ses droits, legs, testament) → objectif reconnu clair **sans appel LLM**. Exclusion du flou dans `_is_vague_request` (le brouillon dédié pose ses questions d'office). **314 tests verts**. Re-classement #643 en prod à valider avec CDAL (`backfill_reclassify.py --only-id 643 --apply` puis `deliver_pending_drafts.py --only-id 643 --apply`). |
+| 30 | **Sujet de brouillon IMAP moche (template WP + tag `[NO_EMAIL_IN_THE_FORM]`)** — malgré les brouillons propres, le sujet IMAP restait `Nouveau Message De Détective privé Belgique - Prenons contact [NO_EMAIL_IN_THE_FORM]`. Le sujet lisible `suggested_subject` (déjà calculé par `subject_fixer`) n'était jamais persisté ni écrit dans le sujet du brouillon. | ✅ **Corrigé v1.25.28** | `app/pipeline/subject_fixer.py` + `app/workers/imap_poller.py` + `app/delivery/imap_draft.py` + `scripts/deliver_pending_drafts.py` | `suggested_subject` persisté en DB : `_persist` (INSERT + UPDATE COALESCE), `_fetch_pending` le retourne, `_ensure_column` l'ajoute idempotemment. `append_draft` écrit `suggested_subject or subject` comme sujet du brouillon IMAP → le tag `[NO_EMAIL_IN_THE_FORM]` et les templates WP absurdes ne polluent plus le sujet vu par Daniel. Livreur backfill `_update_db` écrit `suggested_subject` (non-écrasement). **320 tests verts**. |
+| 31 | **Cockpit affichait encore le sujet original moche** (inbox + conversation) alors que le brouillon IMAP avait déjà son sujet propre depuis v1.25.28. Incohérence entre le sujet vu par Daniel (Drafts IMAP) et celui vu par CDAL (cockpit). | ✅ **Corrigé v1.26.0** | `app/web/app_routes.py` + `tests/test_web_inbox_suggested_subject.py` | `_fetch_mails` (inbox) et `_fetch_mail` (conversation) sélectionnent `suggested_subject` et l'affichent en priorité (`display_subject = suggested_subject or subject`, symétrique à `append_draft` côté IMAP). Zéro modif template Jinja. Le bouton `fix-subject` (v1.25.4, correction LLM manuelle) reste intact (lit `subject` DB via son propre SELECT). **323 tests verts**. Les anciens `demande_client` d'avant v1.25.28 (sans `suggested_subject`) affichent encore le sujet original — backfill bulk possible plus tard. |
+| 32 | **4ème boîte mail OVH (`detectives-belgique.be`)** — Daniel a fourni une nouvelle boîte `info@detectives-belgique.be` hébergée chez OVH (`ex5.mail.ovh.net`), avec brand `Detectives Belgique`, code cockpit `D_DS`, marque Cerveau2 `detectivesbelgique`, DB historique `boite4.sqlite`. Impossible de réutiliser l'IMAP host global `mail.infomaniak.com` pour cette boîte. | ✅ **Corrigé v1.27.0** | `app/config.py` + `app/workers/imap_poller.py` + `app/delivery/imap_draft.py` + `app/workers/drafts_reconciler.py` + `app/charlie.py` + `app/web/*` + scripts | `MailboxConfig` enrichi avec `imap_host`, `imap_port`, `short_code`, `cerveau2_marque`. Connexion IMAP host par boîte (fallback global si vide). Mappings statiques à 3 entrées supprimés/centralisés. Domaines propres étendus à `detectives-belgique.be`. Templates cockpit dynamiques (`mb.brand`, `mb.short_code`). `.env.example` + `docker-compose.yml` mis à jour. **323 tests verts**. |
 
-### 🔴 Points de vigilance ouverts (état au 2026-06-24)
+### 🔴 Points de vigilance ouverts (état au 2026-06-26)
 
 #### Point de vigilance #1 — RAG mis en pause depuis v1.24.2 (décision CDAL)
 > Statut changé le 2026-06-23 : ce n'est plus un **bug à corriger en urgence**, c'est une **fonctionnalité volontairement mise en pause**. L'approche déterministe (`qualification_builder` + few-shot Daniel) est plus fiable et remplace le RAG pour la génération des brouillons.
 
-**Historique (pour mémoire)** : le RAG était cassé sur les **3 boîtes** depuis le 2026-05-28 :
+**Historique (pour mémoire)** : le RAG était cassé sur les **4 boîtes** depuis le 2026-05-28 :
 - `boite1.sqlite` : table `pairs` existe mais **0 rows** (était censé en avoir 2042)
 - `boite2.sqlite` : table `pairs` **n'existe pas**
 - `boite3.sqlite` : table `pairs` **n'existe pas**
+- `boite4.sqlite` : table `pairs` **n'existe pas** (nouvelle boîte v1.27.0 — pas d'historique RAG non plus)
 
 Cause : le bootstrap a crashé le 2026-05-28 avec `litellm.BadRequestError: LLM Provider NOT provided. ... You passed model=intfloat/multilingual-e5-large` — le script utilisait encore l'ancien embedder local `e5-large` alors que la v1.18.0 avait basculé vers `openai/text-embedding-3-small` via OpenRouter. Le bootstrap n'a jamais été ré-exécuté après la bascule. Tous les brouillons générés depuis le 2026-05-28 avaient RAG=0.
 
@@ -477,7 +482,7 @@ Cause : le bootstrap a crashé le 2026-05-28 avec `litellm.BadRequestError: LLM 
 
 **Réactivation (si un jour on le décide)** :
 ```bash
-# 1. Re-indexer pairs_vec sur les 3 boîtes
+# 1. Re-indexer pairs_vec sur les 4 boîtes
 ssh root@69.62.110.165
 cd /opt/DETECTIVE
 docker compose exec detective python -m scripts.bootstrap_embeddings
@@ -491,14 +496,14 @@ Vérifier aussi les catégories de `boite2` (10 catégories dont `PRISE_CONTACT:
 
 #### Point de vigilance #2 — Provider litellm pour Ollama Cloud (CRITIQUE v1.21.1)
 `ollama_chat/<model>` force litellm vers `localhost:11434` (Ollama **local**). Le provider correct pour Ollama **Cloud** est `openai/<model>` avec `api_base=https://ollama.com/v1`.
-**Modèles actuels (v1.25.26)** : `openai/gemma4:31b` (principal + classifier + chat, non-reasoning), `openai/glm-5.2:cloud` (fallback, reasoning).
+**Modèles actuels (v1.27.0)** : `openai/gemma4:31b` (principal + classifier + chat, non-reasoning), `openai/glm-5.2:cloud` (fallback, reasoning).
 **Si un nouveau modèle ne répond pas** → vérifier immédiatement provider (openai/ vs ollama_chat/), l'URL api_base (`/v1` pas `/api`), et que le nom de modèle existe sur ollama.com/library.
 
 #### Point de vigilance #3 — glm-5.2:cloud (fallback) est un reasoning model
 Sa réponse finale est dans `message.reasoning_content`, pas dans `message.content` (vide). Le wrapper `complete()` extrait automatiquement, MAIS :
 - Soit utiliser un autre modèle non-reasoning si on veut du contenu direct
 - Soit accepter le coût (raisonnement = plus de tokens) + le post-traitement `_clean_reasoning()`
-- **gemma4:31b (modèle principal v1.25.26) est non-reasoning** : réponse directe dans `message.content`, pas d'extraction ni de cleaning nécessaires.
+- **gemma4:31b (modèle principal depuis v1.25.0) est non-reasoning** : réponse directe dans `message.content`, pas d'extraction ni de cleaning nécessaires.
 
 #### Point de vigilance #4 — Traces de raisonnement glm-5.2:cloud (CRITIQUE v1.21.2)
 Le fallback reasoning produit des métadiscours parasites : "L'utilisateur demande...", "Let me analyze...", "Points importants :", "Refonte :", "Version plus X :", "C'est mieux.", etc. Le post-traitement `_clean_reasoning()` filtre ~30 patterns, **MAIS** si un nouveau type d'artefact apparaît, il faut **enrichir `_REASONING_LINE_PATTERNS`** dans `app/llm/router.py`. Le cleaning n'est jamais "complet" — c'est une bataille continue.
@@ -639,7 +644,7 @@ Avant de modifier quoi que ce soit :
 
 - [ ] **Lire `CLAUDE.md`** (conventions, garde-fous, stack)
 - [ ] **Lire ce `HANDOVER.md`** (contexte actuel, bugs résolus, points de vigilance, procédures urgence)
-- [ ] **Vérifier `app/_version.py`** — est-ce bien `1.25.26` ?
+- [ ] **Vérifier `app/_version.py`** — est-ce bien `1.26.0` ?
 - [ ] **Vérifier `CHANGELOG.md`** — la dernière version est-elle documentée avec bilan déploiement ?
 - [ ] **Vérifier `docs/ROADMAP.md`** — quelle phase est en cours (V2b/V2c) ?
 - [ ] **Tester le healthcheck** : `curl -s https://detective.digitalhs.biz/health` → `{"ok":true}`
@@ -751,11 +756,11 @@ fi
 
 ## Note pour le prochain agent
 
-État au **2026-06-24** : **v1.25.26** déployée en prod. Le brouillon qualifiant déterministe gère tous les cas de figure (questions par cas + infos client déjà reçues + refus poli des demandes hors-légalité depuis v1.24.1). **Le RAG est mis en pause** (v1.24.2, `rag_enabled=False`) : l'approche déterministe + few-shot Daniel est plus fiable et le remplace — ce n'est plus un bug à corriger en urgence (voir point de vigilance #1). **Bascule LLM v1.25.0** : `gemma4:31b` (non-reasoning) est le modèle principal sur toutes les tâches (classifier, generator, chat Charlie, case_classifier, translator) ; `glm-5.2:cloud` (reasoning) remplace `glm-5.1:cloud` comme fallback. `kimi-k2.6:cloud` n'est plus utilisé nulle part. **v1.25.22 → v1.25.26** : réconcilieur Drafts IMAP 15 min (re-livraison des crashs silencieux via header `X-Detective-Mail-Id`, anti-doublon `delivered_at IS NULL`) + expéditeur forwarder masqué Reply-To uniquement (`NO_EMAIL_IN_THE_FORM`, backfill prod 224 senders) + #629 finalisé (sujet + sender + proposition). Chantiers ouverts restants : reclassement #614 (validation brouillon refus poli avec CDAL — **PAS finalisé**), Task #4 (vrai contact client formulaires WP via Reply-To), V2b (polishing cockpit), V2c (feedback loop qualité Daniel). Pour le reste, voir HANDOVER §12 (checklist reprise) et §13 (4 niveaux anti-crash silencieux opérationnels).
+État au **2026-06-26** : **v1.27.0** prête pour déploiement. Le brouillon qualifiant déterministe gère tous les cas de figure (questions par cas + infos client déjà reçues + refus poli des demandes hors-légalité depuis v1.24.1). **Le RAG est mis en pause** (v1.24.2, `rag_enabled=False`) : l'approche déterministe + few-shot Daniel est plus fiable et le remplace — ce n'est plus un bug à corriger en urgence (voir point de vigilance #1). **Bascule LLM v1.25.0** : `gemma4:31b` (non-reasoning) est le modèle principal sur toutes les tâches (classifier, generator, chat Charlie, case_classifier, translator) ; `glm-5.2:cloud` (reasoning) remplace `glm-5.1:cloud` comme fallback. `kimi-k2.6:cloud` n'est plus utilisé nulle part. **v1.25.22 → v1.25.26** : réconcilieur Drafts IMAP 15 min (re-livraison des crashs silencieux via header `X-Detective-Mail-Id`, anti-doublon `delivered_at IS NULL`) + expéditeur forwarder masqué Reply-To uniquement (`NO_EMAIL_IN_THE_FORM`, backfill prod 224 senders) + #629 finalisé (sujet + sender + proposition). **v1.25.27 → v1.26.0** : nouveau cas métier `investigation_successorale` (#643 Boeteman — brouillon dédié succession + objectif patrimoine reconnu clair sans LLM) + **sujet de brouillon lisible partout** (`suggested_subject` persisté en DB par le poller, écrit dans le sujet IMAP par `append_draft`, affiché dans le cockpit inbox + conversation). **v1.27.0** : ajout 4ème boîte mail OVH `info@detectives-belgique.be` (Detectives Belgique, code cockpit `D_DS`, marque Cerveau2 `detectivesbelgique`, DB `boite4.sqlite`, serveur IMAP `ex5.mail.ovh.net`) — architecture IMAP host par boîte, mappings centralisés dans `MailboxConfig`, templates cockpit dynamiques, 323 tests verts. Chantiers ouverts restants : reclassement #614 (validation brouillon refus poli avec CDAL — **PAS finalisé**), re-classement #643 en prod (brouillon succession propre — à valider avec CDAL), Task #4 (vrai contact client formulaires WP via Reply-To), V2b (polishing cockpit), V2c (feedback loop qualité Daniel). Pour le reste, voir HANDOVER §12 (checklist reprise) et §13 (4 niveaux anti-crash silencieux opérationnels).
 
 **Philosophie CDAL** : MVP simple d'abord, V2 quand qualité prouvée. Pas d'over-engineering. ROI client : "solde 24/7" sans surdimensionner. Communique court en français, écrit parfois avec des fautes de frappe rapides — décoder l'intention.
 
 ---
 
-*Document mis à jour le 2026-06-24 pour la v1.25.26 de Detective.be Agent IA.*
+*Document mis à jour le 2026-06-26 pour la v1.27.0 de Detective.be Agent IA.*
 

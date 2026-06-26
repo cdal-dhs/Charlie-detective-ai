@@ -240,7 +240,7 @@ async def test_imap(
     try:
         from aioimaplib import aioimaplib
 
-        client = aioimaplib.IMAP4_SSL(settings.imap_host, settings.imap_port)
+        client = aioimaplib.IMAP4_SSL(mb.imap_host, mb.imap_port)
         await client.wait_hello_from_server()
         resp = await client.login(mb.user, mb.app_password)
         await client.logout()
@@ -396,10 +396,15 @@ async def documents_page(
         rows = await cur.fetchall()
     cols = ["doc_id", "dossier_id", "marque", "titre", "format", "type", "date", "created_at"]
     documents = [dict(zip(cols, r, strict=True)) for r in rows]
+    settings = get_settings()
     return templates.TemplateResponse(
         request,
         "admin/documents.html",
-        {"documents": documents, "user": user},
+        {
+            "documents": documents,
+            "user": user,
+            "mailboxes": settings.mailboxes(),
+        },
     )
 
 
@@ -432,7 +437,7 @@ async def documents_upload(
         )
 
     dossier_id = str(form.get("dossier_id", "")).strip().upper()
-    marque = str(form.get("marque", "detectivebelgique")).strip()
+    marque = str(form.get("marque", settings.mailboxes()[0].cerveau2_marque)).strip()
     titre = str(form.get("titre", filename)).strip() or filename
 
     try:
@@ -724,8 +729,8 @@ async def draft_simulator_run(
         f'<span class="px-2 py-1 bg-gray-800 rounded">Catégorie : {html.escape(category)}</span>'
         f'<span class="px-2 py-1 bg-gray-800 rounded">Langue : {html.escape(language)}</span>'
         f'<span class="px-2 py-1 bg-gray-800 rounded">Longueur : {len(result.draft)}</span>'
-        f'</div>'
+        f"</div>"
         f'<div class="bg-gray-950 border border-gray-800 rounded p-4 text-sm text-gray-200 '
         f'font-mono whitespace-pre-wrap">{draft_html}</div>'
-        f'</div>'
+        f"</div>"
     )

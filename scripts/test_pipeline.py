@@ -1,13 +1,13 @@
 """Script de test end-to-end pour le pipeline Detective.be.
 
-Envoie 3 emails de test (1 vrai demande client + 2 faux positifs) vers les 3 boîtes
-Infomaniak, puis vérifie dans les logs du poller qu'ils sont classés correctement.
+Envoie 3 emails de test (1 vrai demande client + 2 faux positifs) vers toutes les boîtes,
+puis vérifie dans les logs du poller qu'ils sont classés correctement.
 
 Usage :
     python -m scripts.test_pipeline
 
 Prérequis :
-    - Les 3 MAILBOX_*_APP_PASSWORD doivent être renseignées dans .env
+    - Les MAILBOX_*_APP_PASSWORD doivent être renseignées dans .env
     - L'agent doit tourner (local ou VPS) pour traiter les mails
     - Attendre ~5 min (intervalle de polling) pour voir les résultats
 """
@@ -171,17 +171,21 @@ def main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(description="Test pipeline Detective.be")
+    mailboxes = settings.mailboxes()
+    help_text = (
+        "Boîte cible (" + "; ".join(f"{i + 1}={mb.name}" for i, mb in enumerate(mailboxes)) + ")"
+    )
     parser.add_argument(
         "--mailbox",
         type=int,
-        choices=[1, 2, 3],
+        choices=list(range(1, len(mailboxes) + 1)),
         default=1,
-        help="Boîte cible (1=detective_belgique, 2=detective_belgium, 3=dpdh)",
+        help=help_text,
     )
     parser.add_argument(
         "--all",
         action="store_true",
-        help="Envoyer vers les 3 boîtes",
+        help="Envoyer vers toutes les boîtes",
     )
     args = parser.parse_args()
 

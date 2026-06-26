@@ -4,7 +4,6 @@ from typing import Literal
 
 import structlog
 
-from app.config import get_settings
 from app.llm.router import complete
 from app.pipeline.prefilter import _is_wp_contact_form
 from app.settings_store import get_llm_model_classifier
@@ -330,14 +329,17 @@ def _has_strong_human_demand(body: str) -> tuple[bool, str]:
 
 # v1.24.0 — détection d'une réponse client à un mail de Daniel (Re: + citation).
 # Le body cite un mail de Daniel (préfixe > avec signature DetectiveBelgique/
-# DetectiveBelgium/DPDH). L'expéditeur est humain. On force demande_client même
-# si le LLM voit des mots "devis/facture" dans la citation. Voir mail #606 (Van Houtte).
+# DetectiveBelgium/DPDH/DetectivesBelgique). L'expéditeur est humain. On force
+# demande_client même si le LLM voit des mots "devis/facture" dans la citation.
+# Voir mail #606 (Van Houtte).
 _DANIEL_SIGNATURE_PATTERNS = (
     "daniel hurchon",
     "detectivebelgique.be srl",
     "detectivebelgium.com",
     "détectivebelgique.be srl",
     "detectivebelgique.be srl",
+    "detectives-belgique.be",
+    "detectivesbelgique",
     "autorisation ministérielle",
     "autorisation ministeriele",
     "gsm – 0471/31.81.20",

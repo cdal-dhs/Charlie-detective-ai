@@ -13,7 +13,7 @@ async def reinsert():
     settings = get_settings()
     mb = settings.mailboxes()[0]
 
-    client = aioimaplib.IMAP4_SSL(settings.imap_host, settings.imap_port)
+    client = aioimaplib.IMAP4_SSL(mb.imap_host, mb.imap_port)
     await client.wait_hello_from_server()
     await client.login(mb.user, mb.app_password)
     await client.select("INBOX")

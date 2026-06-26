@@ -5,10 +5,10 @@ Interroge Cerveau2 pour les emails sortants (direction="out"),
 analyse le style d'écriture de Daniel par marque avec le LLM,
 et génère un SOUL.md enrichi pour le générateur de brouillons.
 """
+
 from __future__ import annotations
 
 import asyncio
-import json
 import random
 import sys
 from dataclasses import dataclass
@@ -31,12 +31,14 @@ MARQUE_MAP = {
     "detective_belgique": "detectivebelgique",
     "detective_belgium": "detectivebelgium",
     "dpdh_investigations": "dpdhu",
+    "detectives_belgique": "detectivesbelgique",
 }
 
 MARQUE_BRAND = {
     "detective_belgique": "Detective Belgique",
     "detective_belgium": "Detective Belgium",
     "dpdh_investigations": "DPDH Investigations",
+    "detectives_belgique": "Detectives Belgique",
 }
 
 
@@ -48,7 +50,9 @@ class EmailSample:
     date: str
 
 
-async def _fetch_outgoing(base_url: str, api_secret: str, marque: str, limit: int = 20) -> list[dict]:
+async def _fetch_outgoing(
+    base_url: str, api_secret: str, marque: str, limit: int = 20
+) -> list[dict]:
     """Récupère les emails sortants d'une marque depuis Cerveau2."""
     url = f"{base_url.rstrip('/')}/query"
     payload = {
@@ -131,12 +135,7 @@ def _sanitize_for_prompt(samples: list[EmailSample]) -> str:
     for i, s in enumerate(samples, 1):
         # Tronquer le body pour ne garder que l'essentiel
         body = s.body[:800]
-        blocks.append(
-            f"Email #{i} [{s.langue}]\n"
-            f"Sujet: {s.objet[:100]}\n"
-            f"---\n"
-            f"{body}\n"
-        )
+        blocks.append(f"Email #{i} [{s.langue}]\nSujet: {s.objet[:100]}\n---\n{body}\n")
     return "\n".join(blocks)
 
 
@@ -198,7 +197,10 @@ async def _analyze_style(samples: list[EmailSample], marque: str) -> str:
         samples=_sanitize_for_prompt(samples),
     )
     messages = [
-        {"role": "system", "content": f"Tu analyses le style d'écriture de Daniel Hurchon pour {MARQUE_BRAND.get(marque, marque)}."},
+        {
+            "role": "system",
+            "content": f"Tu analyses le style d'écriture de Daniel Hurchon pour {MARQUE_BRAND.get(marque, marque)}.",
+        },
         {"role": "user", "content": prompt},
     ]
     try:
@@ -236,14 +238,16 @@ def _build_soul(brand_analyses: dict[str, str]) -> str:
 
     for marque, analysis in brand_analyses.items():
         brand_name = MARQUE_BRAND.get(marque, marque)
-        lines.extend([
-            f"---",
-            f"",
-            f"## {brand_name}",
-            f"",
-            analysis,
-            f"",
-        ])
+        lines.extend(
+            [
+                "---",
+                "",
+                f"## {brand_name}",
+                "",
+                analysis,
+                "",
+            ]
+        )
 
     lines.append("---")
     lines.append("")
@@ -279,14 +283,18 @@ async def main():
 
         if not raw_items:
             log.warning("soul.no_data", marque=marque_key)
-            brand_analyses[marque_key] = f"Pas assez de données pour {MARQUE_BRAND.get(marque_key, marque_key)}."
+            brand_analyses[marque_key] = (
+                f"Pas assez de données pour {MARQUE_BRAND.get(marque_key, marque_key)}."
+            )
             continue
 
         emails = [e for e in (_parse_email(item) for item in raw_items) if e and e.body]
         log.info("soul.parsed", marque=marque_key, total=len(emails))
 
         if len(emails) < 10:
-            brand_analyses[marque_key] = f"Corpus insuffisant ({len(emails)} emails) pour {MARQUE_BRAND.get(marque_key, marque_key)}."
+            brand_analyses[marque_key] = (
+                f"Corpus insuffisant ({len(emails)} emails) pour {MARQUE_BRAND.get(marque_key, marque_key)}."
+            )
             continue
 
         samples = _sample_balanced(emails, n=min(15, len(emails)))

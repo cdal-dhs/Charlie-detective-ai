@@ -1,4 +1,7 @@
-import asyncio, sys, traceback
+import asyncio
+import sys
+import traceback
+
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
@@ -12,11 +15,15 @@ settings = get_settings()
 print(f"TOKEN: {settings.telegram_bot_token[:20]}...", file=sys.stderr)
 print(f"CHAT_ID: {settings.telegram_chat_id}", file=sys.stderr)
 
+
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Bonjour ! Charlie est en ligne.")
 
+
 async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Agent opérationnel sur 3 boîtes.")
+    n = len(settings.mailboxes())
+    await update.message.reply_text(f"Agent opérationnel sur {n} boîtes.")
+
 
 async def main():
     print("BUILDING APP", file=sys.stderr)
@@ -31,6 +38,7 @@ async def main():
     print("POLLING ACTIVE", file=sys.stderr)
     await asyncio.sleep(30)
     print("STOPPING", file=sys.stderr)
+
 
 try:
     asyncio.run(main())

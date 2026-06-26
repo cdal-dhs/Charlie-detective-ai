@@ -20,6 +20,7 @@ services:
       DB_BOITE_1: "/app/data/boite1.sqlite"
       DB_BOITE_2: "/app/data/boite2.sqlite"
       DB_BOITE_3: "/app/data/boite3.sqlite"
+      DB_BOITE_4: "/app/data/boite4.sqlite"
       DB_AGENT_STATE: "/app/data/agent_state.db"
     labels:
       - "traefik.enable=true"

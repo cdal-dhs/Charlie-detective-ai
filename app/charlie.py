@@ -12,6 +12,7 @@ from unicodedata import normalize
 import aiosqlite
 import structlog
 
+from app._version import VERSION
 from app.cerveau_client import (
     VaultNote,
     get_vault_note,
@@ -19,15 +20,7 @@ from app.cerveau_client import (
     query_dossiers,
     query_vault,
 )
-from app.charlie_memory import (
-    is_correction,
-    is_memory_query,
-    is_save_request,
-    query_corrections,
-    query_memory,
-    save_memory,
-)
-from app._version import VERSION
+from app.charlie_memory import query_corrections, query_memory, save_memory
 from app.config import get_settings
 from app.llm.router import complete
 
@@ -44,7 +37,7 @@ Utilise "tu". Sois concis mais jamais sec. Un peu d'humour détective est bienve
 Schéma de la table principale (mail_processed) :
 - id INTEGER PRIMARY KEY
 - mailbox_name TEXT  — detective_belgique (D_FR), detective_belgium (D_NL),
-  dpdh_investigations (D_PD)
+  dpdh_investigations (D_PD), detectives_belgique (D_DS)
 - subject TEXT
 - sender TEXT
 - received_at TEXT (format RFC 2822, ex: "Wed, 20 May 2026 17:20:29 +0800" — NE PAS utiliser pour >= ou <= !)
@@ -143,14 +136,25 @@ RÉPONSE: <ta réponse>
 """
 
 _DANGEROUS_SQL = (
-    "drop", "delete", "insert", "update", "alter",
-    "create", "replace", "truncate", "attach", "detach",
+    "drop",
+    "delete",
+    "insert",
+    "update",
+    "alter",
+    "create",
+    "replace",
+    "truncate",
+    "attach",
+    "detach",
 )
 
+# Fallback minimal quand on n'a pas d'objet MailboxConfig sous la main.
+# Préférer `mailbox.short_code` dès que possible.
 BOX_ABBR = {
     "detective_belgique": "D_FR",
     "detective_belgium": "D_NL",
     "dpdh_investigations": "D_PD",
+    "detectives_belgique": "D_DS",
 }
 
 # Lexique métier exhaustif — enrichissement automatique de la question
@@ -158,53 +162,144 @@ BOX_ABBR = {
 # un terme familier ou un euphémisme.
 _ENQUETE_SYNONYMES: dict[str, list[str]] = {
     "adulte": [
-        "infidelite", "adultere", "tromperie", "concubinage",
-        "soupcon", "jaloux", "jalouse", "ma femme", "mon mari",
-        "mon conjoint", "ma compagne", "mon compagnon",
-        "tromper", "trahir", "mentir", "amant", "maitresse",
-        "liaison", "aventure", "escapade", "malaise", "couple",
+        "infidelite",
+        "adultere",
+        "tromperie",
+        "concubinage",
+        "soupcon",
+        "jaloux",
+        "jalouse",
+        "ma femme",
+        "mon mari",
+        "mon conjoint",
+        "ma compagne",
+        "mon compagnon",
+        "tromper",
+        "trahir",
+        "mentir",
+        "amant",
+        "maitresse",
+        "liaison",
+        "aventure",
+        "escapade",
+        "malaise",
+        "couple",
     ],
     "surveillance": [
-        "surveillance", "filature", "observation", "terrain",
-        "pister", "suivre", "espionner", "filmer", "photographier",
-        "detective", "enqueteur", "shadowing", "stakeout",
+        "surveillance",
+        "filature",
+        "observation",
+        "terrain",
+        "pister",
+        "suivre",
+        "espionner",
+        "filmer",
+        "photographier",
+        "detective",
+        "enqueteur",
+        "shadowing",
+        "stakeout",
     ],
     "disparition": [
-        "disparition", "recherche_personne", "retrouver",
-        "localiser", "fugue", "kidnappe", "perdu", "retrouve",
-        "missing", "trace", "disparu", "disparue",
+        "disparition",
+        "recherche_personne",
+        "retrouver",
+        "localiser",
+        "fugue",
+        "kidnappe",
+        "perdu",
+        "retrouve",
+        "missing",
+        "trace",
+        "disparu",
+        "disparue",
     ],
     "residence": [
-        "controle_residence", "residence", "domicile",
-        "logement", "adresse", "habitation", "cooperative",
-        "proprietaire", "locataire", "colocation",
+        "controle_residence",
+        "residence",
+        "domicile",
+        "logement",
+        "adresse",
+        "habitation",
+        "cooperative",
+        "proprietaire",
+        "locataire",
+        "colocation",
     ],
     "famille": [
-        "enquete_famille", "garde", "pension", "famille",
-        "enfant", "mineur", "adolescent", "bebe", "nourrisson",
-        "divorce", "separation", "rupture", "couple", "concubin",
-        "droit de visite", "hebergement", "custodie", "tutelle",
+        "enquete_famille",
+        "garde",
+        "pension",
+        "famille",
+        "enfant",
+        "mineur",
+        "adolescent",
+        "bebe",
+        "nourrisson",
+        "divorce",
+        "separation",
+        "rupture",
+        "couple",
+        "concubin",
+        "droit de visite",
+        "hebergement",
+        "custodie",
+        "tutelle",
     ],
     "harcelement": [
-        "harcelement", "intimidation", "stalking", "menace",
-        "persecution", "chantage", "blackmail", "cyberharcelement",
-        "insulte", "agression", "violence",
+        "harcelement",
+        "intimidation",
+        "stalking",
+        "menace",
+        "persecution",
+        "chantage",
+        "blackmail",
+        "cyberharcelement",
+        "insulte",
+        "agression",
+        "violence",
     ],
     "entreprise": [
-        "investigation_entreprise", "entreprise", "societe",
-        "patron", "salarie", "licenciement", "fraude",
-        "detournement", "vol", "abus", "conflit", "concurrence",
-        "espionnage industriel", "contrefacon",
+        "investigation_entreprise",
+        "entreprise",
+        "societe",
+        "patron",
+        "salarie",
+        "licenciement",
+        "fraude",
+        "detournement",
+        "vol",
+        "abus",
+        "conflit",
+        "concurrence",
+        "espionnage industriel",
+        "contrefacon",
     ],
     "materiel": [
-        "test_materiel", "materiel", "detecteur", "camera",
-        "micro", "gps", "traceur", "bug", "ecoute",
-        "matos", "gadget", "technique",
+        "test_materiel",
+        "materiel",
+        "detecteur",
+        "camera",
+        "micro",
+        "gps",
+        "traceur",
+        "bug",
+        "ecoute",
+        "matos",
+        "gadget",
+        "technique",
     ],
     "collaboration": [
-        "collaboration", "sous_traitance", "partenaire",
-        "associe", "confrere", "collegue", "partenariat",
-        "mandat", "sous_traitant", "prestataire",
+        "collaboration",
+        "sous_traitance",
+        "partenaire",
+        "associe",
+        "confrere",
+        "collegue",
+        "partenariat",
+        "mandat",
+        "sous_traitant",
+        "prestataire",
     ],
 }
 
@@ -218,7 +313,9 @@ class CharlieResult:
     sql_error: str | None
     vault_notes: list[VaultNote] = field(default_factory=list)
     hide_rows: bool = False  # Quand True, le template web ne montre pas le tableau SQL brut
-    archive_rows: list[dict] = field(default_factory=list)  # Emails trouvés dans les DB historiques boite1/2/3
+    archive_rows: list[dict] = field(
+        default_factory=list
+    )  # Emails trouvés dans les DB historiques boite1/2/3/4
 
 
 def parse_charlie_response(text: str) -> tuple[str, str]:
@@ -358,7 +455,7 @@ RÈGLES ABSOLUES :
 """
 
 
-# Mapping type d'enquête → catégorie historique dans les 3 DB sources
+# Mapping type d'enquête → catégorie historique dans les DB sources
 _ENQUETE_TO_CATEGORY: dict[str, str] = {
     "adulte": "INFIDELITE",
     "infidelite": "INFIDELITE",
@@ -381,11 +478,19 @@ _ENQUETE_TO_CATEGORY: dict[str, str] = {
 }
 
 
+def _historical_db_names() -> list[str]:
+    """Retourne les noms de fichiers des DB historiques configurées."""
+    return [mb.db_path.name for mb in get_settings().mailboxes()]
+
+
 async def _search_historical_by_keyword(
-    db_path: Path, keyword: str, year: str | None = None, limit: int = 50,
+    db_path: Path,
+    keyword: str,
+    year: str | None = None,
+    limit: int = 50,
     category: str | None = None,
 ) -> list[dict]:
-    """Cherche dans les 3 DB historiques par mot-clé (subject, body_preview, body_full, sender).
+    """Cherche dans les DB historiques par mot-clé (subject, body_preview, body_full, sender).
 
     Utilisé quand un dossier spécifique est mentionné (ex: ADF) ou quand un
     mot-clé est extrait de la question (ex: "Lampaert") pour trouver tous les
@@ -409,7 +514,7 @@ async def _search_historical_by_keyword(
             "SELECT id, subject, sender, date, body_preview, body_full, category "
             "FROM emails WHERE (subject LIKE ? OR body_preview LIKE ? OR body_full LIKE ? OR sender LIKE ?) "
         )
-    for db_name in ("boite1.sqlite", "boite2.sqlite", "boite3.sqlite"):
+    for db_name in _historical_db_names():
         db_file = data_dir / db_name
         if not db_file.exists():
             continue
@@ -437,17 +542,22 @@ async def _search_historical_by_keyword(
                         preview = full_clean[:3000]
                         if len(full_clean) > 3000:
                             preview += "\n\n[… tronqué à 3000 caractères]"
-                    results.append({
-                        "id": row[0],
-                        "subject": row[1],
-                        "sender": row[2],
-                        "received_at": row[3],
-                        "body_preview": preview,
-                        "category": row[6],
-                        "source_db": db_name,
-                    })
+                    results.append(
+                        {
+                            "id": row[0],
+                            "subject": row[1],
+                            "sender": row[2],
+                            "received_at": row[3],
+                            "body_preview": preview,
+                            "category": row[6],
+                            "source_db": db_name,
+                        }
+                    )
         except Exception as e:
-            log.warning("charlie.historical_keyword_failed", db=db_name, keyword=keyword, error=str(e))
+            log.warning(
+                "charlie.historical_keyword_failed", db=db_name, keyword=keyword, error=str(e)
+            )
+
     # Tri global par date
     def _parse_date(r: dict) -> datetime:
         raw = r.get("received_at") or ""
@@ -468,14 +578,18 @@ async def _search_historical_by_keyword(
         except Exception:
             pass
         return datetime.min
+
     results.sort(key=_parse_date, reverse=True)
     return results[:limit]
 
 
 async def _search_historical_by_category(
-    db_path: Path, category: str, year: str | None = None, limit: int = 5,
+    db_path: Path,
+    category: str,
+    year: str | None = None,
+    limit: int = 5,
 ) -> list[dict]:
-    """Cherche dans les 3 DB historiques (boite1/2/3) par catégorie fine.
+    """Cherche dans les DB historiques par catégorie fine.
 
     Filtres appliqués :
     - body_preview non vide et significatif (>30 caractères)
@@ -486,7 +600,7 @@ async def _search_historical_by_category(
     data_dir = db_path.parent
     results: list[dict] = []
     generic_subjects = ("%Nouveau Message De Détective%", "%Formulaire%", "%Contact%")
-    for db_name in ("boite1.sqlite", "boite2.sqlite", "boite3.sqlite"):
+    for db_name in _historical_db_names():
         db_file = data_dir / db_name
         if not db_file.exists():
             continue
@@ -511,17 +625,20 @@ async def _search_historical_by_category(
                 cursor = await db.execute(sql, tuple(params))
                 rows = await cursor.fetchall()
                 for row in rows:
-                    results.append({
-                        "id": row[0],
-                        "subject": row[1],
-                        "sender": row[2],
-                        "received_at": row[3],
-                        "body_preview": row[4],
-                        "category": row[5],
-                        "source_db": db_name,
-                    })
+                    results.append(
+                        {
+                            "id": row[0],
+                            "subject": row[1],
+                            "sender": row[2],
+                            "received_at": row[3],
+                            "body_preview": row[4],
+                            "category": row[5],
+                            "source_db": db_name,
+                        }
+                    )
         except Exception as e:
             log.warning("charlie.historical_search_failed", db=db_name, error=str(e))
+
     # Tri global par date décroissante — parsing robuste des formats RFC 2822 / ISO
     def _parse_date(r: dict) -> datetime:
         raw = r.get("received_at") or ""
@@ -549,14 +666,16 @@ async def _search_historical_by_category(
 
 
 async def _search_historical_all(
-    db_path: Path, year: str | None = None, limit: int = 50,
+    db_path: Path,
+    year: str | None = None,
+    limit: int = 50,
 ) -> list[dict]:
-    """Cherche dans les 3 DB historiques tous les emails pertinents (exclut spam/newsletter/phishing)."""
+    """Cherche dans les DB historiques tous les emails pertinents (exclut spam/newsletter/phishing)."""
     data_dir = db_path.parent
     results: list[dict] = []
     generic_subjects = ("%Nouveau Message De Détective%", "%Formulaire%", "%Contact%")
     exclude_cats = ("spam", "newsletter", "phishing")
-    for db_name in ("boite1.sqlite", "boite2.sqlite", "boite3.sqlite"):
+    for db_name in _historical_db_names():
         db_file = data_dir / db_name
         if not db_file.exists():
             continue
@@ -582,17 +701,20 @@ async def _search_historical_all(
                 cursor = await db.execute(sql, tuple(params))
                 rows = await cursor.fetchall()
                 for row in rows:
-                    results.append({
-                        "id": row[0],
-                        "subject": row[1],
-                        "sender": row[2],
-                        "received_at": row[3],
-                        "body_preview": row[4],
-                        "category": row[5],
-                        "source_db": db_name,
-                    })
+                    results.append(
+                        {
+                            "id": row[0],
+                            "subject": row[1],
+                            "sender": row[2],
+                            "received_at": row[3],
+                            "body_preview": row[4],
+                            "category": row[5],
+                            "source_db": db_name,
+                        }
+                    )
         except Exception as e:
             log.warning("charlie.historical_all_failed", db=db_name, error=str(e))
+
     def _parse_date(r: dict) -> datetime:
         raw = r.get("received_at") or ""
         if not raw:
@@ -612,16 +734,13 @@ async def _search_historical_all(
         except Exception:
             pass
         return datetime.min
+
     results.sort(key=_parse_date, reverse=True)
     return results
 
 
-_DOSSIER_RE = re.compile(
-    r"[Dd][Oo][Ss]{2}[Ii][Ee][Rr]\s*[Nn]°\s*([A-Za-z0-9_-]+)"
-)
-_DOSSIER_NAME_RE = re.compile(
-    r"[Dd][Oo][Ss]{2}[Ii][Ee][Rr]\s+([A-Z][a-zA-Z]+)"
-)
+_DOSSIER_RE = re.compile(r"[Dd][Oo][Ss]{2}[Ii][Ee][Rr]\s*[Nn]°\s*([A-Za-z0-9_-]+)")
+_DOSSIER_NAME_RE = re.compile(r"[Dd][Oo][Ss]{2}[Ii][Ee][Rr]\s+([A-Z][a-zA-Z]+)")
 _HASH_DOSSIER_RE = re.compile(r"#([A-Z][A-Z0-9]{2,})")
 _CODE_RE = re.compile(r"\b([A-Z]{3,6})\b")
 _YEAR_RE = re.compile(r"\b(20\d{2})\b")
@@ -638,7 +757,17 @@ def _extract_dossier_id(question: str) -> str | None:
     if m:
         name = m.group(1)
         # Exclure les mots communs qui ne sont pas des noms de dossier
-        if name.lower() not in ("client", "general", "generale", "monsieur", "madame", "mademoiselle", "monsieur", "madame", "cliente"):
+        if name.lower() not in (
+            "client",
+            "general",
+            "generale",
+            "monsieur",
+            "madame",
+            "mademoiselle",
+            "monsieur",
+            "madame",
+            "cliente",
+        ):
             return name
     # Pattern 3 : "affaire XYZ123" (synonyme métier)
     m = _AFFAIRE_RE.search(question)
@@ -651,7 +780,23 @@ def _extract_dossier_id(question: str) -> str | None:
     # Pattern 5 : codes ALL-CAPS isolés (ex: ADF, DPDH)
     for m in _CODE_RE.finditer(question):
         code = m.group(1)
-        if code not in ("SQL", "OK", "HTTP", "API", "URL", "HTML", "XML", "JSON", "HTTPS", "SMTP", "IMAP", "PDF", "CSV", "JPEG", "PNG"):
+        if code not in (
+            "SQL",
+            "OK",
+            "HTTP",
+            "API",
+            "URL",
+            "HTML",
+            "XML",
+            "JSON",
+            "HTTPS",
+            "SMTP",
+            "IMAP",
+            "PDF",
+            "CSV",
+            "JPEG",
+            "PNG",
+        ):
             return code
     return None
 
@@ -671,9 +816,27 @@ def _extract_years(question: str) -> list[str]:
 
 
 _MONTH_FR = {
-    "janvier": 1, "fevrier": 2, "mars": 3, "avril": 4, "mai": 5, "juin": 6,
-    "juillet": 7, "aout": 8, "septembre": 9, "octobre": 10, "novembre": 11, "decembre": 12,
-    "jan": 1, "fev": 2, "avr": 4, "juil": 7, "aou": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+    "janvier": 1,
+    "fevrier": 2,
+    "mars": 3,
+    "avril": 4,
+    "mai": 5,
+    "juin": 6,
+    "juillet": 7,
+    "aout": 8,
+    "septembre": 9,
+    "octobre": 10,
+    "novembre": 11,
+    "decembre": 12,
+    "jan": 1,
+    "fev": 2,
+    "avr": 4,
+    "juil": 7,
+    "aou": 8,
+    "sep": 9,
+    "oct": 10,
+    "nov": 11,
+    "dec": 12,
 }
 
 
@@ -685,13 +848,14 @@ def _extract_date_filter(question: str) -> str | None:
     Retourne None si aucune date détectable.
     """
     from datetime import date as _d
+
     q = _normalize(question)
     today = _d.today()
     year_str = _extract_year(question) or str(today.year)
     year = int(year_str)
 
     # "depuis le D mois" ou "a partir du D mois"
-    m = re.search(r'(?:depuis le?|a partir du?)\s+(\d{1,2})\s+([a-záàâéèêîïôùûü]+)', q)
+    m = re.search(r"(?:depuis le?|a partir du?)\s+(\d{1,2})\s+([a-záàâéèêîïôùûü]+)", q)
     if m:
         day = int(m.group(1))
         month_name = _normalize(m.group(2))
@@ -701,7 +865,7 @@ def _extract_date_filter(question: str) -> str | None:
             return f"processed_at >= '{date_str}'"
 
     # "en mois" ou "du mois de mois"
-    m = re.search(r'(?:en|du mois de|ce mois)\s+([a-záàâéèêîïôùûü]+)', q)
+    m = re.search(r"(?:en|du mois de|ce mois)\s+([a-záàâéèêîïôùûü]+)", q)
     if m:
         month_name = _normalize(m.group(1))
         month = _MONTH_FR.get(month_name, 0)
@@ -711,12 +875,12 @@ def _extract_date_filter(question: str) -> str | None:
             return f"processed_at >= '{year}-{month:02d}-01' AND processed_at < '{next_year}-{next_month:02d}-01'"
 
     # "depuis le 2026-05-20" ou "depuis le 20/05/2026"
-    m = re.search(r'depuis le?\s+(\d{4}-\d{2}-\d{2})', question)
+    m = re.search(r"depuis le?\s+(\d{4}-\d{2}-\d{2})", question)
     if m:
         return f"processed_at >= '{m.group(1)}'"
 
     # juste une année (ex: "en 2026", "depuis 2026")
-    if year_str and re.search(r'\b' + year_str + r'\b', question):
+    if year_str and re.search(r"\b" + year_str + r"\b", question):
         return f"processed_at >= '{year_str}-01-01' AND processed_at < '{year + 1}-01-01'"
 
     return None
@@ -759,12 +923,18 @@ def _build_status_sql(question: str, dossier_id: str | None) -> str | None:
     q = _normalize(question)
 
     # Racines courtes = fuzzy / tolérance aux fautes de frappe
-    is_pending = any(kw in q for kw in ("pending", "attente", "a repondre", "a traiter", "non traite"))
+    is_pending = any(
+        kw in q for kw in ("pending", "attente", "a repondre", "a traiter", "non traite")
+    )
     is_demande = any(kw in q for kw in ("demand", "client", "clients", "requete"))
     is_urgent = any(kw in q for kw in ("urgent", "urgente", "prioritaire", "important"))
 
     # "en attente" / "à traiter" / "pending" suffisent même sans "demande" explicite
-    if not is_demande and not is_pending and not any(kw in q for kw in ("email", "mail", "message")):
+    if (
+        not is_demande
+        and not is_pending
+        and not any(kw in q for kw in ("email", "mail", "message"))
+    ):
         return None
 
     where_clauses: list[str] = []
@@ -800,46 +970,196 @@ def _extract_keywords(question: str) -> list[tuple[int, str]]:
     (lieux, types de documents, objets de recherche).
     """
     STOP_WORDS = {
-        "moi", "vous", "dossier", "client", "resume", "resumer",
-        "question", "reponse", "donne", "donner", "aussi",
-        "partie", "partir", "faire", "etre", "avoir", "aller",
-        "comme", "alors", "apres", "avant", "encore", "toujours",
-        "jamais", "toutes", "toute", "tous", "tout", "plusieurs",
-        "quelques", "beaucoup", "souvent", "parfois", "maintenant",
-        "aujourd", "hier", "demain", "matin", "soir", "jour",
-        "semaine", "mois", "annee", "temps", "heure", "minute",
-        "proposition", "propose", "proposer", "offre", "offert",
-        "offrir", "financier", "financiere", "finance", "finances",
-        "budget", "prix", "cout", "couts", "montant", "euro",
-        "euros", "paiement", "payer", "paye", "versement", "provision",
-        "honoraires", "tarif", "tarifs", "forfait", "forfaits", "total",
-        "somme", "sommes", "argent", "gratuit", "gratuite",
-        "avec", "principaux", "principales", "important", "importants",
-        "details", "detail", "information", "informations",
+        "moi",
+        "vous",
+        "dossier",
+        "client",
+        "resume",
+        "resumer",
+        "question",
+        "reponse",
+        "donne",
+        "donner",
+        "aussi",
+        "partie",
+        "partir",
+        "faire",
+        "etre",
+        "avoir",
+        "aller",
+        "comme",
+        "alors",
+        "apres",
+        "avant",
+        "encore",
+        "toujours",
+        "jamais",
+        "toutes",
+        "toute",
+        "tous",
+        "tout",
+        "plusieurs",
+        "quelques",
+        "beaucoup",
+        "souvent",
+        "parfois",
+        "maintenant",
+        "aujourd",
+        "hier",
+        "demain",
+        "matin",
+        "soir",
+        "jour",
+        "semaine",
+        "mois",
+        "annee",
+        "temps",
+        "heure",
+        "minute",
+        "proposition",
+        "propose",
+        "proposer",
+        "offre",
+        "offert",
+        "offrir",
+        "financier",
+        "financiere",
+        "finance",
+        "finances",
+        "budget",
+        "prix",
+        "cout",
+        "couts",
+        "montant",
+        "euro",
+        "euros",
+        "paiement",
+        "payer",
+        "paye",
+        "versement",
+        "provision",
+        "honoraires",
+        "tarif",
+        "tarifs",
+        "forfait",
+        "forfaits",
+        "total",
+        "somme",
+        "sommes",
+        "argent",
+        "gratuit",
+        "gratuite",
+        "avec",
+        "principaux",
+        "principales",
+        "important",
+        "importants",
+        "details",
+        "detail",
+        "information",
+        "informations",
     }
     ACTION_WORDS = {
-        "retrouve", "trouve", "donne", "donner", "montre", "montrer",
-        "cherche", "chercher", "liste", "lister", "affiche", "afficher",
-        "envoie", "envoyer", "rapporte", "rapport", "dis", "dire",
-        "trouves", "donnes", "montres", "cherches", "listes", "afficher",
-        "trouver", "donner", "montrer", "chercher", "lister", "afficher",
-        "envoyer", "dire", "demande", "demander", "demandes", "demandent",
-        "envoies", "envoyes", "envoyez", "regarde", "regarder", "regardes",
-        "presente", "presenter", "presentes", "presentez",
-        "retrouver", "retrouves", "retrouvez", "retrouvent",
-        "trouves", "trouvez", "trouvent", "recherche", "rechercher",
-        "recherches", "recherchez", "recherchent",
+        "retrouve",
+        "trouve",
+        "donne",
+        "donner",
+        "montre",
+        "montrer",
+        "cherche",
+        "chercher",
+        "liste",
+        "lister",
+        "affiche",
+        "afficher",
+        "envoie",
+        "envoyer",
+        "rapporte",
+        "rapport",
+        "dis",
+        "dire",
+        "trouves",
+        "donnes",
+        "montres",
+        "cherches",
+        "listes",
+        "trouver",
+        "demande",
+        "demander",
+        "demandes",
+        "demandent",
+        "envoies",
+        "envoyes",
+        "envoyez",
+        "regarde",
+        "regarder",
+        "regardes",
+        "presente",
+        "presenter",
+        "presentes",
+        "presentez",
+        "retrouver",
+        "retrouves",
+        "retrouvez",
+        "retrouvent",
+        "trouvez",
+        "trouvent",
+        "recherche",
+        "rechercher",
+        "recherches",
+        "recherchez",
+        "recherchent",
     }
     SEMANTIC_BOOST = {
-        "hotel", "hotels", "facture", "factures", "devis", "contrat",
-        "rapport", "reservation", "vol", "avion", "train", "taxi",
-        "restaurant", "parking", "essence", "carburant", "peage", "toll",
-        "autoroute", "document", "photo", "video", "preuve", "temoin",
-        "adresse", "telephone", "email", "mail", "message", "sujet",
-        "client", "enquete", "investigation", "surveillance", "adulte",
-        "infidelite", "disparition", "recherche", "personne", "garde",
-        "enfant", "famille", "residence", "domicile", "entreprise",
-        "fraude", "materiel", "collaboration", "harcelement",
+        "hotel",
+        "hotels",
+        "facture",
+        "factures",
+        "devis",
+        "contrat",
+        "rapport",
+        "reservation",
+        "vol",
+        "avion",
+        "train",
+        "taxi",
+        "restaurant",
+        "parking",
+        "essence",
+        "carburant",
+        "peage",
+        "toll",
+        "autoroute",
+        "document",
+        "photo",
+        "video",
+        "preuve",
+        "temoin",
+        "adresse",
+        "telephone",
+        "email",
+        "mail",
+        "message",
+        "sujet",
+        "client",
+        "enquete",
+        "investigation",
+        "surveillance",
+        "adulte",
+        "infidelite",
+        "disparition",
+        "recherche",
+        "personne",
+        "garde",
+        "enfant",
+        "famille",
+        "residence",
+        "domicile",
+        "entreprise",
+        "fraude",
+        "materiel",
+        "collaboration",
+        "harcelement",
     }
     keywords: list[tuple[int, str]] = []
     # Mots alphabétiques
@@ -925,7 +1245,9 @@ def _build_keyword_sql(question: str) -> str | None:
         date_clause = f" AND (processed_at >= '{y}-01-01' AND processed_at < '{int(y) + 1}-01-01')"
     elif len(years) > 1:
         min_y, max_y = years[0], years[-1]
-        date_clause = f" AND (processed_at >= '{min_y}-01-01' AND processed_at < '{int(max_y) + 1}-01-01')"
+        date_clause = (
+            f" AND (processed_at >= '{min_y}-01-01' AND processed_at < '{int(max_y) + 1}-01-01')"
+        )
     return f"SELECT id, subject, sender, received_at, category, status, priority, body_preview, substr(body, 1, 3000) as body FROM mail_processed WHERE ({where}{category_clause}){date_clause} ORDER BY id DESC LIMIT 20"
 
 
@@ -1023,10 +1345,30 @@ async def _resolve_links(
 
         fm = _extract_frontmatter(note.content)
         for key in (
-            "employeur", "adresse_principale", "related", "dossier", "lieu", "personne", "entities",
-            "epouse", "mari", "conjoint", "compagne", "compagnon",
-            "fille", "fils", "enfant", "pere", "mere", "parent",
-            "soeur", "frere", "cousin", "cousine", "oncle", "tante",
+            "employeur",
+            "adresse_principale",
+            "related",
+            "dossier",
+            "lieu",
+            "personne",
+            "entities",
+            "epouse",
+            "mari",
+            "conjoint",
+            "compagne",
+            "compagnon",
+            "fille",
+            "fils",
+            "enfant",
+            "pere",
+            "mere",
+            "parent",
+            "soeur",
+            "frere",
+            "cousin",
+            "cousine",
+            "oncle",
+            "tante",
         ):
             val = fm.get(key, "")
             if isinstance(val, str):
@@ -1093,12 +1435,20 @@ def _build_dossier_summary_from_emails(
         if not text:
             continue
         # Pattern formulaire NL : Achternaam: X Voornaam: Y
-        m = re.search(r"Achternaam\s*[:=]\s*([A-Za-zÀ-Ÿ\-]+).*?Voornaam\s*[:=]\s*([A-Za-zÀ-Ÿ\-]+)", text, re.IGNORECASE | re.DOTALL)
+        m = re.search(
+            r"Achternaam\s*[:=]\s*([A-Za-zÀ-Ÿ\-]+).*?Voornaam\s*[:=]\s*([A-Za-zÀ-Ÿ\-]+)",
+            text,
+            re.IGNORECASE | re.DOTALL,
+        )
         if m:
             client_name = f"{m.group(2)} {m.group(1)}"
             break
         # Pattern FR : Nom: X Prénom: Y
-        m = re.search(r"Nom\s*[:=]\s*([A-Za-zÀ-Ÿ\-]+).*?Prénom\s*[:=]\s*([A-Za-zÀ-Ÿ\-]+)", text, re.IGNORECASE | re.DOTALL)
+        m = re.search(
+            r"Nom\s*[:=]\s*([A-Za-zÀ-Ÿ\-]+).*?Prénom\s*[:=]\s*([A-Za-zÀ-Ÿ\-]+)",
+            text,
+            re.IGNORECASE | re.DOTALL,
+        )
         if m:
             client_name = f"{m.group(2)} {m.group(1)}"
             break
@@ -1119,7 +1469,11 @@ def _build_dossier_summary_from_emails(
         if not text:
             continue
         # Patterns : 200€, 200 euros, 200 EUR, €200, 1.234,56, 1234.56, 1 234,56
-        for m in re.finditer(r"(?:€|EUR|euro?s?\s*)?\s*(\d{1,3}(?:[\s.]\d{3})*(?:,\d{2})?|\d+(?:,\d{2})?)\s*(?:€|EUR|euro?s?)?", text, re.IGNORECASE):
+        for m in re.finditer(
+            r"(?:€|EUR|euro?s?\s*)?\s*(\d{1,3}(?:[\s.]\d{3})*(?:,\d{2})?|\d+(?:,\d{2})?)\s*(?:€|EUR|euro?s?)?",
+            text,
+            re.IGNORECASE,
+        ):
             raw = m.group(0).strip()
             # Filtrer les faux positifs (années, numéros de téléphone, IDs)
             num_str = m.group(1).replace(" ", "").replace(".", "").replace(",", ".")
@@ -1176,10 +1530,15 @@ def _build_dossier_summary_from_emails(
             demand_type = "enquête familiale"
             break
     if not demand_type:
-        text_all = " ".join(r.get("body", "") or r.get("body_preview", "") or "" for r in all_emails).lower()
+        text_all = " ".join(
+            r.get("body", "") or r.get("body_preview", "") or "" for r in all_emails
+        ).lower()
         if any(k in text_all for k in ("surveillance", "filature", "suivre", "observer")):
             demand_type = "surveillance / filature"
-        elif any(k in text_all for k in ("infidel", "adultere", "tromperie", "ma femme", "mon mari", "conjoi")):
+        elif any(
+            k in text_all
+            for k in ("infidel", "adultere", "tromperie", "ma femme", "mon mari", "conjoi")
+        ):
             demand_type = "enquête d'infidélité"
         elif any(k in text_all for k in ("disparu", "retrouver", "localiser", "fugue")):
             demand_type = "recherche de personne"
@@ -1209,7 +1568,9 @@ def _build_dossier_summary_from_emails(
     # Résumé narratif basé sur les catégories et sujets
     subjects = [r.get("subject") for r in all_emails if r.get("subject")]
     if subjects:
-        parts.append(f"**Emails trouvés** ({len(all_emails)} au total) : sujets liés à '{subjects[0][:60]}...'")
+        parts.append(
+            f"**Emails trouvés** ({len(all_emails)} au total) : sujets liés à '{subjects[0][:60]}...'"
+        )
 
     return "\n".join(parts)
 
@@ -1228,8 +1589,12 @@ async def ask_charlie(
     general_resp = _general_response(question)
     if general_resp:
         return CharlieResult(
-            response_text=general_resp, sql="", rows=None,
-            sql_safe=True, sql_error=None, vault_notes=[],
+            response_text=general_resp,
+            sql="",
+            rows=None,
+            sql_safe=True,
+            sql_error=None,
+            vault_notes=[],
         )
 
     dossier_id = _extract_dossier_id(question)
@@ -1242,12 +1607,78 @@ async def ask_charlie(
 
     # Détection d'intention (avant les closures — late binding Python)
     q_norm = _normalize(question)
-    is_list_request = any(kw in q_norm for kw in ("liste", "lister", "donne-moi", "donne moi", "quels", "quelles", "lesquels", "lesquelles", "montre-moi", "tous les", "toutes les"))
-    is_count_request = any(kw in q_norm for kw in ("combien", "nombre", "total", "count", "combien de"))
-    is_dossier_count = any(kw in q_norm for kw in ("nouveau dossier", "dossier ouvert", "dossier cree", "dossiers crees", "combien de dossier", "ouvert depuis", "crees depuis", "nouveau client", "nouveaux client", "dossiers client"))
-    is_dossier_list = is_list_request and not dossier_id and any(kw in q_norm for kw in ("dossier", "enquete", "enquetes", "affaire", "affaires", "client"))
-    is_identity_request = any(kw in q_norm for kw in ("qui est", "nom", "prenom", "contact", "personne", "sappelle", "epouse", "mari", "conjoint"))
-    is_dossier_summary = dossier_id is not None and any(kw in q_norm for kw in ("resume", "resumer", "resum", "synthese", "synthetiser", "info", "infos", "detail", "details", "situation", "etat"))
+    is_list_request = any(
+        kw in q_norm
+        for kw in (
+            "liste",
+            "lister",
+            "donne-moi",
+            "donne moi",
+            "quels",
+            "quelles",
+            "lesquels",
+            "lesquelles",
+            "montre-moi",
+            "tous les",
+            "toutes les",
+        )
+    )
+    is_count_request = any(
+        kw in q_norm for kw in ("combien", "nombre", "total", "count", "combien de")
+    )
+    is_dossier_count = any(
+        kw in q_norm
+        for kw in (
+            "nouveau dossier",
+            "dossier ouvert",
+            "dossier cree",
+            "dossiers crees",
+            "combien de dossier",
+            "ouvert depuis",
+            "crees depuis",
+            "nouveau client",
+            "nouveaux client",
+            "dossiers client",
+        )
+    )
+    is_dossier_list = (
+        is_list_request
+        and not dossier_id
+        and any(
+            kw in q_norm
+            for kw in ("dossier", "enquete", "enquetes", "affaire", "affaires", "client")
+        )
+    )
+    is_identity_request = any(
+        kw in q_norm
+        for kw in (
+            "qui est",
+            "nom",
+            "prenom",
+            "contact",
+            "personne",
+            "sappelle",
+            "epouse",
+            "mari",
+            "conjoint",
+        )
+    )
+    is_dossier_summary = dossier_id is not None and any(
+        kw in q_norm
+        for kw in (
+            "resume",
+            "resumer",
+            "resum",
+            "synthese",
+            "synthetiser",
+            "info",
+            "infos",
+            "detail",
+            "details",
+            "situation",
+            "etat",
+        )
+    )
 
     # ── 2. Génération SQL ──
     # Fallback programmatique pour les comptages simples (pas besoin de LLM)
@@ -1264,8 +1695,12 @@ async def ask_charlie(
     if not sql:
         try:
             from datetime import date as _date
+
             today_str = _date.today().isoformat()
-            system = CHARLIE_SYSTEM_PROMPT + f"\n\nDate du jour : {today_str}. Si Daniel dit 'aujourd\\'hui', 'ce mois-ci', 'depuis le X mai' sans préciser l\\'année, utilise {today_str[:4]} comme année."
+            system = (
+                CHARLIE_SYSTEM_PROMPT
+                + f"\n\nDate du jour : {today_str}. Si Daniel dit 'aujourd\\'hui', 'ce mois-ci', 'depuis le X mai' sans préciser l\\'année, utilise {today_str[:4]} comme année."
+            )
             if dossier_id:
                 system += f"\nNote : Daniel demande le dossier '{dossier_id}'. Inclus ce terme dans les clauses LIKE."
             messages = [
@@ -1296,7 +1731,11 @@ async def ask_charlie(
 
     async def _vault_task() -> list:
         nonlocal vault_answer
-        lim = 15 if (is_identity_request or is_list_request or is_dossier_list or is_factual_search) else settings.cerveau2_limit
+        lim = (
+            15
+            if (is_identity_request or is_list_request or is_dossier_list or is_factual_search)
+            else settings.cerveau2_limit
+        )
         # Pour les questions identitaires, ne pas filtrer par dossier_id
         # car les fiches personnes/entités ne sont pas liées à un dossier
         vault_dossier_id = None if is_identity_request else dossier_id
@@ -1325,7 +1764,13 @@ async def ask_charlie(
             timeout=vault_timeout,
         )
         vault_answer = ans
-        log.info("charlie.vault_returned", question=question[:60], vault_question=vault_question[:60], has_answer=bool(vault_answer), answer_preview=vault_answer[:200] if vault_answer else "(vide)")
+        log.info(
+            "charlie.vault_returned",
+            question=question[:60],
+            vault_question=vault_question[:60],
+            has_answer=bool(vault_answer),
+            answer_preview=vault_answer[:200] if vault_answer else "(vide)",
+        )
 
         # --- FALLBACK DIRECT : pour les questions identitaires, si la recherche
         # sémantique ne remonte pas la fiche personne, on la demande directement
@@ -1361,7 +1806,8 @@ async def ask_charlie(
             existing_paths = {n.path for n in notes}
             coros = [
                 get_vault_note(p, settings.cerveau2_base_url, settings.cerveau2_api_secret)
-                for p in candidate_slugs if p not in existing_paths
+                for p in candidate_slugs
+                if p not in existing_paths
             ]
             if coros:
                 fetched = await asyncio.gather(*coros, return_exceptions=True)
@@ -1406,12 +1852,21 @@ async def ask_charlie(
         elif any(kw in q_norm for kw in ("rappel", "reminder")):
             category_filter = "rappel"
         if dossier_id:
-            return await _search_historical_by_keyword(db_path, dossier_id, year=archive_year, limit=lim, category=category_filter)
+            return await _search_historical_by_keyword(
+                db_path, dossier_id, year=archive_year, limit=lim, category=category_filter
+            )
         keywords = _extract_keywords(question)
         if keywords:
             best = keywords[0][1]
-            log.info("charlie.archive_keyword", best=best, all_keywords=[k[1] for k in keywords[:5]], category=category_filter)
-            return await _search_historical_by_keyword(db_path, best, year=archive_year, limit=lim, category=category_filter)
+            log.info(
+                "charlie.archive_keyword",
+                best=best,
+                all_keywords=[k[1] for k in keywords[:5]],
+                category=category_filter,
+            )
+            return await _search_historical_by_keyword(
+                db_path, best, year=archive_year, limit=lim, category=category_filter
+            )
         if archive_year:
             return await _search_historical_all(db_path, year=archive_year, limit=lim)
         return []
@@ -1447,10 +1902,18 @@ async def ask_charlie(
     # ── 3.4b COURT-CIRCUIT FACTUEL — Cerveau2 = source, emails = preuves ──
     if is_factual_search and vault_answer:
         _bad_vault = (
-            "je ne trouve pas", "pas trouvé", "aucune information",
-            "pas d'information", "aucune donnée", "aucun résultat",
-            "n'apparaît pas", "n'apparait pas", "ne figure pas",
-            "aucune mention", "n'apparaît", "ne figure",
+            "je ne trouve pas",
+            "pas trouvé",
+            "aucune information",
+            "pas d'information",
+            "aucune donnée",
+            "aucun résultat",
+            "n'apparaît pas",
+            "n'apparait pas",
+            "ne figure pas",
+            "aucune mention",
+            "n'apparaît",
+            "ne figure",
         )
         vault_is_bad = any(p in vault_answer.lower() for p in _bad_vault)
         probant_lines: list[str] = []
@@ -1461,16 +1924,69 @@ async def ask_charlie(
             digits_only = re.sub(r"\D", "", raw_num)
             if len(digits_only) >= 6:
                 q_keywords.add(digits_only)
-        q_keywords -= {"moi", "vous", "dossier", "client", "question", "reponse",
-                       "donne", "donner", "faire", "etre", "avoir", "aller", "comme",
-                       "alors", "apres", "avant", "encore", "toujours", "jamais",
-                       "toutes", "toute", "tous", "tout", "plusieurs", "quelques",
-                       "beaucoup", "souvent", "parfois", "maintenant", "aujourd",
-                       "hier", "demain", "matin", "soir", "jour", "semaine", "mois",
-                       "annee", "temps", "heure", "minute", "avec", "depuis", "dans",
-                       "pour", "sur", "sous", "entre", "contre", "vers", "chez",
-                       "retrouv", "trouv", "retrouve", "trouve", "cherche", "chercher",
-                       "liste", "lister", "montre", "montrer", "donne", "donner"}
+        q_keywords -= {
+            "moi",
+            "vous",
+            "dossier",
+            "client",
+            "question",
+            "reponse",
+            "donne",
+            "donner",
+            "faire",
+            "etre",
+            "avoir",
+            "aller",
+            "comme",
+            "alors",
+            "apres",
+            "avant",
+            "encore",
+            "toujours",
+            "jamais",
+            "toutes",
+            "toute",
+            "tous",
+            "tout",
+            "plusieurs",
+            "quelques",
+            "beaucoup",
+            "souvent",
+            "parfois",
+            "maintenant",
+            "aujourd",
+            "hier",
+            "demain",
+            "matin",
+            "soir",
+            "jour",
+            "semaine",
+            "mois",
+            "annee",
+            "temps",
+            "heure",
+            "minute",
+            "avec",
+            "depuis",
+            "dans",
+            "pour",
+            "sur",
+            "sous",
+            "entre",
+            "contre",
+            "vers",
+            "chez",
+            "retrouv",
+            "trouv",
+            "retrouve",
+            "trouve",
+            "cherche",
+            "chercher",
+            "liste",
+            "lister",
+            "montre",
+            "montrer",
+        }
         probant_rows: list[dict] = []
         seen = set()
         for r in (rows or []) + (archive_rows or []):
@@ -1490,7 +2006,9 @@ async def ask_charlie(
             # Extraire le nom d'affichage si format "Nom <email>"
             sender_name = sender.split("<")[0].strip() if "<" in sender else sender
             if sender_name and sender_name != sender:
-                probant_lines.append(f"- {r.get('subject', 'Sans sujet')} — {sender_name} ({date_str})")
+                probant_lines.append(
+                    f"- {r.get('subject', 'Sans sujet')} — {sender_name} ({date_str})"
+                )
             else:
                 probant_lines.append(f"- {r.get('subject', 'Sans sujet')} ({date_str})")
         # Si Cerveau2 dit "pas trouvé" mais que le numéro recherché apparaît dans sa
@@ -1503,23 +2021,36 @@ async def ask_charlie(
                     break
         if vault_is_bad:
             if probant_lines:
-                full_answer = "Je n'ai pas trouvé dans le cerveau, mais voici les emails liés en base :\n\n" + "\n".join(probant_lines)
+                full_answer = (
+                    "Je n'ai pas trouvé dans le cerveau, mais voici les emails liés en base :\n\n"
+                    + "\n".join(probant_lines)
+                )
             else:
-                full_answer = "Je n'ai trouvé aucune information sur ce sujet dans les sources disponibles."
+                full_answer = (
+                    "Je n'ai trouvé aucune information sur ce sujet dans les sources disponibles."
+                )
         elif probant_lines:
             # Si Cerveau2 contient encore des négations (malgré le faux négatif),
             # on préfère une réponse propre basée sur les emails probants.
             if any(p in vault_answer.lower() for p in _bad_vault):
                 full_answer = "Voici ce que j'ai trouvé :\n\n" + "\n".join(probant_lines)
             else:
-                full_answer = vault_answer.strip() + "\n\n---\nÉléments probants en base :\n" + "\n".join(probant_lines)
+                full_answer = (
+                    vault_answer.strip()
+                    + "\n\n---\nÉléments probants en base :\n"
+                    + "\n".join(probant_lines)
+                )
         else:
             full_answer = vault_answer.strip()
         await _auto_save_fact(db_path, question, full_answer, dossier_id)
         return CharlieResult(
             response_text=full_answer,
-            sql=sql, rows=rows, sql_safe=True, sql_error=None,
-            vault_notes=vault_notes, archive_rows=archive_rows,
+            sql=sql,
+            rows=rows,
+            sql_safe=True,
+            sql_error=None,
+            vault_notes=vault_notes,
+            archive_rows=archive_rows,
         )
 
     # ── 3.5 Résolution des liens (nuage de liaison) ──
@@ -1562,7 +2093,7 @@ async def ask_charlie(
         return False
 
     # 1. Corrections locales (DB Charlie)
-    for c in (correction_notes or []):
+    for c in correction_notes or []:
         if c.question and _q_match(c.question, question):
             log.info("charlie.correction_shortcut.local", question=question[:60])
             return CharlieResult(
@@ -1574,7 +2105,7 @@ async def ask_charlie(
             )
 
     # 2. Corrections Cerveau2
-    for vc in (vault_correction_notes or []):
+    for vc in vault_correction_notes or []:
         vc_question = ""
         vc_corrected = ""
         for line in vc.content.splitlines():
@@ -1597,13 +2128,17 @@ async def ask_charlie(
 
     # Corrections (priorité absolue)
     if correction_notes:
-        context_parts.append("CORRECTIONS UTILISATEUR LOCALES (priorité absolue — utiliser EXCLUSIVEMENT) :")
+        context_parts.append(
+            "CORRECTIONS UTILISATEUR LOCALES (priorité absolue — utiliser EXCLUSIVEMENT) :"
+        )
         for c in correction_notes[:3]:
             context_parts.append(f"- Q: {c.question}\n  RÉPONSE CORRECTE: {c.response}")
         context_parts.append("")
 
     if vault_correction_notes:
-        context_parts.append("CORRECTIONS CERVEAU2 (priorité absolue — utiliser EXCLUSIVEMENT la corrected_response) :")
+        context_parts.append(
+            "CORRECTIONS CERVEAU2 (priorité absolue — utiliser EXCLUSIVEMENT la corrected_response) :"
+        )
         for vc in vault_correction_notes[:3]:
             fname = vc.path.split("/")[-1].replace(".md", "")
             # Extraire corrected_response du frontmatter pour ne pas noyer le LLM
@@ -1615,7 +2150,9 @@ async def ask_charlie(
                 if line.strip().startswith("question:"):
                     question = line.split(":", 1)[1].strip().strip('"')
             if corrected:
-                context_parts.append(f"[{fname}] Question: {question}\nCORRECTED_RESPONSE: {corrected}")
+                context_parts.append(
+                    f"[{fname}] Question: {question}\nCORRECTED_RESPONSE: {corrected}"
+                )
             else:
                 context_parts.append(f"[{fname}]\n{vc.content[:2000]}")
             context_parts.append("")
@@ -1685,10 +2222,14 @@ async def ask_charlie(
                 dates = [d for d in dates if d]
                 if dates:
                     date_range = f"La période couverte va de {dates[-1][:10]} à {dates[0][:10]}."
-            context_parts.append(f"RÉSUMÉ DES EMAILS TROUVÉS EN BASE COURANTE ({len(rows)} email(s)) :")
+            context_parts.append(
+                f"RÉSUMÉ DES EMAILS TROUVÉS EN BASE COURANTE ({len(rows)} email(s)) :"
+            )
             context_parts.append(f"Catégories principales : {top_cats}. {date_range}")
             context_parts.append(f"Sujets les plus récents : {recent_text}.")
-            context_parts.append("Tu dois SYNTHÉTISER ces informations en 1-2 phrases pour Daniel. Ne liste pas les sujets un par un.")
+            context_parts.append(
+                "Tu dois SYNTHÉTISER ces informations en 1-2 phrases pour Daniel. Ne liste pas les sujets un par un."
+            )
             context_parts.append("")
     elif sql:
         context_parts.append("EMAILS BASE COURANTE : aucun email trouvé.")
@@ -1746,7 +2287,9 @@ async def ask_charlie(
                 dates = [d for d in dates if d]
                 if dates:
                     date_range = f"La période couverte va de {dates[-1][:10]} à {dates[0][:10]}."
-            context_parts.append(f"RÉSUMÉ DES EMAILS TROUVÉS EN ARCHIVES ({len(archive_rows)} email(s)) :")
+            context_parts.append(
+                f"RÉSUMÉ DES EMAILS TROUVÉS EN ARCHIVES ({len(archive_rows)} email(s)) :"
+            )
             context_parts.append(f"Catégories principales : {top_cats}. {date_range}")
             context_parts.append(f"Sujets les plus récents : {recent_text}.")
             context_parts.append("")
@@ -1759,7 +2302,9 @@ async def ask_charlie(
     if is_dossier_list:
         if dossier_list:
             total = len(dossier_list)
-            lines = [f"J'ai **{total}** dossier{'s' if total != 1 else ''} client{'s' if total != 1 else ''} ouvert{'s' if total != 1 else ''}."]
+            lines = [
+                f"J'ai **{total}** dossier{'s' if total != 1 else ''} client{'s' if total != 1 else ''} ouvert{'s' if total != 1 else ''}."
+            ]
             lines.append("")
             for d in dossier_list:
                 date_str = d.get("created_at", "")[:10]
@@ -1773,7 +2318,11 @@ async def ask_charlie(
             await _auto_save_fact(db_path, question, msg, dossier_id)
             return CharlieResult(
                 response_text=msg,
-                sql=sql, rows=rows, sql_safe=True, sql_error=None, vault_notes=vault_notes,
+                sql=sql,
+                rows=rows,
+                sql_safe=True,
+                sql_error=None,
+                vault_notes=vault_notes,
             )
         elif archive_rows:
             seen_ids: set[str] = set()
@@ -1784,19 +2333,27 @@ async def ask_charlie(
                     seen_ids.add(did)
                     dossier_ids_found.append(did)
             if dossier_ids_found:
-                lines = [f"J'ai identifié **{len(dossier_ids_found)}** dossier{'s' if len(dossier_ids_found) != 1 else ''} dans les archives historiques :"]
+                lines = [
+                    f"J'ai identifié **{len(dossier_ids_found)}** dossier{'s' if len(dossier_ids_found) != 1 else ''} dans les archives historiques :"
+                ]
                 lines.append("")
                 for did in dossier_ids_found[:30]:
                     lines.append(f"- **{did}**")
                 if len(dossier_ids_found) > 30:
                     lines.append(f"… et {len(dossier_ids_found) - 30} autres.")
                 lines.append("")
-                lines.append("_(Note : le registre Cerveau2 sera complet après les premières ingestions d'emails.)_")
+                lines.append(
+                    "_(Note : le registre Cerveau2 sera complet après les premières ingestions d'emails.)_"
+                )
                 msg = "\n".join(lines)
                 await _auto_save_fact(db_path, question, msg, dossier_id)
                 return CharlieResult(
                     response_text=msg,
-                    sql=sql, rows=rows, sql_safe=True, sql_error=None, vault_notes=vault_notes,
+                    sql=sql,
+                    rows=rows,
+                    sql_safe=True,
+                    sql_error=None,
+                    vault_notes=vault_notes,
                 )
 
     # Dossiers clients — comptage (Cerveau2 registry)
@@ -1894,7 +2451,13 @@ RÉPONSE :"""
 
             for attempt in (1, 2):
                 try:
-                    log.info("charlie.dossier_summary_llm_call", dossier_id=dossier_id, model=summary_model, attempt=attempt, prompt_len=len(dossier_prompt))
+                    log.info(
+                        "charlie.dossier_summary_llm_call",
+                        dossier_id=dossier_id,
+                        model=summary_model,
+                        attempt=attempt,
+                        prompt_len=len(dossier_prompt),
+                    )
                     response = await complete(
                         model=summary_model,
                         messages=[{"role": "user", "content": dossier_prompt}],
@@ -1902,10 +2465,22 @@ RÉPONSE :"""
                         temperature=0.3,
                     )
                     response = response.strip() if response else ""
-                    log.info("charlie.dossier_summary_llm_response", dossier_id=dossier_id, attempt=attempt, response_len=len(response), response_preview=response[:300])
+                    log.info(
+                        "charlie.dossier_summary_llm_response",
+                        dossier_id=dossier_id,
+                        attempt=attempt,
+                        response_len=len(response),
+                        response_preview=response[:300],
+                    )
                     # Garde anti-vide seulement — on laisse le LLM décider du format
                     if response and len(response) > 50:
-                        log.info("charlie.dossier_summary_ok", dossier_id=dossier_id, model=summary_model, attempt=attempt, len=len(response))
+                        log.info(
+                            "charlie.dossier_summary_ok",
+                            dossier_id=dossier_id,
+                            model=summary_model,
+                            attempt=attempt,
+                            len=len(response),
+                        )
                         await _auto_save_fact(db_path, question, response, dossier_id)
                         return CharlieResult(
                             response_text=response,
@@ -1916,14 +2491,21 @@ RÉPONSE :"""
                             vault_notes=vault_notes,
                             hide_rows=True,  # ← Masque le tableau SQL dans le chat
                         )
-                    log.warning("charlie.dossier_summary_too_short", attempt=attempt, preview=response[:300] if response else "(vide)")
+                    log.warning(
+                        "charlie.dossier_summary_too_short",
+                        attempt=attempt,
+                        preview=response[:300] if response else "(vide)",
+                    )
                 except Exception as e:
                     log.warning("charlie.dossier_summary_failed", attempt=attempt, error=str(e))
 
         # Dernier recours : message propre, jamais de tableau
         all_emails = (archive_rows or []) + (rows or [])
         all_emails.sort(key=lambda r: r.get("received_at", r.get("date", "")), reverse=True)
-        lines = [f"J'ai trouvé **{len(all_emails)}** email{'s' if len(all_emails) > 1 else ''} liés au dossier **{dossier_id}**, mais je n'ai pas pu les résumer automatiquement. Voici les sujets :", ""]
+        lines = [
+            f"J'ai trouvé **{len(all_emails)}** email{'s' if len(all_emails) > 1 else ''} liés au dossier **{dossier_id}**, mais je n'ai pas pu les résumer automatiquement. Voici les sujets :",
+            "",
+        ]
         for r in all_emails[:8]:
             subject = r.get("subject") or "Sans sujet"
             date = r.get("received_at") or r.get("date") or ""
@@ -1955,23 +2537,67 @@ RÉPONSE :"""
         if _is_identity_query(question):
             direct_answer = _extract_identity_answer(vault_notes, question)
             if direct_answer:
-                log.info("charlie.identity_direct_extract", question=question[:60], answer=direct_answer[:80])
+                log.info(
+                    "charlie.identity_direct_extract",
+                    question=question[:60],
+                    answer=direct_answer[:80],
+                )
 
         # 5b. Dossier par ville
-        if not direct_answer and ("dossier" in q_lower or "enquête" in q_lower) and any(v in q_lower for v in ("bruxelles", "brussels", "brussel", "waterloo", "namur", "liège", "anvers", "gent", "gand")):
-            ville_match = re.search(r"(?:à|a|sur|dans|en|pres de|proche de)\s+([A-Za-zÀ-Ÿ-]+)", question, re.IGNORECASE)
+        if (
+            not direct_answer
+            and ("dossier" in q_lower or "enquête" in q_lower)
+            and any(
+                v in q_lower
+                for v in (
+                    "bruxelles",
+                    "brussels",
+                    "brussel",
+                    "waterloo",
+                    "namur",
+                    "liège",
+                    "anvers",
+                    "gent",
+                    "gand",
+                )
+            )
+        ):
+            ville_match = re.search(
+                r"(?:à|a|sur|dans|en|pres de|proche de)\s+([A-Za-zÀ-Ÿ-]+)", question, re.IGNORECASE
+            )
             if ville_match:
-                direct_answer = _extract_dossier_par_ville(vault_notes, ville_match.group(1).strip())
+                direct_answer = _extract_dossier_par_ville(
+                    vault_notes, ville_match.group(1).strip()
+                )
                 if direct_answer:
-                    log.info("charlie.dossier_ville_direct", question=question[:60], answer=direct_answer[:80])
+                    log.info(
+                        "charlie.dossier_ville_direct",
+                        question=question[:60],
+                        answer=direct_answer[:80],
+                    )
 
         # 5c. Entreprise / siège / localisation
-        if not direct_answer and any(kw in _normalize(question) for kw in ("siege", "adresse", "localisation", "ou se trouve", "situe", "situer", "domicilie")):
+        if not direct_answer and any(
+            kw in _normalize(question)
+            for kw in (
+                "siege",
+                "adresse",
+                "localisation",
+                "ou se trouve",
+                "situe",
+                "situer",
+                "domicilie",
+            )
+        ):
             entreprise = _extract_entreprise_name(question)
             if entreprise:
                 direct_answer = _extract_entreprise_info(vault_notes, entreprise)
                 if direct_answer:
-                    log.info("charlie.entreprise_info_direct", question=question[:60], answer=direct_answer[:80])
+                    log.info(
+                        "charlie.entreprise_info_direct",
+                        question=question[:60],
+                        answer=direct_answer[:80],
+                    )
 
     if direct_answer:
         await _auto_save_fact(db_path, question, direct_answer, dossier_id)
@@ -1986,13 +2612,27 @@ RÉPONSE :"""
 
     # ── 6. Bypass LLM si Cerveau2 a déjà répondu de manière utile ──
     _BAD_VAULT = (
-        "je ne trouve pas", "pas trouvé", "aucune information",
-        "pas d'information", "aucune donnée", "aucun résultat",
-        "ne trouve pas d'information", "pas explicitement identifié",
-        "tu n'as pas", "pas posé de question", "dernier message",
-        "pas compris", "je ne comprends pas", "qu'est-ce que tu",
-        "on fait quoi", "je t'écoute", "pas de question", "question précise",
-        "pas de sujet", "pas de demande", "de quoi tu parles",
+        "je ne trouve pas",
+        "pas trouvé",
+        "aucune information",
+        "pas d'information",
+        "aucune donnée",
+        "aucun résultat",
+        "ne trouve pas d'information",
+        "pas explicitement identifié",
+        "tu n'as pas",
+        "pas posé de question",
+        "dernier message",
+        "pas compris",
+        "je ne comprends pas",
+        "qu'est-ce que tu",
+        "on fait quoi",
+        "je t'écoute",
+        "pas de question",
+        "question précise",
+        "pas de sujet",
+        "pas de demande",
+        "de quoi tu parles",
     )
 
     def _vault_tokens(text: str) -> set[str]:
@@ -2006,7 +2646,7 @@ RÉPONSE :"""
             # Stemming basique français
             for suffix in ("es", "s", "e", "er", "re", "é", "ée", "ées", "és"):
                 if w.endswith(suffix) and len(w) > len(suffix) + 2:
-                    w = w[:-len(suffix)]
+                    w = w[: -len(suffix)]
                     break
             if len(w) >= 3:
                 roots.add(w)
@@ -2018,27 +2658,91 @@ RÉPONSE :"""
         q_roots = _vault_tokens(q)
         # Stop-words à ignorer
         q_roots -= {
-            "moi", "vous", "dossier", "client", "question", "reponse",
-            "donne", "donner", "faire", "etre", "avoir", "aller", "comme",
-            "alors", "apres", "avant", "encore", "toujours", "jamais",
-            "toutes", "toute", "tous", "tout", "plusieurs", "quelques",
-            "beaucoup", "souvent", "parfois", "maintenant", "aujourd",
-            "hier", "demain", "matin", "soir", "jour", "semaine", "mois",
-            "annee", "temps", "heure", "minute", "avec", "depuis", "dans",
-            "pour", "sur", "sous", "entre", "contre", "vers", "chez",
-            "retrouv", "trouv", "retrouve", "trouve", "cherche", "chercher",
-            "liste", "lister", "montre", "montrer",
+            "moi",
+            "vous",
+            "dossier",
+            "client",
+            "question",
+            "reponse",
+            "donne",
+            "donner",
+            "faire",
+            "etre",
+            "avoir",
+            "aller",
+            "comme",
+            "alors",
+            "apres",
+            "avant",
+            "encore",
+            "toujours",
+            "jamais",
+            "toutes",
+            "toute",
+            "tous",
+            "tout",
+            "plusieurs",
+            "quelques",
+            "beaucoup",
+            "souvent",
+            "parfois",
+            "maintenant",
+            "aujourd",
+            "hier",
+            "demain",
+            "matin",
+            "soir",
+            "jour",
+            "semaine",
+            "mois",
+            "annee",
+            "temps",
+            "heure",
+            "minute",
+            "avec",
+            "depuis",
+            "dans",
+            "pour",
+            "sur",
+            "sous",
+            "entre",
+            "contre",
+            "vers",
+            "chez",
+            "retrouv",
+            "trouv",
+            "retrouve",
+            "trouve",
+            "cherche",
+            "chercher",
+            "liste",
+            "lister",
+            "montre",
+            "montrer",
         }
         ans_roots = _vault_tokens(vault_ans)
         return bool(q_roots and q_roots & ans_roots)
 
     vault_has_bad = vault_answer and any(p in vault_answer.lower() for p in _BAD_VAULT)
     vault_is_relevant = vault_answer and _vault_has_relevance(vault_answer, question)
-    log.info("charlie.vault_check", question=question[:60], has_answer=bool(vault_answer), bad=vault_has_bad, relevant=vault_is_relevant, rows=len(rows), archives=len(archive_rows), is_factual=is_factual_search)
+    log.info(
+        "charlie.vault_check",
+        question=question[:60],
+        has_answer=bool(vault_answer),
+        bad=vault_has_bad,
+        relevant=vault_is_relevant,
+        rows=len(rows),
+        archives=len(archive_rows),
+        is_factual=is_factual_search,
+    )
     if vault_has_bad or not vault_is_relevant:
-        log.info("charlie.vault_answer_skipped", question=question[:60],
-                 bad=vault_has_bad, relevant=vault_is_relevant,
-                 preview=vault_answer[:120] if vault_answer else "(vide)")
+        log.info(
+            "charlie.vault_answer_skipped",
+            question=question[:60],
+            bad=vault_has_bad,
+            relevant=vault_is_relevant,
+            preview=vault_answer[:120] if vault_answer else "(vide)",
+        )
 
     # ── 6.5 Guard anti-hallucination — si aucune source n'a de données ──
     if not vault_notes and not rows and not archive_rows and not vault_answer and not direct_answer:
@@ -2083,16 +2787,69 @@ RÉPONSE :"""
             digits_only = re.sub(r"\D", "", raw_num)
             if len(digits_only) >= 6:
                 q_keywords.add(digits_only)
-        q_keywords -= {"moi", "vous", "dossier", "client", "question", "reponse",
-                       "donne", "donner", "faire", "etre", "avoir", "aller", "comme",
-                       "alors", "apres", "avant", "encore", "toujours", "jamais",
-                       "toutes", "toute", "tous", "tout", "plusieurs", "quelques",
-                       "beaucoup", "souvent", "parfois", "maintenant", "aujourd",
-                       "hier", "demain", "matin", "soir", "jour", "semaine", "mois",
-                       "annee", "temps", "heure", "minute", "avec", "depuis", "dans",
-                       "pour", "sur", "sous", "entre", "contre", "vers", "chez",
-                       "retrouv", "trouv", "retrouve", "trouve", "cherche", "chercher",
-                       "liste", "lister", "montre", "montrer", "donne", "donner"}
+        q_keywords -= {
+            "moi",
+            "vous",
+            "dossier",
+            "client",
+            "question",
+            "reponse",
+            "donne",
+            "donner",
+            "faire",
+            "etre",
+            "avoir",
+            "aller",
+            "comme",
+            "alors",
+            "apres",
+            "avant",
+            "encore",
+            "toujours",
+            "jamais",
+            "toutes",
+            "toute",
+            "tous",
+            "tout",
+            "plusieurs",
+            "quelques",
+            "beaucoup",
+            "souvent",
+            "parfois",
+            "maintenant",
+            "aujourd",
+            "hier",
+            "demain",
+            "matin",
+            "soir",
+            "jour",
+            "semaine",
+            "mois",
+            "annee",
+            "temps",
+            "heure",
+            "minute",
+            "avec",
+            "depuis",
+            "dans",
+            "pour",
+            "sur",
+            "sous",
+            "entre",
+            "contre",
+            "vers",
+            "chez",
+            "retrouv",
+            "trouv",
+            "retrouve",
+            "trouve",
+            "cherche",
+            "chercher",
+            "liste",
+            "lister",
+            "montre",
+            "montrer",
+        }
         for r in (rows or []) + (archive_rows or []):
             subject = (r.get("subject") or "").lower()
             body = (r.get("body") or r.get("body_preview") or "").lower()
@@ -2140,12 +2897,17 @@ RÉPONSE À DANIEL :"""
             top_cats = ", ".join(f"{k} ({v})" for k, v in cat_counts.most_common(3))
             recent_subjects = [r.get("subject", "Sans sujet") for r in all_rows[:3]]
             recent_text = " ; ".join(recent_subjects)
-            dates = [r.get("received_at") or r.get("processed_at") or r.get("date") or "" for r in all_rows]
+            dates = [
+                r.get("received_at") or r.get("processed_at") or r.get("date") or ""
+                for r in all_rows
+            ]
             dates = [d for d in dates if d]
             date_range = ""
             if dates:
                 date_range = f"Période : {dates[-1][:10]} à {dates[0][:10]}."
-            email_block = f"Catégories principales : {top_cats}. {date_range} Sujets récents : {recent_text}."
+            email_block = (
+                f"Catégories principales : {top_cats}. {date_range} Sujets récents : {recent_text}."
+            )
         else:
             email_block = "Aucun email trouvé en base pour cette recherche."
         final_prompt = f"""Tu es Charlie, l'assistant de Daniel Hurchon (Detective.be). Version {VERSION}.
@@ -2164,9 +2926,13 @@ RÉPONSE À DANIEL :"""
         if vault_answer and not vault_has_bad and vault_is_relevant:
             vault_context = f"RÉPONSE DU SECOND CERVEAU (Cerveau2-Det) :\n{vault_answer.strip()}\n\n---\n\n{context}"
         elif vault_answer and (vault_has_bad or not vault_is_relevant):
-            log.info("charlie.vault_context_purged", question=question[:60],
-                     bad=vault_has_bad, relevant=vault_is_relevant,
-                     preview=vault_answer[:120] if vault_answer else "(vide)")
+            log.info(
+                "charlie.vault_context_purged",
+                question=question[:60],
+                bad=vault_has_bad,
+                relevant=vault_is_relevant,
+                preview=vault_answer[:120] if vault_answer else "(vide)",
+            )
         final_prompt = f"""Tu es Charlie, l'assistant IA personnel de Daniel Hurchon, détective privé chez Detective.be. Version {VERSION}.
 Tu t'adresses à Daniel comme à un partenaire : direct, chaleureux, sans langue de bois. Utilise "tu".
 
@@ -2204,12 +2970,23 @@ RÉPONSE À DANIEL :"""
     # Garde : réponse vide OU refus explicite alors qu'on a des données → réponse de secours
     # On ne court-circuite PAS le LLM pour "mauvais format" — le secours Python est encore pire.
     _BAD_RESPONSE = _BAD_VAULT + (
-        "je n'ai pas trouvé", "aucun résultat", "aucune information",
-        "je ne trouve pas", "pas d'information", "aucune donnée",
+        "je n'ai pas trouvé",
+        "aucun résultat",
+        "aucune information",
+        "je ne trouve pas",
+        "pas d'information",
+        "aucune donnée",
     )
     is_bad_response = any(p in response.lower() for p in _BAD_RESPONSE)
     if not response or (is_bad_response and (rows or archive_rows)):
-        log.info("charlie.llm_guard_triggered", question=question[:60], empty=not response, bad_response=is_bad_response, rows=len(rows), archives=len(archive_rows))
+        log.info(
+            "charlie.llm_guard_triggered",
+            question=question[:60],
+            empty=not response,
+            bad_response=is_bad_response,
+            rows=len(rows),
+            archives=len(archive_rows),
+        )
         response = ""
     if not response:
         if is_factual and vault_answer and not vault_has_bad and vault_is_relevant:
@@ -2225,7 +3002,11 @@ RÉPONSE À DANIEL :"""
                 f"Les sujets récents portent sur : {', '.join(subjects)}."
             )
         elif is_count_request and (rows or archive_rows):
-            sql_cnt = int(next(iter(rows[0].values()))) if rows and len(rows) == 1 and len(rows[0]) == 1 else 0
+            sql_cnt = (
+                int(next(iter(rows[0].values())))
+                if rows and len(rows) == 1 and len(rows[0]) == 1
+                else 0
+            )
             arc_cnt = len(archive_rows)
             total = sql_cnt + arc_cnt
             if sql_cnt == 0 and arc_cnt > 0:
@@ -2234,7 +3015,9 @@ RÉPONSE À DANIEL :"""
             if arc_cnt > 0 and sql_cnt == 0:
                 response += " (tous dans les archives historiques)"
         elif is_list_request and archive_rows:
-            lines = [f"J'ai trouvé **{len(archive_rows)}** email{'s' if len(archive_rows) > 1 else ''} dans les archives pour {dossier_id or 'cette période'} :"]
+            lines = [
+                f"J'ai trouvé **{len(archive_rows)}** email{'s' if len(archive_rows) > 1 else ''} dans les archives pour {dossier_id or 'cette période'} :"
+            ]
             for r in archive_rows[:25]:
                 subject = r.get("subject") or "Sans sujet"
                 date = r.get("received_at") or r.get("date") or ""
@@ -2252,7 +3035,10 @@ RÉPONSE À DANIEL :"""
             top_cats = ", ".join(f"{k} ({v})" for k, v in cat_counts.most_common(3))
             recent_subjects = [r.get("subject", "Sans sujet") for r in all_rows[:3]]
             recent_text = " ; ".join(recent_subjects)
-            dates = [r.get("received_at") or r.get("processed_at") or r.get("date") or "" for r in all_rows]
+            dates = [
+                r.get("received_at") or r.get("processed_at") or r.get("date") or ""
+                for r in all_rows
+            ]
             dates = [d for d in dates if d]
             date_range = ""
             if dates:
@@ -2277,6 +3063,7 @@ RÉPONSE À DANIEL :"""
         archive_rows=archive_rows,
     )
 
+
 def _needs_summary(question: str) -> bool:
     q = _normalize(question)
     return any(kw in q for kw in _NEEDS_SUMMARY_KEYWORDS)
@@ -2288,10 +3075,31 @@ def _is_count_query(sql: str) -> bool:
 
 
 _VAULT_KEYWORDS = (
-    "dossier", "affaire", "client", "personne", "entite", "societe", "lieu",
-    "adresse", "telephone", "contact", "facture", "devis", "historique",
-    "archive", "detail", "info", "synthese", "resume", "lien", "relation",
-    "conjoint", "famille", "proche", "employeur", "entreprise",
+    "dossier",
+    "affaire",
+    "client",
+    "personne",
+    "entite",
+    "societe",
+    "lieu",
+    "adresse",
+    "telephone",
+    "contact",
+    "facture",
+    "devis",
+    "historique",
+    "archive",
+    "detail",
+    "info",
+    "synthese",
+    "resume",
+    "lien",
+    "relation",
+    "conjoint",
+    "famille",
+    "proche",
+    "employeur",
+    "entreprise",
 )
 
 
@@ -2302,9 +3110,7 @@ def _is_vault_relevant(question: str, sql: str) -> bool:
     return any(kw in q for kw in _VAULT_KEYWORDS)
 
 
-_IDENTITY_NAME_RE = re.compile(
-    r"[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?"
-)
+_IDENTITY_NAME_RE = re.compile(r"[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?")
 
 _EMAIL_RE = re.compile(r"[\w\.-]+@[\w\.-]+\.\w+")
 
@@ -2325,7 +3131,7 @@ def _extract_dossier_par_ville(vault_notes: list[VaultNote], ville: str) -> str 
     Parse le YAML frontmatter et le corps markdown pour trouver un dossier
     associé à la ville cherchée. Retourne un message formaté ou None.
     """
-    import json
+
     ville_norm = ville.lower().strip()
     # Variantes de la ville
     variants = {ville_norm}
@@ -2348,7 +3154,7 @@ def _extract_dossier_par_ville(vault_notes: list[VaultNote], ville: str) -> str 
 
         # 2. Cherche dans le corps markdown : **Dossier** : NOM
         if not dossier_name:
-            m = re.search(r'\*\*Dossier\*\*\s*:\s*(\S+)', content)
+            m = re.search(r"\*\*Dossier\*\*\s*:\s*(\S+)", content)
             if m:
                 dossier_name = m.group(1)
 
@@ -2373,7 +3179,10 @@ def _extract_dossier_par_ville(vault_notes: list[VaultNote], ville: str) -> str 
 
     if len(unique) == 1:
         return f"Le dossier **{unique[0][0]}** se déroule à **{ville.capitalize()}**."
-    lines = [f"J'ai trouvé **{len(unique)}** dossiers se déroulant à **{ville.capitalize()}** :", ""]
+    lines = [
+        f"J'ai trouvé **{len(unique)}** dossiers se déroulant à **{ville.capitalize()}** :",
+        "",
+    ]
     for d, p in unique:
         lines.append(f"- **{d}**")
     return "\n".join(lines)
@@ -2388,14 +3197,27 @@ def _extract_entreprise_name(question: str) -> str | None:
     - "entreprise XXXX"
     """
     q_norm = _normalize(question)
-    keywords = ("siege", "adresse", "localisation", "ou se trouve", "domiciliee", "domicilie", "entreprise", "situe", "situee", "situer", "ou se situe")
+    keywords = (
+        "siege",
+        "adresse",
+        "localisation",
+        "ou se trouve",
+        "domiciliee",
+        "domicilie",
+        "entreprise",
+        "situe",
+        "situee",
+        "situer",
+        "ou se situe",
+    )
     if not any(kw in q_norm for kw in keywords):
         return None
 
     # Cherche "de/d' XXXX" dans la question originale (conserve les majuscules)
     m = re.search(
         r"(?:de|d')\s+([A-Z][A-Za-z0-9\s&\.\-]{2,}?)(?=\?|\.|,|$|\s+(?:sa|sarl|bvba|nv|sprl|asbl|scs|sca|scrl|à|a|en|dans|et|ou|qui|dont))",
-        question, re.IGNORECASE,
+        question,
+        re.IGNORECASE,
     )
     if m:
         name = m.group(1).strip()
@@ -2405,7 +3227,30 @@ def _extract_entreprise_name(question: str) -> str | None:
     # Fallback : acronyme en majuscules isolé (3+ lettres)
     for m in re.finditer(r"\b([A-Z]{3,})\b", question):
         code = m.group(1)
-        if code not in ("SQL", "OK", "HTTP", "API", "URL", "HTML", "XML", "JSON", "DPDH", "AI", "VPS", "SMTP", "IMAP", "DNS", "CEO", "CFO", "COO", "SARL", "SA", "SCRL", "BVBA", "SPRL"):
+        if code not in (
+            "SQL",
+            "OK",
+            "HTTP",
+            "API",
+            "URL",
+            "HTML",
+            "XML",
+            "JSON",
+            "DPDH",
+            "AI",
+            "VPS",
+            "SMTP",
+            "IMAP",
+            "DNS",
+            "CEO",
+            "CFO",
+            "COO",
+            "SARL",
+            "SA",
+            "SCRL",
+            "BVBA",
+            "SPRL",
+        ):
             return code
     return None
 
@@ -2425,7 +3270,14 @@ def _extract_entreprise_info(vault_notes: list[VaultNote], entreprise: str) -> s
     if len(parts) > 1:
         variants.add(parts[0])
 
-    DANIEL_SIGNATURE_MARKERS = ("detectivebelgique", "daniel hurchon", "0779.433.503", "chaussée bara")
+    DANIEL_SIGNATURE_MARKERS = (
+        "detectivebelgique",
+        "detectivesbelgique",
+        "detectives-belgique",
+        "daniel hurchon",
+        "0779.433.503",
+        "chaussée bara",
+    )
 
     def _is_daniel_signature(text: str) -> bool:
         t = text.lower()
@@ -2474,7 +3326,9 @@ def _extract_entreprise_info(vault_notes: list[VaultNote], entreprise: str) -> s
         for email_match in re.finditer(r"[\w\.-]+@[\w\.-]+\.[a-z]{2,}", content):
             email = email_match.group(0)
             e_lower = email.lower()
-            if any(v in e_lower for v in variants) or ent_norm.replace(" ", "") in e_lower.replace("-", "").replace(".", ""):
+            if any(v in e_lower for v in variants) or ent_norm.replace(" ", "") in e_lower.replace(
+                "-", ""
+            ).replace(".", ""):
                 contact_emails.add(email)
             # Si l'entreprise est ADF Group, tout @groupeadf.com est pertinent
             if "groupeadf" in e_lower and "adf" in ent_norm:
@@ -2488,7 +3342,9 @@ def _extract_entreprise_info(vault_notes: list[VaultNote], entreprise: str) -> s
                 contact_phones.add(raw.strip())
 
         # Noms de contact : lignes "M./Mme XXX" ou signatures
-        for name_match in re.finditer(r"(?:M\.|Mme|Mr|Mrs|Dr)\s+([A-Z][a-zA-Z\-]+(?:\s+[A-Z][a-zA-Z\-]+)?)", content):
+        for name_match in re.finditer(
+            r"(?:M\.|Mme|Mr|Mrs|Dr)\s+([A-Z][a-zA-Z\-]+(?:\s+[A-Z][a-zA-Z\-]+)?)", content
+        ):
             contact_names.add(name_match.group(0).strip())
 
         # Adresse postale en texte brut — plusieurs patterns
@@ -2537,7 +3393,10 @@ def _extract_entreprise_info(vault_notes: list[VaultNote], entreprise: str) -> s
                 return f"Pour **{info.get('nom', entreprise)}**, {', '.join(parts_msg)}."
             return f"J'ai trouvé **{info.get('nom', entreprise)}** dans le vault, mais sans détail de localisation."
 
-        lines = [f"J'ai trouvé **{len(unique)}** entreprises correspondant à **{entreprise}** :", ""]
+        lines = [
+            f"J'ai trouvé **{len(unique)}** entreprises correspondant à **{entreprise}** :",
+            "",
+        ]
         for info in unique:
             nom = info.get("nom", entreprise)
             siege = info.get("siege") or info.get("siège") or info.get("ville")
@@ -2576,11 +3435,20 @@ def _extract_identity_answer(vault_notes: list[VaultNote], question: str) -> str
     relation: str | None = None
     target_person: str | None = None
     for kw, rel in (
-        ("epouse", "épouse"), ("femme", "femme"), ("mari", "mari"),
-        ("conjoint", "conjoint"), ("compagne", "compagne"), ("compagnon", "compagnon"),
-        ("fille", "fille"), ("fils", "fils"), ("enfant", "enfant"),
-        ("pere", "père"), ("mere", "mère"), ("parent", "parent"),
-        ("soeur", "sœur"), ("frere", "frère"),
+        ("epouse", "épouse"),
+        ("femme", "femme"),
+        ("mari", "mari"),
+        ("conjoint", "conjoint"),
+        ("compagne", "compagne"),
+        ("compagnon", "compagnon"),
+        ("fille", "fille"),
+        ("fils", "fils"),
+        ("enfant", "enfant"),
+        ("pere", "père"),
+        ("mere", "mère"),
+        ("parent", "parent"),
+        ("soeur", "sœur"),
+        ("frere", "frère"),
     ):
         if kw in q_norm:
             relation = rel
@@ -2597,13 +3465,20 @@ def _extract_identity_answer(vault_notes: list[VaultNote], question: str) -> str
 
     # --- NOUVEAU : parser le frontmatter pour suivre les wikilinks relationnels ---
     relation_keys = {
-        "épouse": {"epouse", "femme"}, "femme": {"epouse", "femme"},
+        "épouse": {"epouse", "femme"},
+        "femme": {"epouse", "femme"},
         "mari": {"mari", "conjoint", "compagnon"},
         "conjoint": {"conjoint", "epouse", "mari", "compagne", "compagnon"},
-        "compagne": {"compagne", "epouse", "conjoint"}, "compagnon": {"compagnon", "mari", "conjoint"},
-        "fille": {"fille", "enfant"}, "fils": {"fils", "enfant"}, "enfant": {"enfant", "fille", "fils"},
-        "père": {"pere", "parent"}, "mère": {"mere", "parent"}, "parent": {"parent", "pere", "mere"},
-        "sœur": {"soeur"}, "frère": {"frere"},
+        "compagne": {"compagne", "epouse", "conjoint"},
+        "compagnon": {"compagnon", "mari", "conjoint"},
+        "fille": {"fille", "enfant"},
+        "fils": {"fils", "enfant"},
+        "enfant": {"enfant", "fille", "fils"},
+        "père": {"pere", "parent"},
+        "mère": {"mere", "parent"},
+        "parent": {"parent", "pere", "mere"},
+        "sœur": {"soeur"},
+        "frère": {"frere"},
     }
     expected_keys = relation_keys.get(relation, {relation.lower()})
     link_pattern = re.compile(r"\[\[([^\]\n]+?)\]\]")
@@ -2639,7 +3514,9 @@ def _extract_identity_answer(vault_notes: list[VaultNote], question: str) -> str
                         if hm:
                             return f"La {relation} de {target_person or 'CDAL'} est **{hm.group(1).strip()}**."
                         # Fallback : nom de fichier
-                        fname = linked.path.split("/")[-1].replace(".md", "").replace("-", " ").title()
+                        fname = (
+                            linked.path.split("/")[-1].replace(".md", "").replace("-", " ").title()
+                        )
                         return f"La {relation} de {target_person or 'CDAL'} est **{fname}**."
 
     # Concaténer tout le contenu des notes
@@ -2668,7 +3545,18 @@ def _extract_identity_answer(vault_notes: list[VaultNote], question: str) -> str
             if m:
                 name = m.group(1).strip()
                 # Filtrer les faux positifs (mots communs)
-                if name.lower() in ("lui", "elle", "moi", "toi", "nous", "vous", "personne", "rien", "tout", "tous"):
+                if name.lower() in (
+                    "lui",
+                    "elle",
+                    "moi",
+                    "toi",
+                    "nous",
+                    "vous",
+                    "personne",
+                    "rien",
+                    "tout",
+                    "tous",
+                ):
                     continue
                 return f"La {relation} de {target_person or 'CDAL'} s'appelle **{name}**."
         except re.error:
@@ -2680,7 +3568,9 @@ def _extract_identity_answer(vault_notes: list[VaultNote], question: str) -> str
     for i, tok in enumerate(tokens):
         tok_lower = tok.lower()
         # Match relation (ex: épouse, femme, mari)
-        if tok_lower == relation or (relation == "conjoint" and tok_lower in ("conjoint", "conjointe")):
+        if tok_lower == relation or (
+            relation == "conjoint" and tok_lower in ("conjoint", "conjointe")
+        ):
             # Chercher un nom propre majuscule dans une fenêtre de ±8 tokens
             for j in range(max(0, i - 8), min(len(tokens), i + 9)):
                 if j == i:
@@ -2689,24 +3579,75 @@ def _extract_identity_answer(vault_notes: list[VaultNote], question: str) -> str
                 if candidate[0].isupper() and len(candidate) > 2:
                     # Vérifier que ce n'est pas un mot commun majuscule
                     if candidate.lower() not in (
-                        "detective", "belgique", "belgium", "investigations",
-                        "digitalhs", "infomaniak", "gmail", "outlook", "yahoo",
-                        "lundi", "mardi", "mercredi", "jeudi", "vendredi",
-                        "samedi", "dimanche", "janvier", "fevrier", "mars",
-                        "avril", "mai", "juin", "juillet", "aout", "septembre",
-                        "octobre", "novembre", "decembre",
-                        "monsieur", "madame", "mademoiselle", "docteur", "maitre",
+                        "detective",
+                        "belgique",
+                        "belgium",
+                        "investigations",
+                        "digitalhs",
+                        "infomaniak",
+                        "gmail",
+                        "outlook",
+                        "yahoo",
+                        "lundi",
+                        "mardi",
+                        "mercredi",
+                        "jeudi",
+                        "vendredi",
+                        "samedi",
+                        "dimanche",
+                        "janvier",
+                        "fevrier",
+                        "mars",
+                        "avril",
+                        "mai",
+                        "juin",
+                        "juillet",
+                        "aout",
+                        "septembre",
+                        "octobre",
+                        "novembre",
+                        "decembre",
+                        "monsieur",
+                        "madame",
+                        "mademoiselle",
+                        "docteur",
+                        "maitre",
                     ):
-                        return f"La {relation} de {target_person or 'CDAL'} s'appelle **{candidate}**."
+                        return (
+                            f"La {relation} de {target_person or 'CDAL'} s'appelle **{candidate}**."
+                        )
 
     return None
 
 
 _IDENTITY_KEYWORDS = (
-    "qui", "personne", "nom", "prenom", "client", "contact", "sappelle",
-    "epouse", "mari", "conjoint", "femme", "compagne", "compagnon",
-    "fille", "fils", "enfant", "bebe", "pere", "mere", "parent",
-    "soeur", "frere", "famille", "cousin", "cousine", "oncle", "tante",
+    "qui",
+    "personne",
+    "nom",
+    "prenom",
+    "client",
+    "contact",
+    "sappelle",
+    "epouse",
+    "mari",
+    "conjoint",
+    "femme",
+    "compagne",
+    "compagnon",
+    "fille",
+    "fils",
+    "enfant",
+    "bebe",
+    "pere",
+    "mere",
+    "parent",
+    "soeur",
+    "frere",
+    "famille",
+    "cousin",
+    "cousine",
+    "oncle",
+    "tante",
 )
 
 
@@ -2716,7 +3657,10 @@ def _is_identity_query(question: str) -> bool:
 
 
 async def _auto_save_fact(
-    db_path: Path, question: str, response: str, dossier_id: str | None,
+    db_path: Path,
+    question: str,
+    response: str,
+    dossier_id: str | None,
 ) -> None:
     """Stocke automatiquement les faits identitaires dans la mémoire de Charlie."""
     if not response or len(response) < 10:
@@ -2724,9 +3668,13 @@ async def _auto_save_fact(
     norm_resp = _normalize(response)
     # Skip réponses d'erreur / vide / temporaires
     skip_phrases = (
-        "aucun email", "erreur sql", "charlie est momentanement",
-        "reessaie dans un instant", "aucun dossier trouve",
-        "reponse context_only", "reponse zone_rouge",
+        "aucun email",
+        "erreur sql",
+        "charlie est momentanement",
+        "reessaie dans un instant",
+        "aucun dossier trouve",
+        "reponse context_only",
+        "reponse zone_rouge",
     )
     if any(p in norm_resp for p in skip_phrases):
         return
@@ -2902,7 +3850,9 @@ async def _summarize_results(
     # statistiques, etc.), la correction reste un contexte PRIORITAIRE
     # dans le prompt mais laisse le LLM synthétiser avec les résultats SQL.
     if correction_notes and _is_identity_query(question):
-        log.info("charlie.correction_bypass", question=question[:60], corrections=len(correction_notes))
+        log.info(
+            "charlie.correction_bypass", question=question[:60], corrections=len(correction_notes)
+        )
         latest = correction_notes[0]
         return latest.response.strip()
 
@@ -2923,8 +3873,28 @@ async def _summarize_results(
 
     # Bypass LLM pour les questions "dossier à VILLE" : extraction directe du vault
     q_lower = question.lower()
-    if not has_sql and vault_notes and ("dossier" in q_lower or "enquête" in q_lower) and any(v in q_lower for v in ("bruxelles", "brussels", "brussel", "waterloo", "namur", "liège", "anvers", "gent", "gand")):
-        ville_match = re.search(r"(?:à|a|sur|dans|en|pres de|proche de)\s+([A-Za-zÀ-Ÿ-]+)", question, re.IGNORECASE)
+    if (
+        not has_sql
+        and vault_notes
+        and ("dossier" in q_lower or "enquête" in q_lower)
+        and any(
+            v in q_lower
+            for v in (
+                "bruxelles",
+                "brussels",
+                "brussel",
+                "waterloo",
+                "namur",
+                "liège",
+                "anvers",
+                "gent",
+                "gand",
+            )
+        )
+    ):
+        ville_match = re.search(
+            r"(?:à|a|sur|dans|en|pres de|proche de)\s+([A-Za-zÀ-Ÿ-]+)", question, re.IGNORECASE
+        )
         if ville_match:
             ville = ville_match.group(1).strip()
             direct = _extract_dossier_par_ville(vault_notes, ville)
@@ -2933,13 +3903,31 @@ async def _summarize_results(
                 return direct
 
     # Bypass LLM pour les questions "siège / adresse / localisation d'entreprise"
-    if not has_sql and vault_notes and any(kw in q_lower for kw in ("siege", "adresse", "localisation", "ou se trouve", "où se trouve", "situe", "situer", "domicilie")):
+    if (
+        not has_sql
+        and vault_notes
+        and any(
+            kw in q_lower
+            for kw in (
+                "siege",
+                "adresse",
+                "localisation",
+                "ou se trouve",
+                "où se trouve",
+                "situe",
+                "situer",
+                "domicilie",
+            )
+        )
+    ):
         # Extraire le nom d'entreprise potentiel
         entreprise = _extract_entreprise_name(question)
         if entreprise:
             direct = _extract_entreprise_info(vault_notes, entreprise)
             if direct:
-                log.info("charlie.entreprise_info_direct", question=question[:60], answer=direct[:80])
+                log.info(
+                    "charlie.entreprise_info_direct", question=question[:60], answer=direct[:80]
+                )
                 return direct
 
     # Prompt spécifique si SQL vide mais vault a trouvé la réponse

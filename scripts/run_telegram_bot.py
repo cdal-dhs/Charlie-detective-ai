@@ -1,6 +1,6 @@
 """Script de démarrage du bot Telegram seul."""
+
 import asyncio
-import sys
 
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
@@ -9,11 +9,15 @@ from app.config import get_settings
 
 settings = get_settings()
 
+
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Bonjour ! Charlie est en ligne.")
 
+
 async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Agent opérationnel. Polling actif sur 3 boîtes.")
+    n = len(settings.mailboxes())
+    await update.message.reply_text(f"Agent opérationnel. Polling actif sur {n} boîtes.")
+
 
 async def main():
     app = Application.builder().token(settings.telegram_bot_token).build()
@@ -26,8 +30,10 @@ async def main():
 
     print("Bot polling started...")
     import time
+
     while True:
         time.sleep(1)
+
 
 if __name__ == "__main__":
     asyncio.run(main())

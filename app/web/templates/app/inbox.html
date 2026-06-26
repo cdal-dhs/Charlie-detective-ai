@@ -59,13 +59,12 @@
         hx-trigger="submit">
     <!-- Boîtes : checkboxes côte à côte -->
     <div class="flex items-center gap-4">
-      {% set box_labels = {'detective_belgique': 'Detective Belgique', 'detective_belgium': 'Detective Belgium', 'dpdh_investigations': 'DPDH'} %}
       {% for mb in mailboxes %}
         <label class="flex items-center gap-2 text-sm cursor-pointer select-none">
-          <input type="checkbox" value="{{ mb }}" x-model="boxes"
+          <input type="checkbox" value="{{ mb.name }}" x-model="boxes"
                  class="accent-blue-500 w-4 h-4 rounded border-gray-600 bg-gray-900"
                  @change="document.getElementById('filter-box').value = boxes.join(','); htmx.trigger('#filter-form', 'submit')">
-          <span>{{ box_labels.get(mb, mb) }}</span>
+          <span>{{ mb.brand }}</span>
         </label>
       {% endfor %}
       <input type="hidden" name="box" id="filter-box" :value="boxes.join(',')">
