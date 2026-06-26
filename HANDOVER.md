@@ -551,11 +551,12 @@ Intégration de la 4ème boîte `info@detectives-belgique.be` chez OVH (`ex5.mai
    - **Risque** : doublons de brouillons OVH si le réconcilieur et la vérification post-APPEND ne parviennent pas à identifier le brouillon par header. Surveiller `Brouillons` OVH.
 
 2. **Cerveau2 rejette la nouvelle marque `detectivesbelgique` et le type `fiche_entreprise`**  
-   Réponses API 422 observées en prod :
-   - `"Input should be 'detectivebelgique', 'detectivebelgium' or 'dpdhu'"` pour le champ `marque`.
-   - `"Input should be 'document', 'note', 'correspondance' or 'fiche_contact'"` pour le champ `type` (le code Charlie envoie `fiche_entreprise`).
-   - **Impact** : l'ingestion 100% emails + PJ de la boîte OVH échoue silencieusement côté Cerveau2 (pas de crash Charlie, mais données absentes du vault). C'est une régression partielle de la règle "zéro tolérance sur le skip".
-   - **Action** : corriger côté serveur Cerveau2 (ajouter `detectivesbelgique` dans l'enum `marque` + accepter/corriger `fiche_entreprise`) OU mapper temporairement côté Charlie (ex. `detectivesbelgique` → `detectivebelgium` et `fiche_entreprise` → `fiche_contact`).
+   ✅ **Corrigé v0.8.3** — déployé sur `cerveau2-det.digitalhs.biz` le 2026-06-26.
+   - Réponses API 422 observées en prod :
+     - `"Input should be 'detectivebelgique', 'detectivebelgium' or 'dpdhu'"` pour le champ `marque`.
+     - `"Input should be 'document', 'note', 'correspondance' or 'fiche_contact'"` pour le champ `type` (le code Charlie envoie `fiche_entreprise`).
+   - **Fix** : `api/models.py` — ajout de `"detectivesbelgique"` dans les `Literal` `marque` de `IngestEmailRequest` et `IngestNoteRequest`, ajout de `"fiche_entreprise"` dans le `Literal` `type`. Mise à jour de la doc `GET /dossiers` dans `api/routes/dossiers.py`. Tests manuels en conteneur (`/ingest-email` + `/ingest-note`) → **200 OK**.
+   - **Incident sous-jacent découvert et corrigé** : le backup automatique du vault (`scripts/backup-vault.sh`) avait supprimé TOUS les fichiers source de la branche `main` de Cerveau2 sur GitHub (bug ligne 32 `git reset --soft origin/$BRANCH` + `git pull`). Le script a été corrigé pour pusher le vault sur une branche dédiée `vault-backups` et ne jamais toucher à `main`. Le repo source a été restauré en v0.8.3.
 
 **Mémoire dédiée** : [[ovh-imap-search-quirks]].
 
