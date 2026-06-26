@@ -21,7 +21,9 @@ import pytest
 from app.workers.imap_poller import (
     AGENT_ATTEMPTED_FLAG,
     AGENT_FLAG,
+    _build_search_criteria,
     _decode_header,
+    _is_badcharset,
     _is_client_followup,
     _persist,
     _process_single_mail,
@@ -749,3 +751,27 @@ def test_is_client_followup_quote_without_daniel_signature_is_not_shortcut(tmp_p
     )
     msg = _make_followup_msg(subject="Re: Demande", body=body, in_reply_to="<x@y>")
     assert _is_client_followup(db, "client@example.com", msg) is False
+
+
+# --- v1.27.0 - fallback SEARCH charset US-ASCII pour OVH ---
+
+
+def test_is_badcharset_detects_badcharset_response():
+    """OVH renvoie [BADCHARSET (US-ASCII)] -> _is_badcharset doit le détecter."""
+    resp = MagicMock()
+    resp.lines = [b"[BADCHARSET (US-ASCII)] The specified charset is not supported."]
+    assert _is_badcharset(resp) is True
+
+
+def test_is_badcharset_false_on_ok_response():
+    """Réponse SEARCH normale -> pas de BADCHARSET."""
+    resp = MagicMock()
+    resp.lines = [b"1 2 3", b"SEARCH completed."]
+    assert _is_badcharset(resp) is False
+
+
+def test_build_search_criteria_uses_agent_flag():
+    """Le critère SEARCH utilise UNKEYWORD AgentProcessed."""
+    settings = MagicMock()
+    settings.process_since_date = ""
+    assert _build_search_criteria(settings) == "UNKEYWORD AgentProcessed"

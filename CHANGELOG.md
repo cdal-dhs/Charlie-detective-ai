@@ -1,5 +1,26 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.27.1] — 2026-06-26 (hotfix SEARCH OVH — charset US-ASCII)
+
+### Contexte
+Déploiement de la v1.27.0 en prod : la 4ème boîte OVH (`ex5.mail.ovh.net`)
+a immédiatement rejeté la commande `SEARCH UNKEYWORD AgentProcessed` avec
+`[BADCHARSET (US-ASCII)] The specified charset is not supported.`.
+Le serveur OVH n'accepte pas le charset UTF-8 implicite pour SEARCH, contrairement
+à Infomaniak. Les 3 premières boîtes continuaient de fonctionner.
+
+### Fixé
+- **`app/workers/imap_poller.py`** : ajout d'un fallback `charset="us-ascii"`
+  quand `client.search()` renvoie une réponse `[BADCHARSET]`. Détection via
+  `_is_badcharset()`.
+- **Tests** : 3 tests ajoutés dans `tests/test_imap_poller_resilience.py`
+  (`_is_badcharset`, `_build_search_criteria`).
+
+### Changé
+- `app/_version.py` : `VERSION = "1.27.1"`.
+
+---
+
 ## [1.27.0] — 2026-06-26 (ajout 4ème boîte mail OVH — detectives-belgique.be)
 
 ### Contexte

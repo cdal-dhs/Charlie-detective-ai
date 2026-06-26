@@ -1020,6 +1020,15 @@ def _build_search_criteria(settings) -> str:
     return f"UNKEYWORD {AGENT_FLAG}"
 
 
+def _is_badcharset(resp) -> bool:
+    """Détecte une réponse IMAP [BADCHARSET] dans une réponse SEARCH."""
+    for line in getattr(resp, "lines", []) or []:
+        text = line.decode("utf-8", errors="ignore") if isinstance(line, bytes) else str(line)
+        if "BADCHARSET" in text.upper():
+            return True
+    return False
+
+
 async def _process_mailbox(mailbox: MailboxConfig) -> None:
     settings = get_settings()
     client = aioimaplib.IMAP4_SSL(mailbox.imap_host, mailbox.imap_port)
@@ -1037,6 +1046,16 @@ async def _process_mailbox(mailbox: MailboxConfig) -> None:
 
         search_criteria = _build_search_criteria(settings)
         search_resp = await client.search(search_criteria)
+        # v1.27.0 — OVH ex5.mail.ovh.net ne supporte pas le charset UTF-8 implicite
+        # pour SEARCH (répond [BADCHARSET (US-ASCII)]). On retente en US-ASCII.
+        if search_resp.result != "OK" and _is_badcharset(search_resp):
+            log.warning(
+                "imap.search.badcharset_fallback",
+                mailbox=mailbox.name,
+                imap_host=mailbox.imap_host,
+                charset="us-ascii",
+            )
+            search_resp = await client.search(search_criteria, charset="us-ascii")
         if search_resp.result != "OK":
             raise RuntimeError(f"SEARCH failed: {search_resp}")
 
