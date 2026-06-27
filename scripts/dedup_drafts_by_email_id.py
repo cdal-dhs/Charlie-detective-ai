@@ -54,12 +54,13 @@ async def _dedup_mailbox(mb, apply: bool) -> tuple[int, int]:
 
     by_email_id: dict[str, list[str]] = defaultdict(list)
     fetch_failures = 0
-    for uid in uids:
+    for i, uid in enumerate(uids, 1):
         try:
-            # v1.27.5 — timeout=60s explicite : OVH ex5.mail.ovh.net met parfois
-            # 15-30s à répondre sur FETCH massif. Le défaut 10s d'aioimaplib est
-            # trop court → CommandTimeout. 60s laisse une marge confortable.
-            _, msg_data = await client.fetch(uid, "(RFC822)", timeout=60)
+            # v1.27.5 — aioimaplib 2.0.1 n'accepte PAS le kwarg `timeout`
+            # sur fetch() (vérifié dans le source). Le timeout serveur par
+            # défaut (~10s) peut timeout sur OVH ex5.mail.ovh.net en FETCH
+            # massif, mais le try/except permet de continuer sans crasher.
+            _, msg_data = await client.fetch(uid, "(RFC822)")
         except Exception as exc:
             # v1.27.5 — OVH timeout sur FETCH massif : on loggue + on continue,
             # pas de crash de tout le script.
@@ -71,6 +72,11 @@ async def _dedup_mailbox(mb, apply: bool) -> tuple[int, int]:
                 error=str(exc)[:120],
             )
             continue
+        # v1.27.5 — throttle léger entre FETCH : OVH ex5.mail.ovh.net timeout
+        # si on FETCH en rafale. 100ms entre chaque = 100 FETCH/s max, bien
+        # sous les limites IMAP. Asynchrone donc pas bloquant pour le serveur.
+        if i % 5 == 0:
+            await asyncio.sleep(0.1)
         raw = (
             bytes(msg_data[1])
             if len(msg_data) > 1 and isinstance(msg_data[1], (bytes, bytearray))
