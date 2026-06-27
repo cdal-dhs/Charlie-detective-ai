@@ -136,6 +136,23 @@ supprimer manuellement par Daniel ou par un script de nettoyage à venir
 - `tests/test_qualification_builder.py` : +11 tests + 1 mis à jour.
 - `CHANGELOG.md` : cette entrée.
 
+### Bonus post-déploiement — patch `scripts/dedup_drafts_by_email_id.py`
+
+Après le déploiement, le doublon v1.27.4 du mail #656 est resté dans Brouillons
+OVH (à côté du nouveau brouillon v1.27.5). Lancement de `dedup_drafts_by_email_id`
+mais crash sur OVH. Patch (3 commits successifs) :
+- **`--mailbox` / `--skip-mailbox`** : traiter les boîtes une par une (OVH timeout).
+- **try/except par UID sur FETCH** : ne pas crasher si 1 brouillon timeout.
+- **aioimaplib 2.0.1 ne supporte PAS `timeout=` kwarg** sur `fetch()` :
+  erreur silencieuse → retrait du kwarg + `asyncio.sleep(0.1)` tous les
+  5 FETCH (throttle anti-saturation OVH).
+- **OVH SEARCH ALL renvoie `[BADCHARSET (US-ASCII)] The specified charset...`**
+  au lieu d'une liste d'UIDs : `charset=None` + filtre `isdigit()` pour ne
+  garder que les vrais UIDs (le poller avait déjà ce fallback depuis v1.27.3).
+
+**Résultat** : 10 brouillons obsolètes supprimés (4 sur Infomaniak dont
+les 2 doublons #656, 6 sur OVH), 45 conservés (1 par mail = état propre).
+
 ---
 
 ## [1.27.4] — 2026-06-27 (fix brouillon « vague request » sur mails d'avocats)
