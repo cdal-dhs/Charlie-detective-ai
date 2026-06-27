@@ -49,8 +49,16 @@ async def _dedup_mailbox(mb, apply: bool) -> tuple[int, int]:
 
     draft_folder = await _find_drafts_folder(client)
     await client.select(draft_folder)
-    _, data = await client.search("ALL")
-    uids = data[0].decode().split() if data and data[0] else []
+    # v1.27.5 — fallback OVH SEARCH ALL : ex5.mail.ovh.net renvoie parfois
+    # `[BADCHARSET (US-ASCII)] The specified charset...` au lieu d'une liste
+    # d'UIDs. Le poller gère déjà ça (imap_poller.py:_search_unprocessed) ;
+    # ici on retente en SEARCH ALL simple et on valide que la réponse est
+    # bien une liste d'UIDs numériques.
+    _, data = await client.search("ALL", charset=None)
+    raw_uids = data[0].decode().split() if data and data[0] else []
+    # Filtre : ne garder que les tokens qui sont des UIDs valides (entiers).
+    # Ça élimine `[BADCHARSET`, `(US-ASCII)]`, `The`, `specified`, etc.
+    uids = [u for u in raw_uids if u.isdigit()]
 
     by_email_id: dict[str, list[str]] = defaultdict(list)
     fetch_failures = 0
