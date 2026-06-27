@@ -1,5 +1,88 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.27.4] — 2026-06-27 (fix brouillon « vague request » sur mails d'avocats)
+
+### Contexte
+Le mail **#656 (Jennifer Das, avocate)** a reçu un brouillon qualifiant
+générique de type « demande floue » qui demandait à l'avocate de préciser
+l'objectif de sa mission, alors que celle-ci l'avait formulé 3 fois
+explicitement dans son mail :
+- « **notre client souhaiterait faire établir un constat d'adultère** »
+- « doit au prélable obtenir **la preuve de l'adultère** ainsi que
+  **les lieux et heures de rencontre** de son épouse et de son amant »
+- « **Il détient d'ores et déjà une série d'informations** de nature à
+  faciliter vos recherches »
+- « Puis-je vous demander de bien vouloir me faire part de vos
+  **conditions d'intervention** pour une mission qui se déroulerait
+  **durant cet été 2026** »
+
+`case_classifier` avait bien renvoyé `infidelite_filature`, mais
+`_is_vague_request()` (créé en v1.25.1 pour #515/#615) a déclenché le
+brouillon flou parce qu'aucune info opérationnelle n'était extractible du
+mail (l'avocate ne donne pas les détails techniques — c'est le rôle de
+Daniel de les obtenir). Résultat : brouillon insultant pour un professionnel
+du droit qui a fait le travail de rédaction.
+
+### Cause racine
+`_is_vague_request()` ne cherchait que des infos déjà extraites du mail
+(`nom_cible`, `adresse_cible`, `horaires_cible`…). Or un mail d'avocat/
+conseil expose rarement ces détails techniques dans le premier contact : il
+définit la **mission** (livrable + conditions + délai) sans donner les
+données opérationnelles. La logique ignorait complètement les formulations
+qui prouvent un objectif clair.
+
+### Fixé
+- **`app/pipeline/qualification_builder.py`** : nouveau `_OPERATIONAL_SIGNAL_RE`
+  qui capture les 4 catégories de signaux opérationnels forts validées avec
+  CDAL :
+  1. **Mission déléguée par un conseil** : « notre client », « Maître X »,
+     « avocat », « agissant pour le compte », « conseil juridique ».
+  2. **Livrable opérationnel explicite** : « faire établir un constat »,
+     « obtenir la preuve », « prouver l'infidélité/l'adultère/la fraude ».
+  3. **Question de mission déguisée** : « conditions d'intervention »,
+     « conditions de votre mission », « tarif pour une mission ».
+  4. **Annonce d'éléments à fournir** : « il détient d'ores et déjà une
+     série d'informations », « informations de nature à faciliter »,
+     « éléments à transmettre/fournir », « je vous transmettrai… ».
+  5. **Indicateurs temporels de mission** : « mission qui se déroulerait
+     durant cet été 2026 », « mission prévue pour… », « durant l'été NNNN ».
+
+  Court-circuit placé dans `_is_vague_request()` **AVANT** le check « cas
+  classé sans info opérationnelle » : ≥ 1 pattern fort suffit pour sortir
+  du flou (seuil très permissif validé avec CDAL — règle d'or : faux
+  positifs flous acceptables, faux négatifs intolérables).
+
+- **`app/pipeline/objective_check.py`** : `_CLEAR_OBJECTIVE_RE` enrichi avec
+  les mêmes patterns (chemin `non_determine`) — `notre client`, `maître`,
+  `avocat`, `faire établir un constat`, `conditions d'intervention`,
+  `obtenir la preuve`, `léguer`, `agissant pour`. Court-circuite l'appel
+  LLM gemma4 sur les mails d'avocats (gain de latence + suppression du
+  risque « OBJECTIF_FLOU » mal répondu).
+
+- **Tests** : 12 nouveaux tests (5 dans `test_objective_check.py`,
+  7 dans `test_qualification_builder.py`) couvrant :
+  - #656 mail complet avocate → `_is_vague_request=False` + brouillon
+    standard (questions numérotées + tarifs + 2 détectives + closing).
+  - Variantes : « Maître Dupont agissant pour le compte de M. Y »,
+    « obtenir la preuve de l'infidélité », « mission durant cet été 2026 ».
+  - **Régressions** : #515 (Nathalie, mail lapidaire sans signal) reste
+    flou, #615 (douane Kaiserslautern « faire une petite enquête ») reste
+    flou, #643 (investigation_successorale) jamais flou, dette jamais floue.
+  - **340/340 tests verts** (vs 328 avant).
+
+### Backfill
+Mail **#656** à rejouer en prod après déploiement :
+```bash
+ssh root@69.62.110.165 'cd /opt/DETECTIVE && \
+  docker compose exec -T detective python -m scripts.backfill_reclassify --only-id 656 --apply && \
+  docker compose exec -T detective python -m scripts.deliver_pending_drafts --only-id 656 --apply'
+```
+
+### Changé
+- `app/_version.py` : `VERSION = "1.27.4"`.
+
+---
+
 ## [1.27.3] — 2026-06-26 (fix NameError Response au import module — OVH search)
 
 ### Contexte

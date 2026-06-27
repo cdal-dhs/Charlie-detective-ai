@@ -178,3 +178,53 @@ async def test_assess_objective_empty_is_flou_no_llm() -> None:
     with patch("app.pipeline.objective_check.complete", new=AsyncMock()) as m:
         assert await assess_objective_clarity("") is False
     m.assert_not_called()
+
+
+# --- v1.27.4 — avocat / mission déléguée / livrable explicite (#656 Jennifer Das)
+
+
+def test_heuristic_avocate_avec_mission_deleguee() -> None:
+    """#656 — Jennifer Das, avocate : mail avec « notre client » + « constat
+    d'adultère » + « conditions d'intervention » = objectif clair, sans LLM."""
+    msg = (
+        "Je vous adresse la présente en ma qualité de conseil d'un client qui "
+        "souhaiterait faire éventuellement appel à vos services dans le cadre de "
+        "son divorce. En effet, ayant découvert l'infidélité de son épouse, notre "
+        "client souhaiterait faire établir un constat d'adultère mais, pour ce "
+        "faire, doit au préalable obtenir la preuve de l'adultère ainsi que les "
+        "lieux et heures de rencontre de son épouse et de son amant. Il détient "
+        "d'ores et déjà une série d'informations de nature à faciliter vos "
+        "recherches. Puis-je vous demander de bien vouloir me faire part de vos "
+        "conditions d'intervention pour une mission qui se déroulerait durant "
+        "cet été 2026 ?"
+    )
+    assert _has_clear_objective_heuristic(msg) is True
+
+
+def test_heuristic_maitre_agissant_pour_compte() -> None:
+    """Variante : « Maître X, agissant pour le compte de M. Y »."""
+    msg = (
+        "Maître Dupont, agissant pour le compte de Monsieur Jean Martin, vous "
+        "sollicite pour établir un constat d'adultère en vue d'une procédure de "
+        "divorce. Merci de nous faire part de vos conditions d'intervention."
+    )
+    assert _has_clear_objective_heuristic(msg) is True
+
+
+def test_heuristic_obtenir_preuve_infidelite() -> None:
+    """Variante : « obtenir la preuve de l'infidélité » sans avocat ni conditions."""
+    msg = (
+        "Bonjour, j'ai besoin de vos services pour obtenir la preuve de "
+        "l'infidélité de mon conjoint. Pouvez-vous intervenir rapidement ?"
+    )
+    assert _has_clear_objective_heuristic(msg) is True
+
+
+def test_heuristic_mission_duree_estivale() -> None:
+    """Variante : mission annoncée avec délai (été 2026)."""
+    msg = (
+        "Bonjour, je voudrais mettre en place une surveillance de mon mari "
+        "durant cet été 2026. Il est absent plusieurs jours par semaine et "
+        "j'ai des doutes. Pouvez-vous me recontacter pour en discuter ?"
+    )
+    assert _has_clear_objective_heuristic(msg) is True

@@ -1808,6 +1808,50 @@ def suggested_subject_for_draft(
 # (index ≥ 3 dans les specs, après nom/adresse/tel client) n'est répondue. Pour
 # non_determine : body court (< 200 chars) sans tarif = manifestement lapidaire.
 # La dette a sa propre logique (exclue). Cf. #515 (Nathalie) / #615 (douane).
+#
+# v1.27.4 — signal opérationnel fort court-circuite le flou (cf. #656 Jennifer
+# Das, avocate). Le mail contenait « notre client souhaiterait faire établir un
+# constat d'adultère » + « Puis-je vous demander de bien vouloir me faire part
+# de vos conditions d'intervention » + « Il détient d'ores et déjà une série
+# d'informations ». Aucun `nom_cible`/`adresse_cible` n'était extrait (l'avocate
+# ne donne pas les détails techniques), donc l'ancien code tombait dans le
+# brouillon flou qui redemandait l'objectif — alors qu'il était formulé 3 fois.
+# Règle d'or (CDAL) : faux positifs flous acceptables (questions inutiles), faux
+# négatifs intolérables (rater une demande claire → brouillon insultant pour un
+# avocat / un client qui s'est appliqué). ≥ 1 pattern fort suffit pour sortir du
+# flou (seuil très permissif validé avec CDAL).
+_OPERATIONAL_SIGNAL_RE = re.compile(
+    r"(?:"
+    # --- Mission déléguée par un conseil (avocat, notaire…) ---
+    r"(?:notre|son|votre|mon)\s+client|"
+    r"ma[îi]tre\s+[A-ZÀ-Ÿ]|avocat(?:e)?|"
+    r"agissant\s+pour\s+(?:le\s+)?compte|"
+    r"conseil\s+(?:juridique|d[' ]un\s+client)|"
+    # --- Livrable opérationnel explicite ---
+    r"(?:faire|[àa]\s+)[ée]tablir\s+(?:un\s+)?constat|"
+    r"[ée]tablir\s+un\s+constat|"
+    r"obtenir\s+(?:la\s+)?preuve(?:s)?|"
+    r"prouver\s+(?:l[' ]|son\s+|ses\s+)?(?:infid[ée]lit[ée]|adult[èe]re|fraude)|"
+    # --- Question de mission déguisée (équivalent question de tarif) ---
+    r"conditions?\s+d[' ]intervention|"
+    r"conditions?\s+de\s+(?:votre\s+)?(?:mission|intervention|enqu[êe]te)|"
+    r"tarif\s+(?:pour|d[' ]une\s+mission)|"
+    # --- Le client annonce qu'il fournira des éléments ---
+    r"(?:il|elle|je)\s+d[ée]tient\s+(?:d[' ]ores?\s+et\s+d[ée]j[àa]|d[ée]j[àa])\s+"
+    r"(?:une\s+s[ée]rie\s+)?d[' ]informations|"
+    r"informations?\s+de\s+nature\s+[àa]\s+faciliter|"
+    r"[ée]l[ée]ments?\s+(?:à\s+)?(?:transmettre|fournir|communiquer)|"
+    r"je\s+(?:vous\s+)?(?:transmettrai|fournirai|communiquerai|enverrai)\s+"
+    r"(?:ces\s+|les\s+)?[ée]l[ée]ments?|"
+    # --- Indicateurs temporels de mission (délai connu) ---
+    r"(?:mission|dossier|enqu[êe]te|surveillance|filature)\s+"
+    r"(?:qui\s+se\s+d[ée]rouler[ai]t|qui\s+aurait\s+lieu|pr[ée]vue?\s+pour)\s+"
+    r"(?:durant|en|au\s+cours\s+de|pendant|estiv[ée]|[aà]\s+compter\s+de)|"
+    r"durant\s+(?:cet\s+|l[' ])?[ée]t[ée]\s+\d{4}"
+    r")",
+    re.IGNORECASE,
+)
+
 _TARIFF_QUESTION_PATTERNS = re.compile(
     r"(?:"
     r"combien\s+(?:ça\s+)?co[ûu]t|"
@@ -1839,6 +1883,15 @@ def _is_vague_request(
     # Une question de tarif explicite = le client sait ce qu'il veut, on répond
     # avec le brouillon standard (qui contient déjà les tarifs + questions).
     if _TARIFF_QUESTION_PATTERNS.search(body or ""):
+        return False
+    # v1.27.4 — un signal opérationnel fort (mission déléguée par avocat,
+    # livrable explicite, question de conditions, annonce d'éléments à fournir)
+    # prouve que le client a un objectif clair même si les infos techniques
+    # détaillées (nom_cible, adresse_cible, horaires…) ne sont pas encore
+    # extractibles du mail. Court-circuit AVANT le check `cas classé sans
+    # info opérationnelle` qui, sinon, aurait déclenché le brouillon flou
+    # insultant sur les mails d'avocats/conseils. Cf. #656 Jennifer Das.
+    if _OPERATIONAL_SIGNAL_RE.search(body or ""):
         return False
     if case == "non_determine":
         # v1.25.6 — verdict du check objectif amont (heuristique + LLM gemma4)

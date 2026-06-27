@@ -52,6 +52,11 @@ _FORM_FIELD_RE = re.compile(
 # « connaître l'ampleur de la succession et réserver nos droits »). Sans ces
 # termes, l'heuristique déléguait à gemma qui répondait OBJECTIF_FLOU → brouillon
 # « demande floue » redemandant un objectif déjà exprimé (faux négatif intolérable).
+# v1.27.4 — avocat/conseil/mission déléguée (cf. #656 Jennifer Das, avocate) :
+# « notre client souhaiterait faire établir un constat d'adultère » + « Puis-je
+# vous demander de bien vouloir me faire part de vos conditions d'intervention ».
+# Sans ces ajouts, le brouillon « vague request » redemandait l'objectif à une
+# avocate qui l'avait pourtant formulé 3 fois (faux négatif intolérable).
 _CLEAR_OBJECTIVE_RE = re.compile(
     r"\b(?:"
     r"infid[ée]lit[ée]|filature|filer|surveiller|surveillance|"
@@ -67,7 +72,16 @@ _CLEAR_OBJECTIVE_RE = re.compile(
     r"vol|d[ée]tournement|abus|escroquerie|"
     r"succession|h[ée]ritage|h[ée]ritier|h[ée]riti[èe]re|patrimoine|"
     r"d[ée]funt|d[ée]c[èe]s|r[ée]server\s+(?:nos|mes|ses|vos)\s+droits|"
-    r"droits\s+successoraux|legs?|testament"
+    r"droits\s+successoraux|legs?|testament|"
+    # v1.27.4 — mission déléguée par un conseil (avocat, notaire…) + livrable
+    # opérationnel explicite (« faire établir un constat », « conditions
+    # d'intervention »). Cf. #656 Jennifer Das (avocate, infidélité).
+    r"(?:notre|son|votre|mon)\s+client|"
+    r"ma[îi]tre|avocat(?:e)?|conseil\s+juridique|"
+    r"(?:faire|[àa]\s+)[ée]tablir\s+(?:un\s+)?constat|"
+    r"conditions?\s+d['']intervention|conditions?\s+de\s+(?:votre\s+)?intervention|"
+    r"obtenir\s+(?:la\s+)?preuve|"
+    r"l[ée]guer|agissant\s+pour"
     r")\b",
     re.IGNORECASE,
 )

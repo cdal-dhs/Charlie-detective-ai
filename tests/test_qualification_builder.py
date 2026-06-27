@@ -342,3 +342,125 @@ def test_build_qualification_draft_vague_request_path(mailbox: MailboxConfig) ->
     )
     assert "souhaitez obtenir" in draft
     assert "1. Vos nom et prénom complets" not in draft
+
+
+# --- v1.27.4 — Signal opérationnel fort court-circuite le « vague request »
+# (cf. #656 Jennifer Das, avocate). Sans info technique extractible
+# (nom_cible/adresse_cible), l'ancien code renvoyait `is_vague=True` et
+# produisait un brouillon insultant qui redemandait l'objectif. Maintenant :
+# ≥ 1 pattern fort (mission déléguée par conseil, livrable explicite, question
+# de conditions, annonce d'éléments à fournir, mission avec délai) → pas flou.
+
+
+def test_is_vague_request_avocate_not_vague() -> None:
+    """#656 — mail d'avocate avec « notre client » + « constat d'adultère » +
+    « conditions d'intervention » + « détient d'ores et déjà ». Aucun
+    nom_cible/adresse_cible extrait, mais signal opérationnel fort → pas flou.
+    On doit obtenir le brouillon standard (pas le brouillon flou)."""
+    body = (
+        "Je vous adresse la présente en ma qualité de conseil d'un client qui "
+        "souhaiterait faire éventuellement appel à vos services dans le cadre de "
+        "son divorce. En effet, ayant découvert l'infidélité de son épouse, notre "
+        "client souhaiterait faire établir un constat d'adultère mais, pour ce "
+        "faire, doit au préalable obtenir la preuve de l'adultère ainsi que les "
+        "lieux et heures de rencontre de son épouse et de son amant. Il détient "
+        "d'ores et déjà une série d'informations de nature à faciliter vos "
+        "recherches. Puis-je vous demander de bien vouloir me faire part de vos "
+        "conditions d'intervention pour une mission qui se déroulerait durant "
+        "cet été 2026 ?"
+    )
+    # Aucun nom_cible/adresse_cible extrait → avant le fix, _is_vague_request
+    # retournait True (toutes les specs d'index ≥ 3 non répondues).
+    assert _is_vague_request(body, "infidelite_filature", {}, {}) is False
+
+
+def test_build_qualification_draft_avocate_standard_path(mailbox: MailboxConfig) -> None:
+    """#656 — le mail d'avocate produit le brouillon STANDARD (pas le flou)."""
+    body = (
+        "Je vous adresse la présente en ma qualité de conseil d'un client qui "
+        "souhaiterait faire éventuellement appel à vos services dans le cadre de "
+        "son divorce. En effet, ayant découvert l'infidélité de son épouse, notre "
+        "client souhaiterait faire établir un constat d'adultère mais, pour ce "
+        "faire, doit au préalable obtenir la preuve de l'adultère ainsi que les "
+        "lieux et heures de rencontre de son épouse et de son amant. Il détient "
+        "d'ores et déjà une série d'informations de nature à faciliter vos "
+        "recherches. Puis-je vous demander de bien vouloir me faire part de vos "
+        "conditions d'intervention pour une mission qui se déroulerait durant "
+        "cet été 2026 ?"
+        "\n\nBien dévouée,\n\nJennifer Das, avocate\nPour Me Alain-Charles VAN GYSEL\n"
+        "Nom: Das\nPrénom: Jennifer\nTéléphone: 0498284677\n"
+        "Heure de contact: 9h30-16h\nVotre profil ?: Particulier\n"
+    )
+    draft = build_qualification_draft(
+        subject="Nouveau Message - Prenons contact",
+        body=body,
+        sender="j.das@vangysel-wyart.be",
+        mailbox=mailbox,
+        case="infidelite_filature",
+    )
+    # Brouillon STANDARD = questions numérotées (l'avocate a un objectif clair).
+    # Note : la question "Vos nom et prénom complets" est déjà répondue (Nom + Prénom
+    # du formulaire) → n'apparaît PAS dans les questions manquantes, c'est attendu.
+    assert "2. Nom, prénom et adresse de départ connue de la personne concernée" in draft
+    assert "3. Photo récente de la personne concernée" in draft
+    assert "7. Habitudes de la cible" in draft
+    assert "Ouverture de dossier : 200 € HTVA." in draft
+    # Pas le brouillon flou (qui demanderait « précisez votre objectif »).
+    assert "souhaitez obtenir concrètement" not in draft
+
+
+def test_is_vague_request_lapidary_infidelite_still_vague() -> None:
+    """Régression — #515 (Nathalie) : mail lapidaire SANS signal opérationnel
+    doit rester flou (le client ne formule aucune demande)."""
+    # Lapidaire, sans question de tarif, sans signal opérationnel.
+    assert _is_vague_request("Bonjour", "infidelite_filature", {}, {}) is True
+
+
+def test_is_vague_request_douane_kaiserslautern_still_vague() -> None:
+    """Régression — #615 : « faire une petite enquête au bureau de douane »
+    sans livrable clair ni question de tarif = toujours flou."""
+    msg = (
+        "bonjour j'aurai besoin d'un détective pour faire une petite enquete "
+        "au bureau de douane de Kaiserslautern est ce que vous accepteriez de "
+        "le faire ? merci"
+    )
+    assert _is_vague_request(msg, "infidelite_filature", {}, {}) is True
+
+
+def test_is_vague_request_obtenir_preuve_infidelite_not_vague() -> None:
+    """« obtenir la preuve de l'infidélité » = livrable explicite → pas flou."""
+    msg = (
+        "Bonjour, j'ai besoin de vos services pour obtenir la preuve de "
+        "l'infidélité de mon conjoint."
+    )
+    assert _is_vague_request(msg, "infidelite_filature", {}, {}) is False
+
+
+def test_is_vague_request_mission_avec_delai_not_vague() -> None:
+    """Mission annoncée avec délai « durant cet été 2026 » = pas flou."""
+    msg = (
+        "Bonjour, je voudrais mettre en place une surveillance de mon mari "
+        "durant cet été 2026. Il est absent plusieurs jours par semaine et "
+        "j'ai des doutes sérieux."
+    )
+    assert _is_vague_request(msg, "infidelite_filature", {}, {}) is False
+
+
+def test_is_vague_request_investigation_successorale_never_vague() -> None:
+    """Régression — #643 : investigation_successorale ne doit JAMAIS être floue
+    (le brouillon dédié pose ses propres questions)."""
+    assert (
+        _is_vague_request(
+            "Mon oncle est décédé en France, je veux connaître l'ampleur de sa "
+            "succession et réserver mes droits d'héritier.",
+            "investigation_successorale",
+            {},
+            {},
+        )
+        is False
+    )
+
+
+def test_is_vague_request_recuperation_dette_never_vague() -> None:
+    """Régression — dette : jamais floue (le brouillon dédié gère sa logique)."""
+    assert _is_vague_request("Bonjour", "recuperation_dette", {}, {}) is False
