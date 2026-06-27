@@ -132,7 +132,7 @@ docker compose up -d --build      # si requirements.txt ou Dockerfile modifiés
 
 ---
 
-## Stack technique (état v1.27.3)
+## Stack technique (état v1.27.5)
 
 | Couche | Choix |
 |---|---|
@@ -155,7 +155,7 @@ docker compose up -d --build      # si requirements.txt ou Dockerfile modifiés
 | Service prod | **Docker + Docker Compose + Traefik** (VPS Hostinger KVM8) |
 | Logs | `structlog` (JSON structuré, rotation 7j) |
 | Config | `pydantic-settings` depuis `.env` |
-| Version | Source unique `app/_version.py` (`VERSION = "1.27.1"`) — `pyproject.toml` figé en 1.9.5 (volontaire) |
+| Version | Source unique `app/_version.py` (`VERSION = "1.27.5"`) — `pyproject.toml` figé en 1.9.5 (volontaire) |
 
 **Ne PAS introduire** sans discussion : Kubernetes, Swarm, Celery, Redis, Postgres, ORM lourd, framework JS front (React/Vue/Angular). Le périmètre Docker actuel (1 service Compose + Traefik externe) est figé.
 
@@ -277,7 +277,7 @@ DETECTIVE_BE/
 
 ## Statut
 
-✅ **Production active** — `detective.digitalhs.biz` — **v1.27.3**
+✅ **Production active** — `detective.digitalhs.biz` — **v1.27.5**
 
 - **Pipeline IMAP** : polling 4 boîtes toutes les 5 min (3 Infomaniak + 1 OVH), classification 8 catégories, priorité intelligente, flag `AgentProcessed` (succès) + `AgentAttempted` (libère la queue même en cas de crash, v1.21.3).
 - **Génération brouillon** : gemma4:31b (non-reasoning), style Daniel imité via few-shot learning (v1.22.0) + personnalité Cerveau2. **RAG sqlite-vec en pause (v1.24.2)** — remplacé par le brouillon qualifiant déterministe (`qualification_builder`) pour les `demande_client`/`prise_contact`.
@@ -302,6 +302,8 @@ DETECTIVE_BE/
 - **Investigation successorale v1.25.27** : nouveau cas métier `investigation_successorale` (`case_classifier.py` + `qualification_builder._build_succession_draft`) + `objective_check.py` enrichi (objectifs patrimoniaux reconnus clairs sans appel LLM). #643 (Boeteman) — le brouillon flou générique est remplacé par un brouillon dédié (accusé réception + 8 questions succession + coordination notaire).
 - **Sujet de brouillon lisible v1.25.28 → v1.26.0** : `suggested_subject` persisté en DB par le poller (`_persist` INSERT/UPDATE COALESCE) + écrit dans le sujet du brouillon IMAP par `append_draft` (le tag `[NO_EMAIL_IN_THE_FORM]` et les templates WP absurdes ne polluent plus le sujet vu par Daniel). v1.26.0 : le cockpit affiche ce sujet lisible dans l'inbox et la conversation (`display_subject = suggested_subject or subject`, zéro modif template). Symétrique IMAP/cockpit.
 - **4ème boîte mail OVH v1.27.3** : ajout de `info@detectives-belgique.be` (brand Detectives Belgique, code cockpit `D_DS`, marque Cerveau2 `detectivesbelgique`, DB `boite4.sqlite`, serveur IMAP `ex5.mail.ovh.net`). Architecture IMAP host par boîte : `MailboxConfig` enrichi avec `imap_host`, `imap_port`, `short_code`, `cerveau2_marque`. Templates cockpit et mappings métier mis à jour. **328 tests verts**.
+- **Brouillon « vague request » v1.27.4 (#656 Jennifer Das, avocate)** : `_OPERATIONAL_SIGNAL_RE` + enrichissement `_CLEAR_OBJECTIVE_RE` → un pro du droit qui définit la mission est reconnu comme objectif clair sans appel LLM. **340 tests verts**.
+- **Brouillon avocat/conseil v1.27.5 (#656 Jennifer Das, suite)** : `_is_legal_counsel_email()` détecte les pros du droit (avocat / notaire / huissier) écrivant pour un client → salutation « Bonjour Maître, » + wording « votre client » + rappel au GSM de l'avocat uniquement. Patch `scripts/dedup_drafts_by_email_id.py` (OVH robust : timeout FETCH, throttle, filter isdigit). **351 tests verts**.
 - **Header `X-Detective-Mail-Id` v1.25.22** : identifie un brouillon précis en IMAP (réconcilieur + `append_draft`).
 - **Dashboard admin** : stats, settings LLM, audit logs, télémétrie poller, backup Cerveau2.
 - **4 niveaux anti-crash silencieux** : Slack + Resend in-app + cron watchdog externe + Healthchecks.io.
@@ -312,11 +314,11 @@ Voir `docs/ROADMAP.md` pour la roadmap V2b/V2c (polishing cockpit, feedback loop
 
 ## Versions
 
-Version source de vérité : **`app/_version.py`** (`VERSION = "1.27.1"`).
+Version source de vérité : **`app/_version.py`** (`VERSION = "1.27.5"`).
 
 Le badge affiché dans le cockpit est lu dynamiquement depuis `app/_version.py`. **Tolérance zéro** sur la désynchronisation.
 
-Voir [`CHANGELOG.md`](CHANGELOG.md) pour l'historique détaillé (1.18.x → 1.24.x).
+Voir [`CHANGELOG.md`](CHANGELOG.md) pour l'historique détaillé (1.18.x → 1.27.x).
 
 ---
 

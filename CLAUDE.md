@@ -45,7 +45,7 @@
 
 ## 3. Stack technique
 
-État au **2026-06-26 (v1.27.3)**. La SPEC.md d'origine est désalignée sur certains points — **cette section fait foi**.
+État au **2026-06-27 (v1.27.5)**. La SPEC.md d'origine est désalignée sur certains points — **cette section fait foi**.
 
 | Couche | Choix |
 |---|---|
@@ -69,7 +69,7 @@
 | Service prod | **Docker + Docker Compose + Traefik** (VPS Hostinger KVM8) |
 | Logs | `structlog` (JSON structuré, rotation 7j) |
 | Config | `pydantic-settings` depuis `.env` |
-| Version | Source unique `app/_version.py` (`VERSION = "1.25.26"`) — **tolérance zéro** sur `pyproject.toml` qui reste figé en `1.9.5` (volontaire) |
+| Version | Source unique `app/_version.py` (`VERSION = "1.27.5"`) — **tolérance zéro** sur `pyproject.toml` qui reste figé en `1.9.5` (volontaire) |
 
 **Ne PAS introduire** sans discussion explicite : Kubernetes, Swarm, Celery, Redis, Postgres, ORM lourd, framework JS front (React/Vue/Angular). Le périmètre Docker actuel (1 service Compose + Traefik externe) est figé.
 
@@ -216,7 +216,7 @@ ssh root@69.62.110.165 'cd /opt/DETECTIVE && git pull origin main && docker comp
 
 ## 7. État courant du projet
 
-État au **2026-06-26 — v1.27.3** déployée en prod. Voir `HANDOVER.md` pour le détail complet, `CHANGELOG.md` pour l'historique, `docs/ROADMAP.md` pour la roadmap à jour.
+État au **2026-06-27 — v1.27.5** déployée en prod. Voir `HANDOVER.md` pour le détail complet, `CHANGELOG.md` pour l'historique, `docs/ROADMAP.md` pour la roadmap à jour.
 
 ### ✅ Livré
 - **S1 → S4 terminées** : infra & data, pipeline IMAP, génération (RAG mis en pause v1.24.2 — approche déterministe), prod 24/7 sur KVM8.
@@ -236,6 +236,8 @@ ssh root@69.62.110.165 'cd /opt/DETECTIVE && git pull origin main && docker comp
 - **#629 finalisé** (Christèle Kremp-Voinova, forwarder `newsletter@wikipreneurs.be`, Reply-To `ckremp@vo.lu`) : brouillon propre en Drafts IMAP (UID 6540, header `X-Detective-Mail-Id 629`, sujet `Recherche de personne — Christele Kremp-voinova`), `reply_to` + `delivered_at` set en DB, sender DB = `ckremp@vo.lu`. Cas de référence pour les 6 bugs A-F (sujet/sender fantaisistes, Reply-To non exploité, brouillon absent, faux nom extrait, sujet illisible).
 - **4ème boîte mail OVH v1.27.3** : ajout de `info@detectives-belgique.be` (brand Detectives Belgique, code cockpit `D_DS`, marque Cerveau2 `detectivesbelgique`, DB `boite4.sqlite`, serveur IMAP `ex5.mail.ovh.net`). Architecture IMAP host par boîte : `MailboxConfig` enrichi avec `imap_host`, `imap_port`, `short_code`, `cerveau2_marque`. Mappings statiques supprimés, domaines propres étendus, templates cockpit dynamiques. **328 tests verts**.
 - **Hotfix SEARCH OVH v1.27.3** : `ex5.mail.ovh.net` rejette le charset UTF-8 implicite de `SEARCH` (`[BADCHARSET (US-ASCII)]`), refuse aussi `charset="us-ascii"` (`Command Argument Error. 11`) et semble rejeter `UNKEYWORD AgentProcessed`. `_search_unprocessed()` implémente 3 niveaux : (1) SEARCH normal, (2) SEARCH sans charset, (3) `SEARCH ALL` + filtrage côté DB via `_mail_exists()` pour écarter les UIDs déjà traités. **328 tests verts**.
+- **Brouillon « vague request » v1.27.4 (#656 Jennifer Das, avocate)** : `_is_vague_request()` court-circuite le brouillon flou si ≥ 1 signal opérationnel fort détecté (mission déléguée par conseil, livrable explicite, question de conditions, annonce d'éléments à fournir, mission avec délai). 5 catégories de patterns regex. `_CLEAR_OBJECTIVE_RE` enrichi dans `objective_check.py`. **340 tests verts** (12 nouveaux). Mail #656 rejoué en prod.
+- **Brouillon avocat/conseil v1.27.5 (#656 Jennifer Das, suite)** : `_is_legal_counsel_email(body, sender)` détecte les pros du droit écrivant pour un client (avocat, notaire, huissier, maître, qualité conseil). Salutation « Bonjour Maître, » générique, wording « votre client » partout, rappel au GSM de l'avocat uniquement (jamais au client final). `_format_received_info` skip l'identité client final, `_filter_missing_questions` skip les 3 questions identitaires. 11 nouveaux tests. **351 tests verts**. Patch bonus `scripts/dedup_drafts_by_email_id.py` (OVH robustness : `--mailbox`/`--skip-mailbox`, throttle FETCH, fix OVH SEARCH ALL `charset=None` + `isdigit()`). 10 brouillons obsolètes supprimés en prod.
 
 ### ⏳ En cours
 - **V2b — Polishing cockpit** : filtres inbox (4 boîtes cochées par défaut), latence Charlie < 5s (parallélisation Cerveau2 + SQL déjà faite).
