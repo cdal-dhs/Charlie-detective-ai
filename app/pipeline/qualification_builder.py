@@ -315,6 +315,69 @@ def _is_internal_email(email: str) -> bool:
     return False
 
 
+# v1.27.5 — Détection des mails écrits par un conseil (avocat, notaire, huissier)
+# pour le compte d'un client final. Le brouillon doit alors :
+# - saluer « Maître » (pas de prénom)
+# - parler de « votre client » (pas « vous »)
+# - rappeler l'avocat à SON propre GSM (pas celui du client final)
+# Cf. mail #656 (Jennifer Das, avocate/clerk pour Me Alain-Charles VAN GYSEL) :
+# le brouillon standard appelait l'avocate « Jennifer » et lui parlait comme si
+# elle était la cliente — incorrect dans un cadre professionnel juridique.
+_LEGAL_COUNSEL_PATTERNS = re.compile(
+    r"(?:"
+    r"\bavocat[ée]?\b"
+    r"|\bma[îi]tre\s+[A-ZÀ-Ÿ][\w'À-Ÿ\-]+"
+    r"|\bavou[ée]\b"
+    r"|\bnotaire\b"
+    r"|\bhuissier(?:\s+de\s+justice)?\b"
+    r"|\bconseil\s+(?:juridique|d[' ]un\s+client)"
+    r"|\bcabinet\s+(?:juridique|d[' ]avocat|d[' ]avocats)"
+    r"|\b(?:son|notre|votre|mon)\s+(?:confr[èe]re|associ[ée]?)\b"
+    r"|\bagissant\s+(?:pour\s+(?:le\s+)?compte|en\s+(?:le\s+)?nom)\s+de"
+    r"|\b(?:en\s+(?:ma|sa)\s+qualit[ée]\s+de\s+)?(?:son|notre|votre|mon)\s+client\b"
+    r"|\bmand[ée]?\s+(?:par|au\s+nom\s+de)"
+    r"|\b(?:Pour\s+Me|En\s+notre\s+qualit[ée]\s+de\s+conseil)\b"
+    r"|\b[ée]tude\s+de\s+(?:Ma[îi]tre|M[ée]\s+)"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _is_legal_counsel_email(body: str, sender: str = "") -> bool:
+    """Détecte si le mail est écrit par un professionnel du droit pour un client.
+
+    Combine indices body (vocabulaire juridique + mandat) + indices sender
+    (domaine de cabinet). Renvoie True dès qu'UN seul indice matche — règle
+    d'or : faux positif acceptable (un notaire qui n'en est pas un est rare),
+    faux négatif intolérable (rater un avocat → brouillon « Bonjour Jennifer »
+    qui jure avec le ton du mail). Cf. #656 + brief CDAL 2026-06-27.
+    """
+    text = (body or "") + "\n" + (sender or "")
+    if _LEGAL_COUNSEL_PATTERNS.search(text):
+        return True
+    if _is_legal_counsel_sender(sender or ""):
+        return True
+    return False
+
+
+# Domaine email typique d'un cabinet d'avocats belge. On évite les faux positifs
+# (ex: gmail) en exigeant un mot-clé dans le domaine OU une profession détectée.
+_LEGAL_DOMAIN_HINTS = re.compile(
+    r"(?:"
+    r"\.law\b|avocat|notaire|huissier|legal(?:e|tech)?|"
+    r"juridique|juris|advocaat|advocat"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _is_legal_counsel_sender(sender: str) -> bool:
+    """True si le sender email/domaine évoque un cabinet juridique."""
+    if not sender:
+        return False
+    return bool(_LEGAL_DOMAIN_HINTS.search(sender))
+
+
 def _extract_client_info(body: str, sender: str, reply_to: str = "") -> dict[str, str | None]:
     """Extrait les informations client déjà fournies dans le body ou le sender.
 
@@ -999,6 +1062,41 @@ def _rephrase_need(subject: str, body: str, case: str) -> str:
     return "Je comprends que vous souhaitez nos services pour une mission d'enquête."
 
 
+# v1.27.5 — variantes « conseil pour le compte d'un client ». On parle de la
+# mission DU CLIENT (le client final de l'avocat), pas de l'avocat lui-même.
+# On garde la formule d'intro courte et on introduit « votre client » dans la
+# reformulation pour que Daniel s'adresse correctement à l'avocat.
+def _rephrase_need_for_counsel(body: str, case: str) -> str:
+    """Reformule le besoin côté conseil (avocat / notaire / huissier)."""
+    if case == "infidelite_filature":
+        return (
+            "Je comprends que votre client souhaite faire établir un constat "
+            "d'adultère et qu'il dispose d'ores et déjà d'informations "
+            "susceptibles de faciliter nos recherches."
+        )
+    if case == "incapacite_travail":
+        return (
+            "Je comprends que votre client souhaite faire vérifier une "
+            "situation d'incapacité de travail."
+        )
+    if case == "recherche_personne":
+        return "Je comprends que votre client souhaite localiser une personne."
+    if case == "investigation_successorale":
+        return (
+            "Je comprends que votre client souhaite évaluer une succession "
+            "et réserver ses droits d'héritier."
+        )
+    if case == "securite_passé_violences":
+        return (
+            "Je comprends que votre client souhaite obtenir des éléments "
+            "sur le passé d'une personne."
+        )
+    return (
+        "Je comprends que votre client souhaite nous confier une mission "
+        "d'enquête dans le cadre d'un dossier que vous accompagnez."
+    )
+
+
 def _capitalize_name(value: str | None) -> str | None:
     if not value:
         return None
@@ -1009,28 +1107,41 @@ def _format_received_info(
     client_info: dict[str, str | None],
     case_info: dict[str, str | None],
     case: str,
+    is_legal_counsel: bool = False,
 ) -> list[str]:
-    """Formate les informations déjà connues pour le brouillon (tous les cas)."""
+    """Formate les informations déjà connues pour le brouillon (tous les cas).
+
+    v1.27.5 — si ``is_legal_counsel=True``, on NE présente PAS les nom/prénom/
+    adresse/profil comme étant ceux du client final (c'est le conseil qui
+    écrit). On parle de « vos coordonnées de contact » (GSM, email, heure) et
+    on n'affiche PAS « Vos nom et prénom » (les Nom/Prénom du formulaire sont
+    ceux de l'avocat, pas du client). Cf. #656 Jennifer Das.
+    """
     lines: list[str] = []
 
-    # --- Infos client ---
-    prenom = _capitalize_name(client_info.get("prenom"))
-    nom = _capitalize_name(client_info.get("nom"))
-    nom_complet = _capitalize_name(client_info.get("nom_complet"))
-
-    full = nom_complet or " ".join(p for p in [prenom, nom] if p)
-    if full:
-        lines.append(f"- Vos nom et prénom : {full}")
-    if client_info.get("adresse"):
-        lines.append(f"- Votre adresse : {client_info['adresse']}")
+    # --- Coordonnées de contact (toujours affichées) ---
     if client_info.get("telephone"):
-        lines.append(f"- Votre GSM : {client_info['telephone']}")
+        label = "Votre GSM (pour vous recontacter)" if is_legal_counsel else "Votre GSM"
+        lines.append(f"- {label} : {client_info['telephone']}")
     if client_info.get("email"):
-        lines.append(f"- Votre email : {client_info['email']}")
+        label = "Votre adresse e-mail" if is_legal_counsel else "Votre email"
+        lines.append(f"- {label} : {client_info['email']}")
     if client_info.get("heure_contact"):
         lines.append(f"- Heure de contact souhaitée : {client_info['heure_contact']}")
-    if client_info.get("profil"):
-        lines.append(f"- Profil : {client_info['profil']}")
+
+    # --- Identité / adresse du signataire (SEULEMENT si ce n'est pas un conseil) ---
+    if not is_legal_counsel:
+        prenom = _capitalize_name(client_info.get("prenom"))
+        nom = _capitalize_name(client_info.get("nom"))
+        nom_complet = _capitalize_name(client_info.get("nom_complet"))
+
+        full = nom_complet or " ".join(p for p in [prenom, nom] if p)
+        if full:
+            lines.append(f"- Vos nom et prénom : {full}")
+        if client_info.get("adresse"):
+            lines.append(f"- Votre adresse : {client_info['adresse']}")
+        if client_info.get("profil"):
+            lines.append(f"- Profil : {client_info['profil']}")
 
     # --- Infos spécifiques au cas ---
     if case == "infidelite_filature":
@@ -1121,12 +1232,23 @@ def _filter_missing_questions(
     case: str,
     client_info: dict[str, str | None],
     case_info: dict[str, str | None],
+    is_legal_counsel: bool = False,
 ) -> list[str]:
-    """Retourne la liste des questions qui n'ont pas encore été répondues."""
+    """Retourne la liste des questions qui n'ont pas encore été répondues.
+
+    v1.27.5 — si ``is_legal_counsel=True``, on SAUTE les 3 premières questions
+    (Vos nom et prénom / Votre adresse / Votre GSM) : elles concernent le
+    client final, pas le conseil qui nous écrit. Le conseil a déjà donné SES
+    propres coordonnées, et l'identité du client final sera obtenue via la
+    collaboration avocat-détective (pas par formulaire). Cf. #656.
+    """
     merged = {**client_info, **case_info}
     specs = _CASE_QUESTION_SPECS.get(case, [])
     missing: list[str] = []
-    for question, keys in specs:
+    start_idx = 3 if is_legal_counsel else 0
+    for i, (question, keys) in enumerate(specs):
+        if i < start_idx:
+            continue
         if not _question_is_answered(merged, keys):
             missing.append(question)
     return missing
@@ -1140,11 +1262,16 @@ def _build_standard_draft(
     case: str,
     client_info: dict[str, str | None],
     case_info: dict[str, str | None],
+    is_legal_counsel: bool = False,
 ) -> list[str]:
-    """Assemble le brouillon standard avec résumé des infos reçues + questions manquantes."""
+    """Assemble le brouillon standard avec résumé des infos reçues + questions manquantes.
+
+    v1.27.5 — passe ``is_legal_counsel`` aux helpers pour adapter le rendu quand
+    le mail vient d'un avocat/conseil. Cf. #656 Jennifer Das.
+    """
     settings = get_settings()
-    received = _format_received_info(client_info, case_info, case)
-    missing = _filter_missing_questions(case, client_info, case_info)
+    received = _format_received_info(client_info, case_info, case, is_legal_counsel)
+    missing = _filter_missing_questions(case, client_info, case_info, is_legal_counsel)
 
     lines = [greeting, "", need, ""]
 
@@ -1159,25 +1286,46 @@ def _build_standard_draft(
         )
 
     if missing:
-        lines.extend(
-            [
-                (
-                    "Afin de préparer votre dossier dans les meilleures conditions, et pouvoir "
-                    "vous donner une estimation de devis fiable, pourriez-vous me transmettre "
-                    "les éléments suivants :"
-                ),
-            ]
-        )
+        if is_legal_counsel:
+            lines.extend(
+                [
+                    (
+                        "Afin de préparer le dossier de votre client dans les meilleures "
+                        "conditions, et pouvoir vous donner une estimation de devis fiable, "
+                        "pourriez-vous me transmettre les éléments suivants :"
+                    ),
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    (
+                        "Afin de préparer votre dossier dans les meilleures conditions, et pouvoir "
+                        "vous donner une estimation de devis fiable, pourriez-vous me transmettre "
+                        "les éléments suivants :"
+                    ),
+                ]
+            )
         for i, q in enumerate(missing, 1):
             lines.append(f"{i}. {q}.")
     else:
-        lines.extend(
-            [
-                "J'ai bien noté tous les éléments utiles à ce stade. "
-                "Je vous recontacte très prochainement par téléphone pour finaliser le devis "
-                "et convenir d'un échange sur ce dossier.",
-            ]
-        )
+        if is_legal_counsel:
+            lines.extend(
+                [
+                    "J'ai bien noté tous les éléments utiles à ce stade. "
+                    "Je reprends contact avec vous très prochainement par téléphone "
+                    "pour finaliser le devis et convenir d'un échange sur le dossier "
+                    "de votre client.",
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    "J'ai bien noté tous les éléments utiles à ce stade. "
+                    "Je vous recontacte très prochainement par téléphone pour finaliser le devis "
+                    "et convenir d'un échange sur ce dossier.",
+                ]
+            )
         # Pas de bloc tarifaire si le dossier est déjà complet? On le garde quand même
         # pour la transparence, mais on l'insère avant le closing.
         lines.append("")
@@ -1205,14 +1353,24 @@ def _build_standard_draft(
         )
 
     if missing:
-        lines.extend(
-            [
-                "",
-                "Dès réception de ces éléments, je reprendrai contact avec vous "
-                "pour finaliser le devis et convenir d'un échange téléphonique "
-                "sur ce nouveau dossier.",
-            ]
-        )
+        if is_legal_counsel:
+            lines.extend(
+                [
+                    "",
+                    "Dès réception de ces éléments, je reprendrai contact avec vous "
+                    "pour finaliser le devis et convenir d'un échange téléphonique "
+                    "sur le dossier de votre client.",
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    "",
+                    "Dès réception de ces éléments, je reprendrai contact avec vous "
+                    "pour finaliser le devis et convenir d'un échange téléphonique "
+                    "sur ce nouveau dossier.",
+                ]
+            )
 
     lines.extend(
         [
@@ -1526,6 +1684,7 @@ def _build_illegal_refusal_draft(
     case: str,
     client_info: dict[str, str | None],
     case_info: dict[str, str | None],
+    is_legal_counsel: bool = False,
 ) -> list[str]:
     """Brouillon de refus poli d'une demande hors-légalité + requalification.
 
@@ -1555,14 +1714,24 @@ def _build_illegal_refusal_draft(
             seen.add(q)
 
     lines = [greeting, ""]
-    lines.extend(
-        [
-            "Nous accusons bonne réception de votre demande. Je comprends la "
-            "situation que vous décrivez et je prends votre démarche très au "
-            "sérieux.",
-            "",
-        ]
-    )
+    if is_legal_counsel:
+        lines.extend(
+            [
+                "Nous accusons bonne réception de la demande que vous nous "
+                "transmettez pour le compte de votre client. Je comprends la "
+                "situation décrite et je prends votre démarche très au sérieux.",
+                "",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "Nous accusons bonne réception de votre demande. Je comprends la "
+                "situation que vous décrivez et je prends votre démarche très au "
+                "sérieux.",
+                "",
+            ]
+        )
     lines.extend(
         [
             "Je dois toutefois être transparent avec vous sur un point essentiel : "
@@ -1584,13 +1753,27 @@ def _build_illegal_refusal_draft(
             "pouvons faire en revanche, dans un cadre parfaitement légal et éprouvé, "
             f"c'est {alternative}.",
             "",
-            "Pour cela, je dois qualifier précisément votre dossier et comprendre "
-            "l'objectif final que vous poursuivez. Plus les éléments ci-dessous seront "
-            "complets, plus je pourrai vous proposer une intervention adaptée et un "
-            "budget réaliste.",
-            "",
         ]
     )
+    if is_legal_counsel:
+        lines.extend(
+            [
+                "Pour qualifier précisément le dossier de votre client et lui "
+                "proposer la stratégie d'enquête la plus adaptée, je vous invite "
+                "à me transmettre les éléments suivants :",
+                "",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "Pour cela, je dois qualifier précisément votre dossier et comprendre "
+                "l'objectif final que vous poursuivez. Plus les éléments ci-dessous seront "
+                "complets, plus je pourrai vous proposer une intervention adaptée et un "
+                "budget réaliste.",
+                "",
+            ]
+        )
 
     if missing:
         lines.extend(
@@ -1649,19 +1832,33 @@ def build_qualification_draft(
     reply_to: str = "",
 ) -> str:
     """Génère un brouillon qualifiant structuré et déterministe."""
+    client_info = _extract_client_info(body, sender, reply_to=reply_to)
+    case_info = _extract_case_info(body, case)
+    first_name = client_info.get("prenom") or _extract_first_name(body)
+
+    # v1.27.5 — détection d'un mail écrit par un conseil (avocat, notaire,
+    # huissier) pour le compte d'un client. Cf. #656 Jennifer Das + brief CDAL
+    # 2026-06-27. Si détecté : salutation « Bonjour Maître, », pas de prénom
+    # dans la salutation (titre suffit). Le `_format_received_info` et
+    # `_filter_missing_questions` reçoivent ``is_legal_counsel=True`` pour
+    # adapter le rendu (coordonnées de contact au lieu d'identité, skip des
+    # 3 premières questions qui concernent le client final).
+    is_legal_counsel = _is_legal_counsel_email(body, sender)
+    if is_legal_counsel:
+        greeting = "Bonjour Maître,"
+    else:
+        greeting = f"Bonjour {first_name}," if first_name else "Bonjour,"
+
     # v1.24.1 — refus poli d'une demande hors-légalité (piratage, extraction de
     # communications, logiciel espion). On court-circuite le brouillon qualifiant
     # standard par une réponse ferme qui propose l'alternative légale. Cf. #614.
     is_illegal, _reason = _detect_illegal_request(body)
     if is_illegal:
-        client_info = _extract_client_info(body, sender, reply_to=reply_to)
-        case_info = _extract_case_info(body, case)
-        first_name = client_info.get("prenom") or _extract_first_name(body)
-        greeting = f"Bonjour {first_name}," if first_name else "Bonjour,"
         log.info(
             "qualification.illegal_request_detected",
             case=case,
             first_name=first_name,
+            is_legal_counsel=is_legal_counsel,
         )
         return "\n".join(
             _build_illegal_refusal_draft(
@@ -1671,13 +1868,9 @@ def build_qualification_draft(
                 case,
                 client_info,
                 case_info,
+                is_legal_counsel=is_legal_counsel,
             )
         )
-
-    client_info = _extract_client_info(body, sender, reply_to=reply_to)
-    case_info = _extract_case_info(body, case)
-    first_name = client_info.get("prenom") or _extract_first_name(body)
-    greeting = f"Bonjour {first_name}," if first_name else "Bonjour,"
 
     # v1.25.1 — demande floue : le client raconte sa situation sans exprimer une
     # demande opérationnelle claire (pas de cible/horaires/lieu, pas de question
@@ -1694,10 +1887,15 @@ def build_qualification_draft(
                 case,
                 client_info,
                 case_info,
+                is_legal_counsel=is_legal_counsel,
             )
         )
 
     need = _rephrase_need(subject, body, case)
+    # v1.27.5 — adaptation de la formulation « votre besoin » quand c'est un
+    # conseil qui écrit pour son client : on parle de la mission DU CLIENT.
+    if is_legal_counsel:
+        need = _rephrase_need_for_counsel(body, case)
 
     # Pour le cas dette, on conserve la structure spécifique de Daniel.
     if case == "recuperation_dette":
@@ -1724,6 +1922,7 @@ def build_qualification_draft(
             case=case,
             client_info=client_info,
             case_info=case_info,
+            is_legal_counsel=is_legal_counsel,
         )
     return "\n".join(lines)
 
@@ -1921,6 +2120,7 @@ def _build_vague_request_draft(
     case: str,
     client_info: dict[str, str | None],
     case_info: dict[str, str | None],
+    is_legal_counsel: bool = False,
 ) -> list[str]:
     """Brouillon de clarification pour une demande floue.
 
@@ -1929,43 +2129,80 @@ def _build_vague_request_draft(
     (transparence) et propose un échange téléphonique au numéro fourni le cas
     échéant. PAS de questions opérationnelles (inadaptées tant que la demande
     n'est pas clarifiée). Cf. v1.25.1 — #515 / #615.
+
+    v1.27.5 — si ``is_legal_counsel=True``, le wording bascule sur « votre
+    client » (le client final suivi par l'avocat) et le rappel téléphonique se
+    fait sur le GSM de l'avocat (jamais sur un éventuel téléphone du client
+    final, qu'on n'a pas).
     """
     settings = get_settings()
-    received = _format_received_info(client_info, case_info, case)
+    received = _format_received_info(client_info, case_info, case, is_legal_counsel=is_legal_counsel)
 
     lines = [greeting, ""]
-    lines.extend(
-        [
-            "Je vous remercie pour votre message et accuse bonne réception de "
-            "votre demande. Je prends le temps de vous lire avec attention.",
-            "",
-        ]
-    )
+    if is_legal_counsel:
+        lines.extend(
+            [
+                "Je vous remercie pour votre message et accuse bonne réception de "
+                "la demande que vous nous transmettez pour le compte de votre "
+                "client. Je prends le temps de la lire avec attention.",
+                "",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "Je vous remercie pour votre message et accuse bonne réception de "
+                "votre demande. Je prends le temps de vous lire avec attention.",
+                "",
+            ]
+        )
 
     if received:
         lines.extend(["Vous m'avez déjà communiqué les éléments suivants :", "", *received, ""])
 
-    lines.extend(
-        [
-            "Afin de bien comprendre votre demande et de pouvoir vous proposer un "
-            "devis adapté, pourriez-vous me préciser ce que vous souhaitez obtenir "
-            "concrètement de notre intervention ?",
-            "",
-        ]
-    )
+    if is_legal_counsel:
+        lines.extend(
+            [
+                "Afin de bien comprendre le dossier de votre client et de pouvoir "
+                "vous proposer un devis adapté, pourriez-vous me préciser ce que "
+                "vous souhaitez obtenir concrètement de notre intervention ?",
+                "",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "Afin de bien comprendre votre demande et de pouvoir vous proposer un "
+                "devis adapté, pourriez-vous me préciser ce que vous souhaitez obtenir "
+                "concrètement de notre intervention ?",
+                "",
+            ]
+        )
 
     # Task #4 (partiel) : pour les formulaires WP relayés par un forwarder, le
     # vrai contact du client est le téléphone extrait du body. On propose un
     # échange au numéro fourni plutôt que de répondre au forwarder email.
+    # v1.27.5 — pour un avocat, on rappelle au GSM de l'avocat (jamais à un
+    # téléphone du client final, qu'on ne doit pas contacter directement).
     tel = client_info.get("telephone")
     if tel:
-        lines.extend(
-            [
-                f"Je me permets également de vous recontacter au {tel} pour en "
-                f"discuter de vive voix, si vous le souhaitez.",
-                "",
-            ]
-        )
+        if is_legal_counsel:
+            lines.extend(
+                [
+                    f"Pour faciliter nos échanges, je me permettrai également de "
+                    f"vous recontacter au {tel} (votre GSM) pour en discuter de "
+                    f"vive voix, si vous le souhaitez.",
+                    "",
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    f"Je me permets également de vous recontacter au {tel} pour en "
+                    f"discuter de vive voix, si vous le souhaitez.",
+                    "",
+                ]
+            )
 
     lines.extend(
         [

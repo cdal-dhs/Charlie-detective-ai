@@ -1,5 +1,143 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.27.5] — 2026-06-27 (brouillon « avocat/conseil » : salutation Maître + pronom « votre client »)
+
+### Contexte
+Suite au fix v1.27.4 sur le mail **#656 (Jennifer Das, avocate)**, le brouillon
+généré était techniquement correct (questions numérotées, tarifs, 2 détectives)
+mais restait **maladroit socialement** :
+- salutation **« Bonjour Jennifer, »** au lieu de **« Bonjour Maître, »** ;
+- wording **« vous souhaitez… »** au lieu de parler de **« votre client »** ;
+- rappel téléphonique au GSM du client final (qu'on ne doit PAS contacter
+  directement, c'est l'avocat qui gère le dossier).
+
+Un professionnel du droit écrit rarement à la première personne « je » : il
+définit la mission **de son client**. Le brouillon doit refléter cette
+intermédiation.
+
+### Ajouté
+- **`app/pipeline/qualification_builder.py`** : nouveau helper
+  `_is_legal_counsel_email(body, sender)` qui combine 3 catégories d'indices :
+  1. **Indices lexicaux body** : `\bavocat[ée]?\b`, `\bma[îi]tre\s+X`,
+     `\bnotaire\b`, `\bhuissier(?:\s+de\s+justice)?\b`,
+     `\bagissant\s+(?:pour\s+(?:le\s+)?compte|en\s+(?:le\s+)?nom)\s+de`,
+     `\b(?:son|notre|votre|mon)\s+client\b`, `\bPour\s+Me\b`,
+     `\b[ée]tude\s+de\s+(?:Ma[îi]tre|M[ée]\s+)`, `\bconseil\s+(?:juridique|
+     d[' ]un\s+client)\b`, `\bma[îi]tre\s+[A-ZÀ-Ÿ][\w'À-Ÿ\-]+\b`.
+  2. **Indices structurels** : `Pour Me`, `En notre qualité de conseil`,
+     `mand[ée] par/au nom de`.
+  3. **Indices sender** (fallback) : `_LEGAL_DOMAIN_HINTS` capture
+     `avocat|notaire|huissier|legal|juridique|juris|advocaat|advocat`
+     dans le hostname email.
+  Règle d'or : ≥ 1 indice suffit (faux positif acceptable, faux négatif
+  intolérable — rater un avocat = « Bonjour Jennifer » qui jure).
+
+- **Nouveau `_rephrase_need_for_counsel(body, case)`** : reformulation du
+  besoin orientée « votre client » pour tous les cas (`infidelite_filature`,
+  `incapacite_travail`, `recherche_personne`, `investigation_successorale`,
+  `securite_passé_violences`, fallback générique).
+
+### Changé
+- **`build_qualification_draft`** : détection `is_legal_counsel` **AVANT** tous
+  les autres checks (illegal / vague / dette / succession / standard).
+  - Salutation : **« Bonjour Maître, »** quand `is_legal_counsel=True`
+    (générique, pas personnalisé avec le prénom de l'avocat — le titre suffit).
+  - Cas standard : wording passe de « vous » à « votre client » partout :
+    - « Merci pour les éléments » → inchangé (les éléments sont bien ceux de
+      l'avocat).
+    - « Pourriez-vous me transmettre » → « pourriez-vous me transmettre »
+      (déjà orienté avocat).
+    - « préparer votre dossier » → « **préparer le dossier de votre client** ».
+    - « Je vous recontacte » → « **Je reprends contact avec vous** pour le
+      dossier de votre client ».
+    - « Dès réception… nouveau dossier » → « **Dès réception… dossier de
+      votre client** ».
+  - Cas illegal (refus poli) : wording adapté « la demande que vous nous
+    transmettez **pour le compte de votre client** » + « **qualifier
+    précisément le dossier de votre client** ».
+  - Cas vague (clarification) : « la demande **que vous nous transmettez
+    pour le compte de votre client** » + « pourriez-vous me préciser ce
+    que **vous souhaitez obtenir concrètement** » (l'avocat sait, on ne
+    lui demande pas de deviner ce que veut son client — formulation
+    conservée mais contextualisée).
+  - Rappel téléphonique : **au GSM de l'avocat** (« Pour faciliter nos
+    échanges, je me permettrai également de vous recontacter au 0498… —
+    votre GSM ») — JAMAIS au téléphone du client final.
+
+- **`_format_received_info(client_info, case_info, case, is_legal_counsel=False)`**
+  : quand `is_legal_counsel=True`, **skip** des champs d'identité
+  (`Vos nom et prénom`, `Votre adresse`, `Profil`) — les Nom/Prénom du
+  formulaire sont ceux de l'avocat, pas du client final, donc les afficher
+  serait trompeur. Seules les **coordonnées de contact de l'avocat**
+  apparaissent, avec un libellé adapté (« Votre GSM (pour vous recontacter) »
+  vs « Votre GSM »).
+
+- **`_filter_missing_questions(case, client_info, case_info, is_legal_counsel=False)`**
+  : quand `is_legal_counsel=True`, **skip des 3 premières questions
+  identitaires** (`Vos nom et prénom complets`, `Votre adresse complète`,
+  `Votre GSM de contact direct`) — ce sont les coordonnées du CLIENT FINAL
+  que l'avocat n'a pas à nous transmettre dans le premier mail.
+
+- **`_build_standard_draft`** : passe `is_legal_counsel` à tous les helpers.
+  Wording adapté pour le bloc « demande de complément » et le closing.
+
+- **`_build_vague_request_draft(greeting, first_name, mailbox, case, client_info, case_info, is_legal_counsel=False)`**
+  : nouvelle signature. Wording adapté pour le rappel téléphonique (GSM avocat
+  uniquement).
+
+- **`_build_illegal_refusal_draft(greeting, first_name, mailbox, case, client_info, case_info, is_legal_counsel=False)`**
+  : nouvelle signature. Wording adapté pour le contexte de refus poli
+  (« la demande que vous nous transmettez pour le compte de votre client »).
+
+### Tests
+- **11 nouveaux tests** dans `tests/test_qualification_builder.py` :
+  - `_is_legal_counsel_email` × 8 : avocat avec qualité conseil, signature
+    « Pour Me », Maître agissant pour compte, notaire, huissier de justice,
+    client régulier (False), domaine cabinet-juridique, domaine avec
+    `avocat`.
+  - `build_qualification_draft` × 1 (cas Maître Dupont agissant pour M. Martin) :
+    salutation « Bonjour Maître, » générique + « votre client » + pas de
+    formulation « vous souhaitez mettre en place une surveillance » +
+    tarifs + 2 détectives.
+  - `_build_vague_request_draft(is_legal_counsel=True)` × 1 : wording
+    « dossier de votre client » + rappel au GSM avocat uniquement.
+- **Test #656 mis à jour** : vérifie maintenant salutation Maître, absence
+  de « Bonjour Jennifer », présence de « votre client » et « dossier de
+  votre client », absence de la question « Vos nom et prénom complets »,
+  présence des questions opérationnelles filature.
+
+### Métriques
+- **351 tests verts** (340 avant + 11 nouveaux).
+- **0 régression** : tous les tests existants (clients réguliers, dette,
+  recherche, succession, illegal, vague request) passent.
+
+### Backfill
+Mail **#656** à rejouer en prod après déploiement (le brouillon v1.27.4
+actuellement déposé est techniquement correct mais utilise « Bonjour Jennifer ») :
+```bash
+ssh root@69.62.110.165 'cd /opt/DETECTIVE && \
+  docker compose exec -T detective python -m scripts.deliver_pending_drafts --only-id 656 --apply'
+```
+
+### Note nettoyage
+Daniel aura **2 brouillons #656** dans `Brouillons OVH` après backfill (ancien
+v1.27.4 « Bonjour Jennifer » + nouveau v1.27.5 « Bonjour Maître »). À
+supprimer manuellement par Daniel ou par un script de nettoyage à venir
+(`scripts/cleanup_old_drafts.py`).
+
+### Fichiers modifiés
+- `app/_version.py` : `VERSION = "1.27.5"`.
+- `app/pipeline/qualification_builder.py` : ajout `_is_legal_counsel_email`,
+  `_is_legal_counsel_sender`, `_LEGAL_COUNSEL_PATTERNS`, `_LEGAL_DOMAIN_HINTS`,
+  `_rephrase_need_for_counsel` ; adaptation `_format_received_info`,
+  `_filter_missing_questions`, `_build_standard_draft`,
+  `_build_vague_request_draft`, `_build_illegal_refusal_draft`,
+  `build_qualification_draft`.
+- `tests/test_qualification_builder.py` : +11 tests + 1 mis à jour.
+- `CHANGELOG.md` : cette entrée.
+
+---
+
 ## [1.27.4] — 2026-06-27 (fix brouillon « vague request » sur mails d'avocats)
 
 ### Contexte

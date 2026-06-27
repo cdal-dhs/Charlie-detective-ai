@@ -10,6 +10,7 @@ from app.config import MailboxConfig
 from app.pipeline.qualification_builder import (
     _build_vague_request_draft,
     _extract_first_name,
+    _is_legal_counsel_email,
     _is_vague_request,
     build_followup_ack_draft,
     build_qualification_draft,
@@ -375,7 +376,15 @@ def test_is_vague_request_avocate_not_vague() -> None:
 
 
 def test_build_qualification_draft_avocate_standard_path(mailbox: MailboxConfig) -> None:
-    """#656 — le mail d'avocate produit le brouillon STANDARD (pas le flou)."""
+    """#656 — le mail d'avocate produit le brouillon STANDARD (pas le flou),
+    avec salutation « Bonjour Maître, » et wording orienté « votre client ».
+
+    v1.27.5 — l'avocate écrit pour le compte d'un client, donc :
+    - salutation = « Bonjour Maître, » (pas « Bonjour Jennifer, »)
+    - les questions d'identité (nom/prénom/adresse) sont SKIP car ce sont
+      celles de l'avocat, pas du client final
+    - le wording parle de « votre client » (pas « vous »)
+    """
     body = (
         "Je vous adresse la présente en ma qualité de conseil d'un client qui "
         "souhaiterait faire éventuellement appel à vos services dans le cadre de "
@@ -398,14 +407,25 @@ def test_build_qualification_draft_avocate_standard_path(mailbox: MailboxConfig)
         mailbox=mailbox,
         case="infidelite_filature",
     )
-    # Brouillon STANDARD = questions numérotées (l'avocate a un objectif clair).
-    # Note : la question "Vos nom et prénom complets" est déjà répondue (Nom + Prénom
-    # du formulaire) → n'apparaît PAS dans les questions manquantes, c'est attendu.
-    assert "2. Nom, prénom et adresse de départ connue de la personne concernée" in draft
-    assert "3. Photo récente de la personne concernée" in draft
-    assert "7. Habitudes de la cible" in draft
+    # --- v1.27.5 salutation + pronom « votre client » ---
+    assert "Bonjour Maître," in draft
+    # Pas de salutation personnalisée avec le prénom de l'avocate.
+    assert "Bonjour Jennifer" not in draft
+    # Reformulation du besoin parle du client final (pas de l'avocate).
+    assert "votre client" in draft
+    # Pas de mention « Vos nom et prénom complets » (question skippée : ces
+    # champs du formulaire sont ceux de l'avocat, pas du client final).
+    assert "Vos nom et prénom complets" not in draft
+    # Le wording de la demande de complément parle du dossier de votre client.
+    assert "dossier de votre client" in draft
+
+    # --- Questions opérationnelles présentes (filature/surveillance) ---
+    assert "1. Nom, prénom et adresse de départ connue de la personne concernée" in draft
+    assert "2. Photo récente de la personne concernée" in draft
+    # Tarifs + 2 détectives.
     assert "Ouverture de dossier : 200 € HTVA." in draft
-    # Pas le brouillon flou (qui demanderait « précisez votre objectif »).
+    assert "deux détectives" in draft
+    # Pas le brouillon flou.
     assert "souhaitez obtenir concrètement" not in draft
 
 
@@ -464,3 +484,127 @@ def test_is_vague_request_investigation_successorale_never_vague() -> None:
 def test_is_vague_request_recuperation_dette_never_vague() -> None:
     """Régression — dette : jamais floue (le brouillon dédié gère sa logique)."""
     assert _is_vague_request("Bonjour", "recuperation_dette", {}, {}) is False
+
+
+# --- v1.27.5 — détection d'un conseil (avocat / notaire / huissier) ----------
+# Brief CDAL 2026-06-27 : « il FAUT dire bonjour Maître !! et parler de la
+# situation de SON ou SA client(e) et pas elle » — #656 Jennifer Das.
+
+
+def test_is_legal_counsel_email_avocate_qualite_conseil() -> None:
+    body = (
+        "Je vous adresse la présente en ma qualité de conseil d'un client qui "
+        "souhaiterait faire éventuellement appel à vos services dans le cadre "
+        "de son divorce."
+    )
+    assert _is_legal_counsel_email(body, "j.das@vangysel-wyart.be") is True
+
+
+def test_is_legal_counsel_email_pour_me_signature() -> None:
+    body = "Pour Me Alain-Charles VAN GYSEL\nBien dévouée,\nJennifer Das, avocate\n"
+    assert _is_legal_counsel_email(body, "j.das@vangysel-wyart.be") is True
+
+
+def test_is_legal_counsel_email_maitre_agissant_pour_compte() -> None:
+    body = (
+        "Maître Dupont, agissant pour le compte de Monsieur Jean Martin, vous "
+        "sollicite pour établir un constat d'adultère."
+    )
+    assert _is_legal_counsel_email(body, "maitre@dupont-avocat.be") is True
+
+
+def test_is_legal_counsel_email_notaire() -> None:
+    body = "Étude de Maître Leroy, notaire à Bruxelles. Notre client M. Dupont..."
+    assert _is_legal_counsel_email(body, "etude@leroy-notaire.be") is True
+
+
+def test_is_legal_counsel_email_huissier() -> None:
+    body = (
+        "En ma qualité d'huissier de justice, je vous contacte au nom de mon "
+        "client pour une mission de constat."
+    )
+    assert _is_legal_counsel_email(body, "huissier@justice.be") is True
+
+
+def test_is_legal_counsel_email_regular_client_returns_false() -> None:
+    body = (
+        "Bonjour,\n\nJe souhaite mettre en place une filature sur mon conjoint. "
+        "Cordialement,\nPierre Martin\n"
+    )
+    assert _is_legal_counsel_email(body, "pierre@example.com") is False
+
+
+def test_is_legal_counsel_email_law_firm_domain() -> None:
+    """Domaine cabinet juridique reconnu (heuristique sender).
+
+    Indice = `cabinet-juridique` dans le hostname (détecté par ``_is_legal_counsel_sender``).
+    """
+    body = "Bonjour, je vous contacte pour le compte d'un client du cabinet."
+    assert _is_legal_counsel_email(body, "contact@cabinet-juridique-dupont.be") is True
+
+
+def test_is_legal_counsel_email_avocat_in_domain() -> None:
+    """Domaine contenant « avocat » = cabinet."""
+    body = "Bonjour, je vous contacte au nom de mon client."
+    assert _is_legal_counsel_email(body, "contact@dupont-avocat.be") is True
+
+
+def test_is_legal_counsel_email_empty() -> None:
+    assert _is_legal_counsel_email("", "client@example.com") is False
+
+
+def test_build_qualification_draft_maitre_salutation_et_votre_client(
+    mailbox: MailboxConfig,
+) -> None:
+    """#656 — l'avocate doit recevoir un brouillon « Bonjour Maître, » + wording
+    orienté sur SON client (pas sur elle)."""
+    body = (
+        "Maître Dupont, agissant pour le compte de Monsieur Jean Martin, vous "
+        "sollicite pour établir un constat d'adultère en vue d'une procédure "
+        "de divorce. Merci de nous faire part de vos conditions d'intervention."
+    )
+    draft = build_qualification_draft(
+        subject="Demande de devis",
+        body=body,
+        sender="maitre@dupont-avocat.be",
+        mailbox=mailbox,
+        case="infidelite_filature",
+    )
+    # Salutation Maître (pas « Bonjour Maître Dupont, » : générique).
+    assert draft.startswith("Bonjour Maître,")
+    # Pas de prénom de l'avocat dans la salutation.
+    assert "Bonjour Maître Dupont" not in draft
+    # Reformulation orientée client (pas sur le maître).
+    assert "votre client" in draft
+    # Pas la formulation standard « Je comprends que vous souhaitez mettre en
+    # place une surveillance » qui s'adresse à la personne qui écrit.
+    assert "Je comprends que vous souhaitez mettre en place une surveillance" not in draft
+    # Tarifs + 2 détectives conservés.
+    assert "Ouverture de dossier : 200 € HTVA." in draft
+    assert "deux détectives" in draft
+
+
+def test_build_vague_request_draft_legal_counsel_uses_votre_client(
+    mailbox: MailboxConfig,
+) -> None:
+    """Brouillon de clarification pour avocat = « votre client », pas « vous »."""
+    draft = "\n".join(
+        _build_vague_request_draft(
+            greeting="Bonjour Maître,",
+            first_name=None,
+            mailbox=mailbox,
+            case="infidelite_filature",
+            client_info={"telephone": "0498284677"},
+            case_info={},
+            is_legal_counsel=True,
+        )
+    )
+    # Salutation Maître.
+    assert "Bonjour Maître," in draft
+    # Wording orienté « votre client » (formulation dédiée conseil).
+    assert "dossier de votre client" in draft
+    # Rappel au GSM de l'avocat, pas au client final.
+    assert "0498284677" in draft
+    assert "votre GSM" in draft
+    # Pas d'invitation à rappeler le client final (on n'a pas son numéro).
+    assert "recontacter votre client au" not in draft
