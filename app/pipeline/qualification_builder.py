@@ -675,15 +675,25 @@ def _extract_case_info(body: str, case: str) -> dict[str, str | None]:
                 info["prenom_cible"] = nom_match.group(2).strip().strip(";,.:")
 
         # 2. Relation explicite : "mon mari X Y", "ma femme X Y", "mon épouse X Y",
-        #    "madame X Y", "ma conjointe X Y".
+        #    "madame X Y", "ma conjointe X Y", "ma fiancée X Y", "mon fiancé X Y",
+        #    "ma compagne X Y", "mon compagnon X Y", "ma concubine X Y".
+        #    v1.28.0 — RC1 fix : ajout fiancé(e), compagne/on, concubin(e) (#672 Kirara).
+        #    On arrête la capture aux verbes/mots-outils pour ne pas avaler
+        #    "habitant à Tournai" ou "de me tromper".
         if not info.get("prenom_cible"):
             relation_match = re.search(
                 r"(?:"
-                r"mon\s+(?:mari|époux|épouse|femme|conjoint|conjointe)|"
-                r"ma\s+(?:femme|épouse|conjointe)|"
-                r"(?:madame|mme)"
-                r")\s*"
-                r"([A-ZÀ-Ÿ][a-zà-ÿ]+(?:\s+[A-ZÀ-Ÿ][a-zà-ÿ]+){0,3})?",
+                r"mon\s+(?:mari|époux|épouse|femme|conjoint|conjointe|fiancé|fiancée|"
+                r"compagnon|compagne|concubin|concubine|ami|amie|copain|copine)|"
+                r"ma\s+(?:femme|épouse|conjointe|fiancée|fiancé|compagne|compagnon|"
+                r"concubine|concubin|amie|ami|copine|copain)|"
+                r"(?:madame|mme|monsieur|mr)"
+                r")\s+"
+                r"([A-ZÀ-Ÿ][a-zà-ÿ]+(?:[\s\-][A-ZÀ-Ÿ][a-zà-ÿ]+)?)"
+                # Arrêt : verbe, pronom, mot-outil, ou fin de segment (. , \n $).
+                r"(?=(?:\s+(?:habitant|réside|résidant|habite|demeure|vit|qui|que|qu'|"
+                r"de|d'|à|a|au|aux|en|part|aller|doit|souhaite|veut|pense|croit|"
+                r"suspect|est|sera|a\s+été)\b|[,;.:!\n]|$))",
                 clean_body,
                 re.IGNORECASE,
             )
@@ -898,6 +908,76 @@ def _extract_case_info(body: str, case: str) -> dict[str, str | None]:
         if statut_match:
             info["statut_cible"] = _clean_value(statut_match.group(0))
 
+    # --- v1.28.0 — RC3 + RC4 : brique "mission datée" cross-cas -----------------
+    # Détecte une date précise (JJ/MM, JJ mois, JJ mois YYYY) et une ville liée à
+    # la mission (résidence/destination de la cible). Pour tous les cas où la
+    # notion de "moment d'intervention" est pertinente (filature, recherche,
+    # dette, incapacité). On stocke date_cible et ville_cible pour les réutiliser
+    # dans le rendu des éléments reçus et dans le builder mission_dated dédié.
+    _MISSION_CASES = {
+        "infidelite_filature",
+        "recherche_personne",
+        "incapacite_travail",
+        "recuperation_dette",
+        "investigation_successorale",
+    }
+    if case in _MISSION_CASES:
+        # Détection date — patterns permissifs (ordre naturel français).
+        # Formats acceptés : "le 02/07", "la journée du 02/07", "le 2 juillet",
+        # "le 15 août 2026", "semaine du 18 juin", "week-end du 5 juillet",
+        # "durant l'été 2026". Pour la phrase capacité+date+réserve on n'utilise
+        # que le jour+mois (format court), mais on capture la formulation
+        # source pour ne pas perdre le contexte.
+        date_match = re.search(
+            r"(?:"
+            # "la journée du 02/07" — v1.28.0 fix #672 Kirara
+            r"\bla\s+journ[ée]e\s+du\s+\d{1,2}(?:[/-]\d{1,2}|\s+\w+)(?:\s+\d{4})?|"
+            # Format court JJ/MM(/YYYY)? — obligatoire "le"
+            r"\ble\s+\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?|"
+            # Format long JJ mois (YYYY)? — obligatoire "le"
+            r"\ble\s+\d{1,2}\s+(?:janvier|février|fevrier|mars|avril|mai|juin|juillet|"
+            r"août|aout|septembre|octobre|novembre|décembre|decembre)(?:\s+\d{4})?|"
+            # "semaine du JJ mois"
+            r"\bsemaine\s+du\s+\d{1,2}\s+\w+|"
+            # "week-end du JJ mois"
+            r"\bweek[\s-]?end\s+du\s+\d{1,2}\s+\w+|"
+            # "durant l'été 2026" / "durant cet été"
+            r"(?:durant|pendant)\s+(?:cet\s+|l[' ])?[ée]t[ée]\s+\d{4}|"
+            # "début juillet" / "fin août"
+            r"(?:début|fin|mi[- ]?)?\s*(?:juillet|août|aout|septembre|octobre|novembre)\s+\d{4}"
+            r")",
+            clean_body,
+            re.IGNORECASE,
+        )
+        if date_match:
+            captured = date_match.group(0).strip()
+            # Normaliser pour la phrase capacité+date+réserve : on extrait juste
+            # le jour+mois (format court) si on a capturé "la journée du 02/07".
+            m_short = re.search(r"\d{1,2}[/-]\d{1,2}", captured)
+            if m_short and "journ" in captured.lower():
+                info["date_cible"] = m_short.group(0)
+            else:
+                info["date_cible"] = captured
+
+        # Détection ville — mots-clés de localisation après mots mission.
+        # On réutilise _ADRESSE_BE_PATTERN si disponible ; sinon regex simple.
+        city_match = re.search(
+            r"(?:à|a|au|aux|en|pour|sur|destination|vers)\s+"
+            r"([A-ZÀ-Ÿ][a-zà-ÿ\-]+(?:\s+[A-ZÀ-Ÿ][a-zà-ÿ\-]+)?)",
+            clean_body,
+        )
+        if city_match:
+            candidate = _clean_value(city_match.group(1))
+            # Filtre les faux positifs (mois, jours, mots-outils).
+            STOP = {
+                "janvier", "février", "fevrier", "mars", "avril", "mai", "juin",
+                "juillet", "août", "aout", "septembre", "octobre", "novembre",
+                "décembre", "decembre", "lundi", "mardi", "mercredi", "jeudi",
+                "vendredi", "samedi", "dimanche",
+            }
+            if candidate and candidate.lower() not in STOP and len(candidate) > 2:
+                info["ville_cible"] = candidate
+
     return info
 
 
@@ -944,7 +1024,7 @@ _CASE_QUESTION_SPECS: dict[str, list[tuple[str, list[str]]]] = {
         ),
         ("Photo récente de la personne concernée", ["photo_cible"]),
         (
-            "Véhicule de la personne concernée (marque, modèle, couleur) si connu",
+            "Caractéristiques de son véhicule (marque, modèle, couleur, immatriculation si connue)",
             ["vehicule_cible"],
         ),
         ("Adresse précise de départ pour le début de la surveillance", ["adresse_depart_cible"]),
@@ -1144,6 +1224,12 @@ def _format_received_info(
             lines.append(f"- Profil : {client_info['profil']}")
 
     # --- Infos spécifiques au cas ---
+    # v1.28.0 — RC4 fix (#672 Kirara) : date + ville de mission datée en tête de
+    # bloc pour bien les faire ressortir (avant les autres infos cas).
+    if case_info.get("date_cible"):
+        lines.append(f"- Date de mission souhaitée : {case_info['date_cible']}")
+    if case_info.get("ville_cible"):
+        lines.append(f"- Ville / lieu de surveillance : {case_info['ville_cible']}")
     if case == "infidelite_filature":
         cible_parts = [
             p
@@ -1383,6 +1469,339 @@ def _build_standard_draft(
             "contact@detectivebelgique.be",
         ]
     )
+    return lines
+
+
+# --- v1.28.0 — RC5 : brique 'mission datée' ---------------------------------
+# Quand le client exprime une mission avec date précise (< 90j dans le futur)
+# ET/OU ville précise, on génère un brouillon dédié qui :
+# - accuse réception chaleureux avec "confiance",
+# - annonce la capacité ("Nous pouvons effectivement organiser..."),
+# - présente la méthode (2 détectives si filature),
+# - liste UNIQUEMENT les questions strictement manquantes (pas les coordonnées
+#   déjà reçues du client),
+# - signale l'urgence si date proche (< 30j),
+# - clôt par "Dans l'attente de votre retour, Bien à vous".
+# Inspiration : brouillon Daniel référence #672 Kirara (Olivier, filature fiancée
+# datée 02/07 à Tournai).
+
+
+def _is_mission_dated(case_info: dict[str, str | None], case: str) -> bool:
+    """True si la mission est explicitement datée et mérite le builder dédié.
+
+    Critères (permissifs, règle d'or CDAL : faux positif acceptable,
+    faux négatif intolérable — un mail daté qui tombe dans le builder
+    standard = on rate la formulation capacité+date+réserve + urgence FR).
+
+    v1.28.0 — Filtre les formulations trop vagues (« durant cet été 2026 »,
+    « fin août », etc.) qui sont mieux servies par le builder standard :
+    ici on veut une date **précise** (jour+mois, idéalement < 90 jours).
+    """
+    # Cas non éligibles : ont leur propre builder dédié.
+    if case in {"recuperation_dette", "investigation_successorale"}:
+        return False
+
+    date = case_info.get("date_cible")
+    ville = case_info.get("ville_cible")
+
+    # Une date précise (jour + mois + année) ET présente dans le futur proche
+    # (< 90 jours) est l'idéal. Pour les formulations vagues (« durant cet
+    # été 2026 »), on reste sur le builder standard.
+    if date:
+        import re as _re
+        from datetime import datetime
+
+        # Rejeter les formulations trop vagues
+        vague_keywords = ("cet été", "cet hiver", "cet automne", "ce printemps",
+                          "cette année", "l'été prochain", "l'année prochaine")
+        if any(v in date.lower() for v in vague_keywords):
+            return False
+
+        # Format JJ/MM(/YYYY)?
+        m = _re.search(r"(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?", date)
+        if m:
+            try:
+                d, mo = int(m.group(1)), int(m.group(2))
+                y = int(m.group(3)) if m.group(3) else datetime.now().year
+                if y < 100:
+                    y += 2000
+                target = datetime(y, mo, d)
+                # Tolérance : pas dans le passé lointain ET < 180 jours
+                delta = (target - datetime.now()).days
+                if -30 <= delta <= 180:
+                    return True
+            except ValueError:
+                pass
+
+        # Format JJ mois (YYYY)?
+        mois_map = {
+            "janvier": 1, "février": 2, "fevrier": 2, "mars": 3, "avril": 4,
+            "mai": 5, "juin": 6, "juillet": 7, "août": 8, "aout": 8,
+            "septembre": 9, "octobre": 10, "novembre": 11, "décembre": 12,
+            "decembre": 12,
+        }
+        m = _re.search(r"(\d{1,2})\s+(\w+)(?:\s+(\d{4}))?", date.lower())
+        if m:
+            d = int(m.group(1))
+            mo = mois_map.get(m.group(2))
+            if mo:
+                try:
+                    y = int(m.group(3)) if m.group(3) else datetime.now().year
+                    target = datetime(y, mo, d)
+                    delta = (target - datetime.now()).days
+                    if -30 <= delta <= 180:
+                        return True
+                except ValueError:
+                    pass
+
+    # Si on a seulement une ville mais avec un mot-clé mission explicite
+    # (filature/surveillance), on accepte aussi (cas limite).
+    return bool(
+        ville
+        and any(
+            kw in (case_info.get("relation_cible") or "").lower()
+            for kw in ("filature", "surveillance", "enquête")
+        )
+    )
+
+
+def _is_date_urgent(date_str: str | None) -> bool:
+    """True si la date est < 30 jours dans le futur (ou aujourd'hui).
+
+    Heuristique simple : parse JJ/MM ou JJ mois, considère que c'est urgent.
+    Pour les formats non parsables, retourne False (non urgent par défaut).
+    """
+    if not date_str:
+        return False
+    import re as _re
+    from datetime import datetime
+
+    # Tenter format JJ/MM(/YYYY)?
+    m = _re.search(r"(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?", date_str)
+    if m:
+        d, mo = int(m.group(1)), int(m.group(2))
+        y = int(m.group(3)) if m.group(3) else datetime.now().year
+        if y < 100:
+            y += 2000
+        try:
+            target = datetime(y, mo, d)
+            delta = (target - datetime.now()).days
+            return 0 <= delta <= 30
+        except ValueError:
+            return False
+    # Tenter format JJ mois (YYYY)?
+    mois_map = {
+        "janvier": 1, "février": 2, "fevrier": 2, "mars": 3, "avril": 4,
+        "mai": 5, "juin": 6, "juillet": 7, "août": 8, "aout": 8,
+        "septembre": 9, "octobre": 10, "novembre": 11, "décembre": 12,
+        "decembre": 12,
+    }
+    m = _re.search(r"(\d{1,2})\s+(\w+)(?:\s+(\d{4}))?", date_str.lower())
+    if m:
+        d = int(m.group(1))
+        mo = mois_map.get(m.group(2))
+        if mo:
+            y = int(m.group(3)) if m.group(3) else datetime.now().year
+            try:
+                target = datetime(y, mo, d)
+                delta = (target - datetime.now()).days
+                return 0 <= delta <= 30
+            except ValueError:
+                return False
+    return False
+
+
+def _mission_dated_verb(case: str) -> str:
+    """Verbe d'action correspondant au cas métier pour la phrase capacité+date+réserve."""
+    return {
+        "infidelite_filature": "une mission de filature",
+        "recherche_personne": "une recherche de personne",
+        "incapacite_travail": "une surveillance d'incapacité de travail",
+        "securite_passé_violences": "une enquête sur le passé d'une personne",
+        "contre_espionnage_micros": "une détection de micros ou caméras",
+        "non_determine": "une mission d'enquête",
+    }.get(case, "une mission d'enquête")
+
+
+def _build_mission_dated_draft(
+    greeting: str,
+    first_name: str | None,
+    case: str,
+    mailbox: MailboxConfig,
+    client_info: dict[str, str | None],
+    case_info: dict[str, str | None],
+    is_legal_counsel: bool = False,
+) -> list[str]:
+    """Brouillon spécialisé mission datée — v1.28.0 (RC5, inspiration #672 Kirara).
+
+    Structure :
+    1. Salutation
+    2. Accusé chaleureux (confiance)
+    3. Capacité + date + réserve (le pivot du ton Daniel)
+    4. Méthode (2 détectives si filature)
+    5. Éléments reçus (avec date + ville en tête)
+    6. Questions strictement manquantes (filtrées)
+    7. Tarifs
+    8. Urgence FR (si date proche < 30j)
+    9. CTA + clôture "Dans l'attente de votre retour, Bien à vous"
+    10. Signature SRL
+    """
+    from app.config import get_settings
+
+    settings = get_settings()
+    received = _format_received_info(client_info, case_info, case, is_legal_counsel)
+    missing = _filter_missing_questions(case, client_info, case_info, is_legal_counsel)
+
+    verb = _mission_dated_verb(case)
+    date_str = case_info.get("date_cible") or "la date convenue"
+    ville_str = case_info.get("ville_cible")
+
+    lines: list[str] = [greeting, ""]
+
+    # --- 2. Accusé chaleureux (confiance) --------------------------------
+    if is_legal_counsel:
+        lines.extend(
+            [
+                "Nous vous remercions pour votre message et pour la confiance "
+                "que vous accordez à notre agence pour le compte de votre client.",
+                "",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "Nous vous remercions pour votre message et pour la confiance "
+                "que vous accordez à notre agence.",
+                "",
+            ]
+        )
+
+    # --- 3. Reformulation du besoin (wording « votre client » pour avocat) --
+    # v1.28.0 — Régression #656 : doit aussi apparaître dans le builder mission
+    # datée (sinon les mails avocat tombent en faux positif et perdent le wording).
+    if is_legal_counsel:
+        lines.append("Pour le dossier de votre client, ")
+        lines.append("")
+
+    # --- 4. Capacité + date + réserve -----------------------------------
+    # Le pivot du ton Daniel : on confirme qu'on PEUT faire la mission à la
+    # date demandée, sous réserve d'avoir les infos complémentaires.
+    if ville_str:
+        lines.append(
+            f"Nous pouvons effectivement organiser {verb} le {date_str} à "
+            f"{ville_str}, sous réserve de recevoir rapidement les informations "
+            f"nécessaires afin de préparer l'intervention et de vous transmettre "
+            f"un devis précis."
+        )
+    else:
+        lines.append(
+            f"Nous pouvons effectivement organiser {verb} le {date_str}, "
+            f"sous réserve de recevoir rapidement les informations nécessaires "
+            f"afin de préparer l'intervention et de vous transmettre un devis précis."
+        )
+    lines.append("")
+
+    # --- 4. Méthode (2 détectives si filature) ---------------------------
+    if case == "infidelite_filature":
+        lines.extend(
+            [
+                f"Une {verb.replace('une mission de ', '')} est réalisée par "
+                f"deux détectives (homme et femme). Cette méthode permet "
+                f"d'assurer la discrétion, d'éviter toute perte de la cible et "
+                f"d'augmenter considérablement les chances de réussite de la mission.",
+                "",
+            ]
+        )
+
+    # --- 5. Éléments reçus -----------------------------------------------
+    if received:
+        lines.extend(["Vous m'avez déjà communiqué les éléments suivants :", ""])
+        lines.extend(received)
+        lines.append("")
+
+    # --- 6. Questions strictement manquantes -----------------------------
+    if missing:
+        if is_legal_counsel:
+            lines.append(
+                "Afin d'établir notre devis et de planifier l'intervention, "
+                "nous vous remercions de nous communiquer dans les meilleurs "
+                "délais les éléments suivants :"
+            )
+        else:
+            lines.append(
+                "Afin d'établir notre devis et de planifier l'intervention, "
+                "nous vous remercions de nous communiquer dans les meilleurs délais :"
+            )
+        lines.append("")
+        for i, q in enumerate(missing, 1):
+            lines.append(f"{i}. {q}.")
+        lines.append("")
+        lines.append(
+            "Ces informations sont essentielles, car elles nous permettent de "
+            "dimensionner correctement la mission et d'établir un devis au plus juste."
+        )
+        lines.append("")
+
+    # --- 7. Tarifs (transparence) ----------------------------------------
+    lines.extend(
+        [
+            "Sur le plan tarifaire :",
+            f"- Ouverture de dossier : {settings.dossier_opening_fee} € HTVA.",
+            f"- Rapport final : {settings.report_fee} € HTVA.",
+            f"- Heure de détective : {settings.hourly_rate_day} €/h HTVA "
+            f"({settings.hourly_rate_night_weekend} €/h nuit/week-end).",
+            "",
+        ]
+    )
+
+    # --- 8. Urgence FR (si date proche < 30j) ----------------------------
+    if _is_date_urgent(date_str):
+        if is_legal_counsel:
+            lines.append(
+                "Compte tenu du caractère urgent de votre demande et de la date "
+                "très proche de l'intervention, nous vous invitons à nous "
+                "transmettre ces éléments dès que possible afin que nous puissions "
+                "vérifier la disponibilité de nos détectives et vous envoyer "
+                "rapidement notre proposition."
+            )
+        else:
+            lines.append(
+                "Compte tenu du caractère urgent de votre demande et de la date "
+                "très proche de l'intervention, nous vous invitons à nous "
+                "transmettre ces éléments dès que possible afin que nous puissions "
+                "vérifier la disponibilité de nos détectives et vous envoyer "
+                "rapidement notre proposition."
+            )
+        lines.append("")
+
+    # --- 9. CTA + clôture ------------------------------------------------
+    if is_legal_counsel:
+        lines.extend(
+            [
+                "Dans l'attente de votre retour,",
+                "",
+                "Bien à vous,",
+                "",
+                "Daniel Hurchon",
+                f"{mailbox.brand}",
+                "GSM 0471/31.81.20",
+                "contact@detectivebelgique.be",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "Dans l'attente de votre retour,",
+                "",
+                "Bien à vous,",
+                "",
+                "Daniel Hurchon",
+                f"{mailbox.brand}",
+                "GSM 0471/31.81.20",
+                "contact@detectivebelgique.be",
+            ]
+        )
+
     return lines
 
 
@@ -1836,6 +2255,15 @@ def build_qualification_draft(
     case_info = _extract_case_info(body, case)
     first_name = client_info.get("prenom") or _extract_first_name(body)
 
+    # v1.28.0 — RC4 fix (#672 Kirara) : si une ville de mission est détectée
+    # (cas daté) et que le client n'a pas fourni d'adresse postale complète,
+    # on remplit client_info["adresse"] avec la ville pour éviter que
+    # `_filter_missing_questions` redemande "Votre adresse complète" alors
+    # qu'on a déjà l'info essentielle. La ville est insuffisante pour un vrai
+    # devis mais on signale par ville_cible au lecteur.
+    if case_info.get("ville_cible") and not client_info.get("adresse"):
+        client_info["adresse"] = case_info["ville_cible"]
+
     # v1.27.5 — détection d'un mail écrit par un conseil (avocat, notaire,
     # huissier) pour le compte d'un client. Cf. #656 Jennifer Das + brief CDAL
     # 2026-06-27. Si détecté : salutation « Bonjour Maître, », pas de prénom
@@ -1912,6 +2340,27 @@ def build_qualification_draft(
             mailbox,
             client_info,
             case_info,
+        )
+    elif _is_mission_dated(case_info, case):
+        # v1.28.0 — RC5 fix (#672 Kirara) : mission datée détectée →
+        # brouillon dédié capacité+date+réserve + urgence FR + "Dans l'attente".
+        # Court-circuit AVANT le standard pour bien marquer la structure Daniel.
+        log.info(
+            "qualification.mission_dated_detected",
+            case=case,
+            first_name=first_name,
+            is_legal_counsel=is_legal_counsel,
+            date_cible=case_info.get("date_cible"),
+            ville_cible=case_info.get("ville_cible"),
+        )
+        lines = _build_mission_dated_draft(
+            greeting=greeting,
+            first_name=first_name,
+            case=case,
+            mailbox=mailbox,
+            client_info=client_info,
+            case_info=case_info,
+            is_legal_counsel=is_legal_counsel,
         )
     else:
         lines = _build_standard_draft(
@@ -2046,7 +2495,13 @@ _OPERATIONAL_SIGNAL_RE = re.compile(
     r"(?:mission|dossier|enqu[êe]te|surveillance|filature)\s+"
     r"(?:qui\s+se\s+d[ée]rouler[ai]t|qui\s+aurait\s+lieu|pr[ée]vue?\s+pour)\s+"
     r"(?:durant|en|au\s+cours\s+de|pendant|estiv[ée]|[aà]\s+compter\s+de)|"
-    r"durant\s+(?:cet\s+|l[' ])?[ée]t[ée]\s+\d{4}"
+    r"durant\s+(?:cet\s+|l[' ])?[ée]t[ée]\s+\d{4}|"
+    # v1.28.0 — RC2 fix (#672 Kirara) : formulations naturelles en français
+    # "filature le 02 juillet", "surveillance le 15/08", "durant le week-end du 5 juillet".
+    r"(?:mission|dossier|enqu[êe]te|surveillance|filature|constat)\s+"
+    r"(?:le|du|au)\s+\d|"
+    r"durant\s+le\s+week[\s-]?end\s+du\s+\d|"
+    r"journ[ée]e\s+du\s+\d"
     r")",
     re.IGNORECASE,
 )
@@ -2136,7 +2591,9 @@ def _build_vague_request_draft(
     final, qu'on n'a pas).
     """
     settings = get_settings()
-    received = _format_received_info(client_info, case_info, case, is_legal_counsel=is_legal_counsel)
+    received = _format_received_info(
+        client_info, case_info, case, is_legal_counsel=is_legal_counsel
+    )
 
     lines = [greeting, ""]
     if is_legal_counsel:

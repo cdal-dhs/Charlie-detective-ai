@@ -1,5 +1,60 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.28.0] — 2026-06-29 (brique « mission datée » + détection enhanced — inspiration Daniel, fix mail #672 Kirara)
+
+### Contexte
+Sur le mail **#672 (Olivier Kirara, filature fiancée datée du 02/07 à Tournai)**, Charlie produisait un brouillon « qualifiant médiocre » qui demandait au client ce qu'il souhaitait obtenir, alors que :
+- le client avait déjà **donné toutes ses coordonnées** (GSM, email, nom, profil, mission datée, ville précise) ;
+- la mission était **clairement définie** (filature fiancée, datée, créneau connu) ;
+- Daniel produit un mail de référence qui **accuse, valide la capacité, explique la méthode, liste uniquement les questions strictement manquantes, et signale l'urgence**.
+
+L'objectif métier reformulé par CDAL : **« avons-nous toutes les infos ? sinon qu'est-ce qu'on demande de plus ? »** — pour TOUS les cas.
+
+### Ajouté
+- **`app/pipeline/qualification_builder.py`** — brique « mission datée » (RC5) : nouvelle fonction `_build_mission_dated_draft()` (~190 lignes) qui produit un brouillon structurellement aligné sur le benchmark Daniel :
+  1. Salutation personnalisée (premier prénom)
+  2. Accusé chaleureux avec « confiance »
+  3. **Capacité + date + réserve** : « Nous pouvons effectivement organiser une mission de [TYPE] le [DATE] à [VILLE], sous réserve de recevoir rapidement les informations nécessaires… »
+  4. Méthode pédagogique (2 détectives si filature)
+  5. Éléments reçus (avec date + ville en tête de bloc, RC4)
+  6. Questions strictement manquantes (filtrées via `_filter_missing_questions`, ne re-demandent jamais nom/GSM/adresse/profil déjà fournis)
+  7. Tarifs inchangés
+  8. **Phrase urgence FR** si date < 30 jours : « Compte tenu du caractère urgent de votre demande et de la date très proche de l'intervention, nous vous invitons à nous transmettre ces éléments dès que possible… »
+  9. Clôture « Dans l'attente de votre retour, Bien à vous »
+  10. Signature SRL
+- Nouveau helper `_is_mission_dated(case_info, case)` détecte les missions **vraiment datées** (date précise jour+mois dans la fenêtre -30j/+180j) **et** filtre les formulations trop vagues (« durant cet été 2026 » — couvre la régression #656 Jennifer Das qui doit rester sur le builder standard).
+- Nouveau helper `_is_date_urgent(date_str)` retourne `True` si la date est < 30 jours dans le futur (utilisé pour la phrase d'urgence FR).
+- Nouveau helper `_mission_dated_verb(case)` retourne le nom de mission par cas (« une mission de filature », « une recherche de personne », etc.).
+
+### Changé
+- **`app/pipeline/qualification_builder.py`** — extraction (`_extract_case_info`) :
+  - **RC1** — Pattern `relation_match` élargi pour reconnaître fiancé/compagnon/compagne/concubine/concubin (masculin + féminin).
+  - **RC3** — Nouvelle détection de date précise (formats JJ/MM, JJ mois, semaine du JJ, week-end du JJ, durant été YYYY) avec heuristique de normalisation pour « la journée du 02/07 » → « 02/07 ».
+  - **RC4** — Nouvelle détection de ville_cible via pattern `à|a|au|aux|en|pour|sur|destination|vers` +1 mot capitalisé (filtrage stopwords mois/jours).
+  - **RC2** — `_OPERATIONAL_SIGNAL_RE` élargi pour matcher « mission le 02 juillet », « durant le week-end du 5 juillet », « journée du 02/07 ».
+- **`app/pipeline/qualification_builder.py`** — rendu (`_format_received_info`) : les éléments cas-spécifiques affichent désormais « Date de mission souhaitée : JJ/MM » et « Ville / lieu de surveillance : VILLE » en tête de bloc quand détectés.
+- **`app/pipeline/qualification_builder.py`** — `_CASE_QUESTION_SPECS["infidelite_filature"]` : wording véhicule aligné sur le ton Daniel : « Caractéristiques de son véhicule (marque, modèle, couleur, immatriculation si connue) » au lieu de « Véhicule de la personne concernée (marque, modèle, couleur) si connu ».
+- Branche `build_qualification_draft()` : nouveau branchement `elif _is_mission_dated(case_info, case)` avant `_build_standard_draft()` (mais après `_build_standard_draft` pour les cas non datés).
+
+### Fixé
+- **#672 (Olivier Kirara)** : brouillon produit conforme au benchmark Daniel (capacité+date+réserve, 2 détectives, urgence FR, Dans l'attente, signature SRL, questions manquantes filtrées).
+- **Régression #656 (Jennifer Das, avocate)** — formulation « durant cet été 2026 » NE déclenche PAS le builder mission datée (faux positif évité) : le mail reste sur le builder standard qui inclut « Pour le dossier de votre client, ». Wordings avocat préservés.
+
+### Tests
+- Nouveau fichier `tests/test_mission_dated_draft.py` — **17 tests TDD** (368 verts au total vs 351 avant).
+  - RC1 : `test_extract_case_info_recognizes_fiancee`, `..._fiance_masculin`, `..._compagne`
+  - RC2 : `test_operational_signal_matches_mission_le_02_juillet`, `..._le_02_07`, `..._durant_weekend`
+  - RC3+RC4 : `test_extract_case_info_extracts_mission_date_short`, `..._longue`, `..._city`, `test_format_received_info_includes_date_and_city_for_mission_dated`
+  - RC5 : `test_build_qualification_draft_kirara_produces_brouillon_daniel`, `..._no_vague_request`, `..._questions_filtered`, `..._signature_srl`, `..._urgence_date_proche`
+  - Non-régression : `test_non_dated_mail_passes_through_standard_draft`, `test_vague_date_does_not_trigger_mission_dated` (couvre #656 Jennifer Das)
+- Nouvelle fixture `tests/fixtures/mail_672_kirara.json` — body #672 anonymisé (PII purgées : « Jean Dupont » / `firstname.lastname@example.com` / GSM exemple).
+
+### Hors périmètre
+- Pas de nouveau service / nouvelle ENV / nouvelle DB.
+- `pyproject.toml` reste figé en `1.9.5` volontairement.
+- `_build_standard_draft` reste inchangé pour les cas non datés → préservation du comportement actuel (mail Sophie, mail Gaya Ndjoli, etc.).
+- Few-shot `personality_daniel.txt` : pas modifié dans cette version (le builder `_build_mission_dated_draft` produit du texte déterministe, pas de LLM rédacteur — le prompt n'influence pas le résultat).
+
 ## [1.27.5] — 2026-06-27 (brouillon « avocat/conseil » : salutation Maître + pronom « votre client »)
 
 ### Contexte
