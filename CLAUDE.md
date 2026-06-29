@@ -45,7 +45,7 @@
 
 ## 3. Stack technique
 
-État au **2026-06-27 (v1.27.5)**. La SPEC.md d'origine est désalignée sur certains points — **cette section fait foi**.
+État au **2026-06-29 (v1.28.2)**. La SPEC.md d'origine est désalignée sur certains points — **cette section fait foi**.
 
 | Couche | Choix |
 |---|---|
@@ -216,7 +216,7 @@ ssh root@69.62.110.165 'cd /opt/DETECTIVE && git pull origin main && docker comp
 
 ## 7. État courant du projet
 
-État au **2026-06-27 — v1.27.5** déployée en prod. Voir `HANDOVER.md` pour le détail complet, `CHANGELOG.md` pour l'historique, `docs/ROADMAP.md` pour la roadmap à jour.
+État au **2026-06-29 — v1.28.2** déployée en prod (**379 tests verts**). Voir `HANDOVER.md` pour le détail complet, `CHANGELOG.md` pour l'historique, `docs/ROADMAP.md` pour la roadmap à jour.
 
 ### ✅ Livré
 - **S1 → S4 terminées** : infra & data, pipeline IMAP, génération (RAG mis en pause v1.24.2 — approche déterministe), prod 24/7 sur KVM8.
@@ -238,6 +238,8 @@ ssh root@69.62.110.165 'cd /opt/DETECTIVE && git pull origin main && docker comp
 - **Hotfix SEARCH OVH v1.27.3** : `ex5.mail.ovh.net` rejette le charset UTF-8 implicite de `SEARCH` (`[BADCHARSET (US-ASCII)]`), refuse aussi `charset="us-ascii"` (`Command Argument Error. 11`) et semble rejeter `UNKEYWORD AgentProcessed`. `_search_unprocessed()` implémente 3 niveaux : (1) SEARCH normal, (2) SEARCH sans charset, (3) `SEARCH ALL` + filtrage côté DB via `_mail_exists()` pour écarter les UIDs déjà traités. **328 tests verts**.
 - **Brouillon « vague request » v1.27.4 (#656 Jennifer Das, avocate)** : `_is_vague_request()` court-circuite le brouillon flou si ≥ 1 signal opérationnel fort détecté (mission déléguée par conseil, livrable explicite, question de conditions, annonce d'éléments à fournir, mission avec délai). 5 catégories de patterns regex. `_CLEAR_OBJECTIVE_RE` enrichi dans `objective_check.py`. **340 tests verts** (12 nouveaux). Mail #656 rejoué en prod.
 - **Brouillon avocat/conseil v1.27.5 (#656 Jennifer Das, suite)** : `_is_legal_counsel_email(body, sender)` détecte les pros du droit écrivant pour un client (avocat, notaire, huissier, maître, qualité conseil). Salutation « Bonjour Maître, » générique, wording « votre client » partout, rappel au GSM de l'avocat uniquement (jamais au client final). `_format_received_info` skip l'identité client final, `_filter_missing_questions` skip les 3 questions identitaires. 11 nouveaux tests. **351 tests verts**. Patch bonus `scripts/dedup_drafts_by_email_id.py` (OVH robustness : `--mailbox`/`--skip-mailbox`, throttle FETCH, fix OVH SEARCH ALL `charset=None` + `isdigit()`). 10 brouillons obsolètes supprimés en prod.
+- **Brique « mission datée » v1.28.0 (#672 Olivier Kirara)** : `_build_qualification_draft` détecte les missions explicitement datées (date précise JJ/MM ou JJ mois dans fenêtre -30j/+180j) et bascule vers `_build_mission_dated_draft` qui produit un brouillon structurellement aligné sur le benchmark Daniel — capacité+date+réserve (« Nous pouvons effectivement organiser une mission de filature le 02/07 à Tournai, sous réserve de recevoir rapidement les informations nécessaires »), méthode pédagogique 2 détectives, éléments reçus avec date+ville en tête, questions strictement manquantes (jamais les identités client déjà reçues), tarifs, phrase urgence FR si date < 30j (« Compte tenu du caractère urgent de votre demande et de la date très proche de l'intervention »), clôture « Dans l'attente de votre retour, Bien à vous », signature SRL. Enrichissements extraction `_extract_case_info` (RC1 fiancé/compagnon/concubin, RC3 dates, RC4 villes, RC2 élargi `_OPERATIONAL_SIGNAL_RE`). Garde-fou `_is_mission_dated` filtre les formulations vagues (« durant cet été 2026 ») pour ne pas régresser #656. **17 nouveaux tests TDD** (368 verts). #672 livré en prod (v1.28.1).
+- **Garde-fou anti-brouillon-interne v1.28.2 (#686 CDAL→Daniel réunion IT)** : `is_internal_sender()` dans `prefilter.py` détecte un mail interne (domaine `digitalhs.biz` OU local-part `cdal`/`daniel` sur n'importe quel domaine), whitelist d'exclusion pour préfixes techniques (`wordpress@`, `noreply@`, `contactform@`…) pour ne pas casser `is_wordpress_contact_form()`. `quick_classify()` retourne `"autre"` en première position. `generate_draft()` court-circuite aussi (défense en profondeur) avec `GenerationResult(raw_draft="", note="Sender interne — brouillon skipped")`. **11 nouveaux tests** (379 verts). Backfill prod : #686 brouillon supprimé des Drafts IMAP (UID 38) + DB rollback ; #652/#582/#562/#474/#82 reclassifiés `autre` + `draft_generated=0`.
 
 ### ⏳ En cours
 - **V2b — Polishing cockpit** : filtres inbox (4 boîtes cochées par défaut), latence Charlie < 5s (parallélisation Cerveau2 + SQL déjà faite).

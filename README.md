@@ -10,6 +10,16 @@ L'agent surveille 4 boîtes email (3 boîtes Infomaniak : Detective Belgique FR,
 
 ---
 
+## 🚀 Dernières versions (2026-06-29)
+
+- **v1.28.2** — **Garde-fou anti-brouillon-interne** (fix #686) — préfiltre `is_internal_sender()` détecte les mails internes CDAL/Daniel → catégorie `autre` + `generate_draft()` court-circuite. Backfill des 5 autres mails internes LIVRÉS (#652, #582, #562, #474, #82). **379 tests verts**.
+- **v1.28.0** — **Brique « mission datée » + détection enhanced** (fix #672 Kirara) — `_build_mission_dated_draft()` aligné sur le benchmark Daniel (capacité+date+réserve, 2 détectives, urgence FR, Dans l'attente, signature SRL). 368 tests verts.
+- **v1.27.5** — **Brouillon avocat/conseil** (#656 Jennifer Das, suite) — `_is_legal_counsel_email()` détecte les pros du droit → salutation « Bonjour Maître, » + wording « votre client ». 351 tests verts.
+
+> 📋 Historique complet : [`CHANGELOG.md`](CHANGELOG.md). Pipeline complet : [`HANDOVER.md`](HANDOVER.md). Spec intentions (figée 2026-05-13) : [`docs/SPEC.md`](docs/SPEC.md).
+
+---
+
 ## Architecture en une image
 
 ```
@@ -132,7 +142,7 @@ docker compose up -d --build      # si requirements.txt ou Dockerfile modifiés
 
 ---
 
-## Stack technique (état v1.27.5)
+## Stack technique (état v1.28.2)
 
 | Couche | Choix |
 |---|---|
@@ -155,7 +165,7 @@ docker compose up -d --build      # si requirements.txt ou Dockerfile modifiés
 | Service prod | **Docker + Docker Compose + Traefik** (VPS Hostinger KVM8) |
 | Logs | `structlog` (JSON structuré, rotation 7j) |
 | Config | `pydantic-settings` depuis `.env` |
-| Version | Source unique `app/_version.py` (`VERSION = "1.27.5"`) — `pyproject.toml` figé en 1.9.5 (volontaire) |
+| Version | Source unique `app/_version.py` (`VERSION = "1.28.2"`) — `pyproject.toml` figé en 1.9.5 (volontaire) |
 
 **Ne PAS introduire** sans discussion : Kubernetes, Swarm, Celery, Redis, Postgres, ORM lourd, framework JS front (React/Vue/Angular). Le périmètre Docker actuel (1 service Compose + Traefik externe) est figé.
 
@@ -277,7 +287,7 @@ DETECTIVE_BE/
 
 ## Statut
 
-✅ **Production active** — `detective.digitalhs.biz` — **v1.27.5**
+✅ **Production active** — `detective.digitalhs.biz` — **v1.28.2** (379 tests verts)
 
 - **Pipeline IMAP** : polling 4 boîtes toutes les 5 min (3 Infomaniak + 1 OVH), classification 8 catégories, priorité intelligente, flag `AgentProcessed` (succès) + `AgentAttempted` (libère la queue même en cas de crash, v1.21.3).
 - **Génération brouillon** : gemma4:31b (non-reasoning), style Daniel imité via few-shot learning (v1.22.0) + personnalité Cerveau2. **RAG sqlite-vec en pause (v1.24.2)** — remplacé par le brouillon qualifiant déterministe (`qualification_builder`) pour les `demande_client`/`prise_contact`.
@@ -304,6 +314,8 @@ DETECTIVE_BE/
 - **4ème boîte mail OVH v1.27.3** : ajout de `info@detectives-belgique.be` (brand Detectives Belgique, code cockpit `D_DS`, marque Cerveau2 `detectivesbelgique`, DB `boite4.sqlite`, serveur IMAP `ex5.mail.ovh.net`). Architecture IMAP host par boîte : `MailboxConfig` enrichi avec `imap_host`, `imap_port`, `short_code`, `cerveau2_marque`. Templates cockpit et mappings métier mis à jour. **328 tests verts**.
 - **Brouillon « vague request » v1.27.4 (#656 Jennifer Das, avocate)** : `_OPERATIONAL_SIGNAL_RE` + enrichissement `_CLEAR_OBJECTIVE_RE` → un pro du droit qui définit la mission est reconnu comme objectif clair sans appel LLM. **340 tests verts**.
 - **Brouillon avocat/conseil v1.27.5 (#656 Jennifer Das, suite)** : `_is_legal_counsel_email()` détecte les pros du droit (avocat / notaire / huissier) écrivant pour un client → salutation « Bonjour Maître, » + wording « votre client » + rappel au GSM de l'avocat uniquement. Patch `scripts/dedup_drafts_by_email_id.py` (OVH robust : timeout FETCH, throttle, filter isdigit). **351 tests verts**.
+- **Brique « mission datée » + détection enhanced v1.28.0 (#672 Olivier Kirara)** : `_build_qualification_draft` détecte les missions explicitement datées (date précise JJ/MM ou JJ mois dans fenêtre -30j/+180j) et bascule vers `_build_mission_dated_draft` qui produit un brouillon structurellement aligné sur le benchmark Daniel — capacité+date+réserve (« Nous pouvons effectivement organiser une mission de filature le 02/07 à Tournai, sous réserve de recevoir rapidement les informations nécessaires »), méthode pédagogique 2 détectives, éléments reçus avec date+ville en tête, questions strictement manquantes (photo/véhicule/adresse/horaires/habitudes — jamais les identités client déjà reçues), tarifs, **phrase urgence FR** si date < 30j (« Compte tenu du caractère urgent de votre demande et de la date très proche de l'intervention »), clôture « Dans l'attente de votre retour, Bien à vous », signature SRL. Enrichissements extraction `_extract_case_info` (RC1 fiancé/compagnon/concubin, RC3 dates, RC4 villes, RC2 élargi `_OPERATIONAL_SIGNAL_RE`). Garde-fou `_is_mission_dated` filtre les formulations vagues (« durant cet été 2026 ») pour ne pas régresser #656. **17 nouveaux tests** (368 verts). #672 livré en prod 2026-06-29 (v1.28.1).
+- **Garde-fou anti-brouillon-interne v1.28.2 (#686 CDAL→Daniel réunion IT)** : `is_internal_sender()` dans `prefilter.py` détecte un mail interne (domaine `digitalhs.biz` OU local-part `cdal`/`daniel` sur n'importe quel domaine), whitelist d'exclusion pour préfixes techniques (`wordpress@`, `no-reply@`…) pour ne pas casser `is_wordpress_contact_form()`. `quick_classify()` retourne `"autre"` en première position. `generate_draft()` court-circuite aussi (défense en profondeur) avec `GenerationResult(raw_draft="", note="Sender interne — brouillon skipped")`. **11 nouveaux tests** (379 verts). Backfill prod : #686 brouillon supprimé des Drafts IMAP (UID 38) + DB rollback ; #652/#582/#562/#474/#82 reclassifiés `autre` + `draft_generated=0`.
 - **Header `X-Detective-Mail-Id` v1.25.22** : identifie un brouillon précis en IMAP (réconcilieur + `append_draft`).
 - **Dashboard admin** : stats, settings LLM, audit logs, télémétrie poller, backup Cerveau2.
 - **4 niveaux anti-crash silencieux** : Slack + Resend in-app + cron watchdog externe + Healthchecks.io.
@@ -314,11 +326,11 @@ Voir `docs/ROADMAP.md` pour la roadmap V2b/V2c (polishing cockpit, feedback loop
 
 ## Versions
 
-Version source de vérité : **`app/_version.py`** (`VERSION = "1.27.5"`).
+Version source de vérité : **`app/_version.py`** (`VERSION = "1.28.2"`).
 
 Le badge affiché dans le cockpit est lu dynamiquement depuis `app/_version.py`. **Tolérance zéro** sur la désynchronisation.
 
-Voir [`CHANGELOG.md`](CHANGELOG.md) pour l'historique détaillé (1.18.x → 1.27.x).
+Voir [`CHANGELOG.md`](CHANGELOG.md) pour l'historique détaillé (1.18.x → 1.28.x).
 
 ---
 

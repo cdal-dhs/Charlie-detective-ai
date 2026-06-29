@@ -8,7 +8,7 @@
 ## TABLE DES MATIÈRES (TL;DR)
 
 1. [Qui, quoi, pourquoi](#1-qui-quoi-pourquoi)
-2. [Architecture actuelle v1.27.5](#2-architecture-actuelle-v1275)
+2. [Architecture actuelle v1.28.2](#2-architecture-actuelle-v1282)
 3. [Le pipeline Charlie AI](#3-le-pipeline-charlie-ai)
 4. [Stack technique détaillée](#4-stack-technique-détaillée)
 5. [Cerveau2-Det — second cerveau](#5-cerveau2-det--second-cerveau)
@@ -38,7 +38,7 @@
 
 ---
 
-## 2. Architecture actuelle (v1.27.5)
+## 2. Architecture actuelle (v1.28.2)
 
 ```
 [4 boîtes email IMAP — 3 Infomaniak + 1 OVH] ──polling 5min──► [Worker asyncio Python]
@@ -108,7 +108,7 @@
 
 ---
 
-## 3. Le pipeline Charlie AI (état v1.27.5)
+## 3. Le pipeline Charlie AI (état v1.28.2)
 
 Le fichier `app/charlie.py` contient `ask_charlie()`. Flow exact :
 
@@ -193,7 +193,7 @@ if not response and rows:
 
 ---
 
-## 4. Stack technique détaillée (v1.27.5)
+## 4. Stack technique détaillée (v1.28.2)
 
 | Couche | Outil | Version / Détail |
 |---|---|---|
@@ -403,7 +403,7 @@ Le poller IMAP ne traite que les mails reçus depuis cette date. Les archives hi
 
 ### Règle 8 — Provider LLM pour Ollama Cloud = `openai/<model>` + `api_base=https://ollama.com/v1`
 - **JAMAIS** `ollama_chat/<model>` (force litellm vers `localhost:11434`).
-- **Modèles actuels (v1.27.5)** : `gemma4:31b` (principal, non-reasoning — réponse dans `message.content`), `glm-5.2:cloud` (fallback, reasoning model — réponse dans `reasoning_content`, extrait automatiquement par `complete()`).
+- **Modèles actuels (v1.28.2)** : `gemma4:31b` (principal, non-reasoning — réponse dans `message.content`), `glm-5.2:cloud` (fallback, reasoning model — réponse dans `reasoning_content`, extrait automatiquement par `complete()`).
 - **JAMAIS** `kimi-k2` (404), `ollama_chat/<model>` (Ollama local inexistant sur le VPS).
 - Si un nouveau modèle ne répond pas, vérifier immédiatement provider + api_base + nom.
 
@@ -418,9 +418,9 @@ Le poller IMAP ne traite que les mails reçus depuis cette date. Les archives hi
 
 ---
 
-## 9. Bugs résolus et points de vigilance (état au 2026-06-27, v1.27.5)
+## 9. Bugs résolus et points de vigilance (état au 2026-06-29, v1.28.2)
 
-### ✅ Bugs résolus récents (v1.22.0 → v1.27.5)
+### ✅ Bugs résolus récents (v1.22.0 → v1.28.2)
 
 | # | Problème | Statut | Fichier | Notes |
 |---|---|---|---|---|
@@ -459,8 +459,10 @@ Le poller IMAP ne traite que les mails reçus depuis cette date. Les archives hi
 | 33 | **OVH SEARCH rejete charset / `UNKEYWORD AgentProcessed`** — dès le premier cycle poller sur `detectives_belgique`, `client.search()` avec charset UTF-8 implicite a été rejeté par `ex5.mail.ovh.net` : `[BADCHARSET (US-ASCII)]`. Le fallback `charset="us-ascii"` a aussi échoué avec `Command Argument Error. 11`. L'usage de `UNKEYWORD AgentProcessed` semblait également rejeté. La 4ème boîte ne pouvait donc pas être lue. | ✅ **Corrigé v1.27.3** | `app/workers/imap_poller.py` | `_search_unprocessed()` : (1) SEARCH normal, (2) SEARCH sans charset, (3) `SEARCH ALL` + filtrage côté DB via `_mail_exists()` pour écarter les UIDs déjà traités. `needs_db_filter=True` propagé dans `_process_mailbox()`. **328 tests verts**. |
 | 34 | **Brouillon « vague request » insultant pour un avocat (#656 Jennifer Das, 2026-06-26)** — Charlie classait correctement le mail en `infidelite_filature` mais `_is_vague_request()` déclenchait le brouillon flou parce qu'aucune info opérationnelle n'était extractible (un avocat ne donne pas les détails techniques dans le premier contact : il définit la **mission**, pas les données). Résultat : brouillon qui demandait à l'avocate de préciser l'objectif qu'elle avait formulé 3 fois explicitement. Faux négatif intolérable (rater un pro du droit = brouillon insultant). | ✅ **Corrigé v1.27.4** | `app/pipeline/qualification_builder.py` + `app/pipeline/objective_check.py` | Nouveau `_OPERATIONAL_SIGNAL_RE` capturant 5 catégories de signaux forts (mission déléguée par conseil, livrable opérationnel, question de mission déguisée, annonce d'éléments, indicateurs temporels). Court-circuit dans `_is_vague_request()` AVANT le check « cas classé sans info opérationnelle ». `_CLEAR_OBJECTIVE_RE` enrichi avec les mêmes patterns pour court-circuiter l'appel LLM sur les mails d'avocats (gain latence). **340 tests verts** (12 nouveaux). |
 | 35 | **Brouillon avocat socialement maladroit (#656 Jennifer Das, suite)** — même après le fix v1.27.4, le brouillon restait maladroit : salutation **« Bonjour Jennifer, »** au lieu de **« Bonjour Maître, »** ; wording **« vous souhaitez… »** au lieu de **« votre client »** ; rappel au GSM du client final (qu'on ne doit PAS contacter directement — c'est l'avocat qui gère le dossier). Un professionnel du droit écrit rarement à la première personne « je » : il définit la mission **de son client**. | ✅ **Corrigé v1.27.5** | `app/pipeline/qualification_builder.py` | Nouveau `_is_legal_counsel_email(body, sender)` combinant indices body (`\bavocat[ée]?\b`, `\bma[îi]tre\s+[A-ZÀ-Ÿ]`, `\bnotaire\b`, `\bhuissier(?:\s+de\s+justice)?\b`, `\bagissant\s+(?:pour|au\s+nom)\b`, `\b(?:son|notre|votre|mon)\s+client\b`, `\bPour\s+Me\b`, `\b[ée]tude\s+de\s+Ma[îi]tre\b`) + indices sender (domaine `avocat|notaire|huissier|legal|juridique|juris`). Nouveau `_rephrase_need_for_counsel()`. Salutation « Bonjour Maître, » générique. Wording « votre client » partout dans `_build_standard_draft` / `_build_vague_request_draft` / `_build_illegal_refusal_draft`. Skip des questions identitaires + identité client final dans `_format_received_info`. Rappel téléphonique au GSM de l'avocat uniquement. **351 tests verts** (11 nouveaux). Patch bonus `scripts/dedup_drafts_by_email_id.py` (3 commits) : `--mailbox` / `--skip-mailbox` filtres + try/except par UID/mailbox + throttle OVH (`asyncio.sleep(0.1)` tous les 5 FETCH) + fix OVH SEARCH ALL `charset=None` + filtre `isdigit()` (le serveur renvoie `[BADCHARSET (US-ASCII)] The specified charset...` au lieu d'UIDs). 10 brouillons obsolètes supprimés en prod (4 sur Infomaniak dont les 2 doublons #656, 6 sur OVH). |
+| 36 | **Brouillon « qualifiant médiocre » sur mission datée (#672 Olivier Kirara, 2026-06-27)** — Charlie classait correctement en `infidelite_filature` mais `_build_standard_draft` posait les questions identitaires (« Vos nom et prénom complets », « Votre GSM de contact direct », « Votre adresse complète ») alors que **toutes les coordonnées étaient déjà reçues** dans le formulaire (nom, GSM, email, profil) ET que la mission était **explicitement datée** (« filature le 02/07 à Tournai »). Résultat : brouillon qui demandait au client ce qu'il souhaitait, alors que la mission était claire et la date connue. Faux négatif intolérable (un client qui attend une date précise doit recevoir une réponse alignée sur le benchmark Daniel — capacité+date+réserve, urgence FR, Dans l'attente). | ✅ **Corrigé v1.28.0** | `app/pipeline/qualification_builder.py` + `tests/test_mission_dated_draft.py` (nouveau) + `tests/fixtures/mail_672_kirara.json` (nouveau) | **RC1** Pattern `relation_match` élargi (`fiancé`/`fiancée`/`compagne`/`compagnon`/`concubin`/`concubine`) avec lookahead restrictif. **RC2** `_OPERATIONAL_SIGNAL_RE` accepte « mission le 02 juillet » / « durant le week-end du 5 juillet » / « journée du 02/07 ». **RC3**+**RC4** Extraction `_extract_case_info` ajoute `date_cible` (formats JJ/MM, JJ mois, semaine/week-end, été YYYY, etc.) et `ville_cible` (pattern `à/a/au/aux/en/pour/sur/destination/vers` + mot capitalisé, filtrage stopwords mois/jours). **RC4 rendu** `_format_received_info` affiche « Date de mission souhaitée » + « Ville / lieu de surveillance » en tête de bloc éléments reçus. **RC5** Nouvelle brique `_build_mission_dated_draft()` (~190 lignes) alignée sur le benchmark Daniel : salutation → accusé chaleureux avec « confiance » → **capacité+date+réserve** (« Nous pouvons effectivement organiser une mission de filature le 02/07 à Tournai, sous réserve de recevoir rapidement les informations nécessaires… ») → méthode pédagogique 2 détectives → éléments reçus (avec date+ville) → questions strictement manquantes filtrées (photo/véhicule/adresse/horaires/habitudes — **jamais** nom/prénom/GSM/profil déjà reçus) → tarifs → **phrase urgence FR** si date < 30j (« Compte tenu du caractère urgent de votre demande et de la date très proche de l'intervention ») → clôture « Dans l'attente de votre retour, Bien à vous » → signature SRL. Helpers `_is_mission_dated` (filtre formulations vagues « durant cet été 2026 » pour préserver wording « pour le dossier de votre client » sur les mails avocat #656), `_is_date_urgent`, `_mission_dated_verb`. Wording véhicule aligné Daniel (« Caractéristiques de son véhicule (marque, modèle, couleur, immatriculation si connue) »). **17 nouveaux tests TDD** (368 verts). **#672 livré en prod v1.28.1** via `scripts/deliver_pending_drafts --only-id 672 --apply` (brouillon physique dans Drafts Infomaniak, sujet `DEMANDE D'Approbation - Reponse Demande Client : Filature / surveillance — Olivier Kirara`, header `X-Detective-Mail-Id: 672`). |
+| 37 | **Brouillon aberrant sur mail interne (#686 CDAL→Daniel, 2026-06-29)** — CDAL a forwardé une note interne de réunion IT à la boîte `detective_belgique` (pour archive). Charlie a classé le mail en `demande_client` (le classifier v1.24+ est volontairement très permissif pour ne rater aucun vrai client) et a généré un brouillon client aberrant **livré en IMAP Drafts** : salutation « Bonjour PT » (extraction hallucinée du footer « PT Digital Highway Solutions »), accusé de réception d'une note de réunion interne comme si c'était un client. **5 autres mails internes CDAL→Daniel étaient déjà LIVRÉS** avec le même bug (#652, #582, #562, #474, #82 — tous des tests CDAL sauf #686 qui est une vraie note de fond). Cause racine : aucun filtre « sender interne » dans le préfiltre, le classifier, ni le générateur. Faux positif inacceptable (un brouillon aberrant livré dans la boîte Daniel = confusion garantie). | ✅ **Corrigé v1.28.2** | `app/pipeline/prefilter.py` + `app/pipeline/generator.py` + `tests/test_internal_sender_guard.py` (nouveau) | **Défense en profondeur, 3 maillons** : (1) `is_internal_sender()` dans `prefilter.py` détecte un mail interne selon 2 critères : **domaine interne** (`digitalhs.biz`) OU **local-part identifiant un membre** (`cdal`, `daniel` — n'importe quel domaine, ex `cdal@gmail.com`). **Whitelist d'exclusion** pour les préfixes techniques (`wordpress@`, `mail@`, `noreply@`, `no-reply@`, `contactform@`, `postmaster@`, `abuse@`, `newsletter@`, `contact@`, `info@`) pour ne pas casser `is_wordpress_contact_form()`. `quick_classify()` retourne `"autre"` en première position (avant WP). (2) `generate_draft()` court-circuite aussi (défense en profondeur) : si `_is_internal_email(sender)` est True, retourne `GenerationResult(raw_draft="", note="Sender interne — brouillon skipped (v1.28.2)")` AVANT d'invoquer RAG/case_classifier/LLM. Log `warning generator.internal_sender_skip` posé. (3) `GenerationResult` enrichi avec champ optionnel `note: str = ""` (debug). **11 nouveaux tests** (379 verts). **Backfill prod appliqué** : #686 brouillon supprimé des Drafts IMAP (UID 38) + DB rollback (`status=pending, draft_generated=0, ai_draft=NULL`) ; #652/#582/#562/#474/#82 reclassifiés `autre` + `draft_generated=0` (déjà absents des Drafts — Daniel les avait approuvés/rejetés). |
 
-### 🔴 Points de vigilance ouverts (état au 2026-06-27)
+### 🔴 Points de vigilance ouverts (état au 2026-06-29)
 
 #### Point de vigilance #1 — RAG mis en pause depuis v1.24.2 (décision CDAL)
 > Statut changé le 2026-06-23 : ce n'est plus un **bug à corriger en urgence**, c'est une **fonctionnalité volontairement mise en pause**. L'approche déterministe (`qualification_builder` + few-shot Daniel) est plus fiable et remplace le RAG pour la génération des brouillons.
@@ -499,7 +501,7 @@ Vérifier aussi les catégories de `boite2` (10 catégories dont `PRISE_CONTACT:
 
 #### Point de vigilance #2 — Provider litellm pour Ollama Cloud (CRITIQUE v1.21.1)
 `ollama_chat/<model>` force litellm vers `localhost:11434` (Ollama **local**). Le provider correct pour Ollama **Cloud** est `openai/<model>` avec `api_base=https://ollama.com/v1`.
-**Modèles actuels (v1.27.5)** : `openai/gemma4:31b` (principal + classifier + chat, non-reasoning), `openai/glm-5.2:cloud` (fallback, reasoning).
+**Modèles actuels (v1.28.2)** : `openai/gemma4:31b` (principal + classifier + chat, non-reasoning), `openai/glm-5.2:cloud` (fallback, reasoning).
 **Si un nouveau modèle ne répond pas** → vérifier immédiatement provider (openai/ vs ollama_chat/), l'URL api_base (`/v1` pas `/api`), et que le nom de modèle existe sur ollama.com/library.
 
 #### Point de vigilance #3 — glm-5.2:cloud (fallback) est un reasoning model
@@ -779,11 +781,20 @@ fi
 
 ## Note pour le prochain agent
 
-État au **2026-06-27** : **v1.27.5** déployée en prod. Le brouillon qualifiant déterministe gère tous les cas de figure (questions par cas + infos client déjà reçues + refus poli des demandes hors-légalité depuis v1.24.1). **Le RAG est mis en pause** (v1.24.2, `rag_enabled=False`) : l'approche déterministe + few-shot Daniel est plus fiable et le remplace — ce n'est plus un bug à corriger en urgence (voir point de vigilance #1). **Bascule LLM v1.25.0** : `gemma4:31b` (non-reasoning) est le modèle principal sur toutes les tâches (classifier, generator, chat Charlie, case_classifier, translator) ; `glm-5.2:cloud` (reasoning) remplace `glm-5.1:cloud` comme fallback. `kimi-k2.6:cloud` n'est plus utilisé nulle part. **v1.25.22 → v1.25.26** : réconcilieur Drafts IMAP 15 min (re-livraison des crashs silencieux via header `X-Detective-Mail-Id`, anti-doublon `delivered_at IS NULL`) + expéditeur forwarder masqué Reply-To uniquement (`NO_EMAIL_IN_THE_FORM`, backfill prod 224 senders) + #629 finalisé (sujet + sender + proposition). **v1.25.27 → v1.26.0** : nouveau cas métier `investigation_successorale` (#643 Boeteman — brouillon dédié succession + objectif patrimoine reconnu clair sans LLM) + **sujet de brouillon lisible partout** (`suggested_subject` persisté en DB par le poller, écrit dans le sujet IMAP par `append_draft`, affiché dans le cockpit inbox + conversation). **v1.27.3** : ajout 4ème boîte mail OVH `info@detectives-belgique.be` (Detectives Belgique, code cockpit `D_DS`, marque Cerveau2 `detectivesbelgique`, DB `boite4.sqlite`, serveur IMAP `ex5.mail.ovh.net`) — architecture IMAP host par boîte, mappings centralisés dans `MailboxConfig`, templates cockpit dynamiques, **328 tests verts**. **v1.27.4 → v1.27.5** : brouillon avocat/conseil — `_is_legal_counsel_email()` détecte les pros du droit écrivant pour un client, salutation « Bonjour Maître, » + wording « votre client » + rappel au GSM de l'avocat uniquement (cf. #656 Jennifer Das). `scripts/dedup_drafts_by_email_id.py` patché (OVH robustness). **351 tests verts**. 10 brouillons obsolètes supprimés en prod. **Points de vigilance ouverts** : Cerveau2 ne reconnaît pas encore `detectivesbelgique` / `fiche_entreprise` (ingestion OVH échoue en 422, voir point #10). Chantiers ouverts restants : reclassement #614 (validation brouillon refus poli avec CDAL — **PAS finalisé**), re-classement #643 en prod (brouillon succession propre — à valider avec CDAL), Task #4 (vrai contact client formulaires WP via Reply-To), V2b (polishing cockpit), V2c (feedback loop qualité Daniel). Pour le reste, voir HANDOVER §12 (checklist reprise) et §13 (4 niveaux anti-crash silencieux opérationnels).
+État au **2026-06-29** : **v1.28.2** déployée en prod (**379 tests verts**). **Dernières versions** (sprint de la journée) :
+- **v1.28.2 (2026-06-29)** — Garde-fou anti-brouillon-interne (#686). `is_internal_sender()` dans `prefilter.py` détecte un mail interne (domaine `digitalhs.biz` OU local-part `cdal`/`daniel`), whitelist d'exclusion pour préfixes techniques. `quick_classify()` retourne `"autre"` en première position, `generate_draft()` court-circuite avec `note="Sender interne — brouillon skipped"`. Backfill prod : #686 brouillon supprimé des Drafts IMAP (UID 38) + DB rollback ; #652/#582/#562/#474/#82 reclassifiés `autre` + `draft_generated=0`. 11 nouveaux tests.
+- **v1.28.1 (2026-06-29)** — Livraison prod #672 Olivier Kirara (brouillon conforme Daniel, livré via `deliver_pending_drafts --only-id 672 --apply`).
+- **v1.28.0 (2026-06-29)** — Brique « mission datée » (`_build_mission_dated_draft` aligné sur benchmark Daniel). RC1 fiancé/compagnon/concubin, RC2 `_OPERATIONAL_SIGNAL_RE` élargi, RC3+RC4 extraction `date_cible`/`ville_cible` cross-cas + affichage en tête de bloc. Garde-fou `_is_mission_dated` filtre les formulations vagues (« durant cet été 2026 ») pour préserver le wording « pour le dossier de votre client » sur les mails avocat (#656). 17 nouveaux tests.
+
+Contexte technique stable : **Le RAG est mis en pause** (v1.24.2, `rag_enabled=False`) — ce n'est plus un bug à corriger (voir point de vigilance #1). **Bascule LLM v1.25.0** : `gemma4:31b` (non-reasoning) principal sur toutes les tâches ; `glm-5.2:cloud` (reasoning) fallback. **Brouillon qualifiant déterministe** couvre tous les cas (infidélité, recherche personne, incapacité, dette, succession, violences, micros, indéterminé + **mission datée**) avec questions structurées, refus poli hors-légalité (v1.24.1), wording avocat (v1.27.5), exclusion des éléments déjà reçus.
+
+**Historique récent** : **v1.27.5** = brouillon avocat/conseil (#656 Jennifer Das) — `_is_legal_counsel_email()` détecte les pros du droit écrivant pour un client, salutation « Bonjour Maître, » + wording « votre client » + rappel au GSM de l'avocat uniquement. **v1.27.3** = 4ème boîte OVH `info@detectives-belgique.be` (`ex5.mail.ovh.net`, code `D_DS`, marque Cerveau2 `detectivesbelgique`, DB `boite4.sqlite`) — architecture IMAP host par boîte. **v1.25.22 → v1.26.0** = réconcilieur Drafts IMAP + expéditeur forwarder masqué Reply-To + sujet de brouillon lisible partout (`suggested_subject`).
+
+**Chantiers ouverts restants** : reclassement #614 (validation brouillon refus poli avec CDAL — **PAS finalisé**), re-classement #643 en prod (brouillon succession propre — à valider avec CDAL), Task #4 (vrai contact client formulaires WP via Reply-To), V2b (polishing cockpit), V2c (feedback loop qualité Daniel). Pour le reste, voir HANDOVER §12 (checklist reprise) et §13 (4 niveaux anti-crash silencieux opérationnels).
 
 **Philosophie CDAL** : MVP simple d'abord, V2 quand qualité prouvée. Pas d'over-engineering. ROI client : "solde 24/7" sans surdimensionner. Communique court en français, écrit parfois avec des fautes de frappe rapides — décoder l'intention.
 
 ---
 
-*Document mis à jour le 2026-06-27 pour la v1.27.5 de Detective.be Agent IA.*
+*Document mis à jour le 2026-06-29 pour la v1.28.2 de Detective.be Agent IA.*
 
