@@ -1,5 +1,64 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.28.2] — 2026-06-29 (garde-fou anti-brouillon-interne — fix régression #686)
+
+### Contexte
+Le mail **#686 (CDAL→Daniel, résumé du meeting IT 260626)** a été classifié
+`demande_client` et un brouillon client aberrant (salutation "Bonjour PT", accusé
+réception d'une note de réunion comme si c'était un client) a été **livré en
+IMAP Drafts** de la boîte `detective_belgique`. Cause racine : aucun filtre
+"sender interne" dans le préfiltre, ni dans le classifier, ni dans le générateur
+— un mail forwardé depuis `cdal@digitalhs.biz` vers la boîte Daniel était
+traité comme une vraie demande client.
+
+Règle d'or CDAL : aucun mail interne ne doit générer de brouillon de réponse
+client. C'est une note interne, pas une demande.
+
+### Ajouté
+- **`app/pipeline/prefilter.py`** : nouvelle fonction `is_internal_sender(msg)`
+  qui détecte un mail interne selon deux critères :
+  1. **Domaine interne** : `digitalhs.biz` (CDAL, staff DigitalHS).
+  2. **Local-part identifiant un membre** : `cdal`, `daniel` (n'importe quel
+     domaine, ex : `cdal@gmail.com`).
+  Whitelist d'exclusion pour les préfixes techniques : `wordpress`, `mail`,
+  `noreply`, `no-reply`, `contactform`, `postmaster`, `abuse`, `newsletter`,
+  `contact`, `info` (forwarders WP légitimes à NE PAS bloquer).
+- `quick_classify()` : nouveau premier maillon `is_internal_sender()` →
+  retourne `"autre"` (note interne) sans passer par le LLM.
+
+### Changé
+- **`app/pipeline/generator.py`** : nouveau garde-fou de défense en profondeur
+  en haut de `generate_draft()`. Si `_is_internal_email(sender)` est True,
+  retourne un `GenerationResult` avec `raw_draft=""` (brouillon vide) et
+  `note="Sender interne — brouillon skipped (v1.28.2)"`. Log `warning
+  generator.internal_sender_skip` posé.
+- `GenerationResult` : nouveau champ optionnel `note: str = ""` (debug).
+
+### Fixé
+- **#686** : brouillon supprimé des Drafts IMAP (UID 38) + DB rollback
+  (`status=pending, draft_generated=0, ai_draft=NULL, delivered_at=NULL`).
+- **#652, #582, #562, #474, #82** : 5 autres mails internes CDAL→Daniel
+  classifiés `demande_client` et déjà LIVRÉS — backfill de la base pour les
+  repasser en `autre` + suppression des brouillons IMAP physiques.
+
+### Tests
+- Nouveau fichier `tests/test_internal_sender_guard.py` — **11 tests TDD** :
+  - `is_internal_sender` reconnaît `cdal@digitalhs.biz`, `daniel@yahoo.fr`,
+    `staff@digitalhs.biz`, mais PAS `wordpress@detectivebelgique.be` ni
+    `client.real@example.com`.
+  - `quick_classify` route les mails internes vers `autre` ET laisse passer
+    les formulaires WP.
+  - `generate_draft` skip le brouillon si sender interne, même si `category=
+    demande_client` forcée ; et continue à générer pour un vrai client.
+- 379 tests verts (368 v1.28.1 + 11 nouveaux).
+
+### Action manuelle
+Pour chaque mail interne LIVRÉ en prod (#652, #582, #562, #474, #82) :
+1. `UPDATE mail_processed SET category='autre', delivered_at=NULL,
+   draft_generated=0, ai_draft=NULL, draft_sent_at=NULL WHERE id=<X>`
+2. `SELECT HEADER X-Detective-Mail-Id <X>` dans Drafts IMAP + `STORE +FLAGS
+   \\Deleted` + `EXPUNGE`.
+
 ## [1.28.1] — 2026-06-29 (livraison prod mail #672 Kirara — brouillon conforme Daniel)
 
 ### Contexte

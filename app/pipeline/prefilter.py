@@ -407,6 +407,63 @@ def _extract_links(body_snippet: str) -> list[str]:
     return re.findall(r'https?://[^\s<>"\']+', body_snippet)
 
 
+# v1.28.2 — garde-fou anti-brouillon-interne : un mail envoyé par un membre
+# du cabinet (CDAL) ou par une adresse du domaine cabinet ne doit JAMAIS
+# déclencher un brouillon de réponse. Catégorie forcée = "autre" (sémantiquement
+# le plus proche d'une note interne parmi les catégories existantes).
+#
+# On exclut les préfixes techniques (wordpress@, mail@, noreply@, contactform@)
+# car ils correspondent à des forwarders WP — leur body est une vraie demande
+# client relayée par le site du cabinet (voir is_wordpress_contact_form).
+_INTERNAL_SENDER_LOCAL_PARTS = frozenset({
+    "cdal", "daniel",
+})
+_INTERNAL_SENDER_DOMAINS = frozenset({
+    "digitalhs.biz",
+})
+_INTERNAL_SENDER_EXCLUDED_LOCAL_PARTS = frozenset({
+    "wordpress", "mail", "noreply", "no-reply", "contactform",
+    "postmaster", "abuse", "newsletter", "contact", "info",
+})
+
+
+def is_internal_sender(msg: Message) -> bool:
+    """True si le From du mail provient d'un membre identifiable du cabinet.
+
+    Conçu pour court-circuiter la classification `demande_client` sur les
+    mails internes (ex : CDAL qui forward une note de réunion à Daniel).
+    Bloqué AVANT le LLM classifier et AVANT la génération du brouillon.
+
+    Règle d'or (CDAL) :
+    - Bloque les expéditeurs humains du cabinet (CDAL, Daniel) même sur des
+      domaines externes (faux positif acceptable vs envoyer un brouillon aberrant
+      sur une note interne).
+    - EXCLUT les forwarders techniques (wordpress@…) pour ne pas casser
+      is_wordpress_contact_form().
+    - N'inclut PAS les domaines du site (detectivebelgique.be) ici : ces
+      adresses sont toutes des forwarders WP gérées par is_wordpress_contact_form.
+    """
+    sender = (msg.get("From", "") or "").lower()
+    if not sender or "@" not in sender:
+        return False
+    # Extrait l'adresse entre <...> si display name présent
+    if "<" in sender and ">" in sender:
+        addr = sender[sender.find("<") + 1 : sender.find(">")]
+    else:
+        addr = sender
+    addr = addr.strip()
+    if "@" not in addr:
+        return False
+    local, _, domain = addr.partition("@")
+    local = local.strip()
+    domain = domain.strip()
+    # 1. Domaine interne connu, SAUF si préfixe technique (filet)
+    if domain in _INTERNAL_SENDER_DOMAINS and local not in _INTERNAL_SENDER_EXCLUDED_LOCAL_PARTS:
+        return True
+    # 2. Membre identifiable du cabinet sur n'importe quel domaine
+    return local in _INTERNAL_SENDER_LOCAL_PARTS
+
+
 def is_newsletter(msg: Message) -> bool:
     # Headers typiques
     if any(msg.get(h) for h in NEWSLETTER_HEADERS):
@@ -625,7 +682,13 @@ def quick_classify(msg: Message) -> str | None:
     peuvent matcher des mots-clés service dans leur corps.
     demande_client est EXCLU du pré-filtre rapide (trop de faux positifs),
     sauf les formulaires WordPress du propre site.
+
+    v1.28.2 — is_internal_sender EN PREMIER : aucun mail interne (CDAL, staff
+    DigitalHS, domaine cabinet) ne doit jamais déclencher un brouillon client.
+    Court-circuite vers "autre" (= note interne par défaut).
     """
+    if is_internal_sender(msg):
+        return "autre"
     if is_wordpress_contact_form(msg):
         return "demande_client"
     if is_phishing(msg):

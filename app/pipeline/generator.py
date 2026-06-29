@@ -12,6 +12,7 @@ from app.pipeline.case_classifier import classify_case
 from app.pipeline.language import Language, language_label
 from app.pipeline.objective_check import assess_objective_clarity, extract_free_message
 from app.pipeline.qualification_builder import (
+    _is_internal_email,
     build_followup_ack_draft,
     build_qualification_draft,
     suggested_subject_for_draft,
@@ -48,6 +49,8 @@ class GenerationResult:
     # v1.25.1 : sujet de brouillon lisible quand le sujet original est un template
     # WP absurde (formulaire relayé par forwarder). None = garder le sujet original.
     suggested_subject: str | None = None
+    # v1.28.2 : note libre (ex: "Sender interne — brouillon skipped") pour debug.
+    note: str = ""
 
 
 def _is_multilingual_draft_complete(draft: str) -> tuple[bool, str]:
@@ -368,6 +371,31 @@ async def generate_draft(
     reply_to: str = "",
 ) -> GenerationResult:
     settings = get_settings()
+
+    # v1.28.2 — Garde-fou anti-brouillon-interne. Un mail envoyé par un membre
+    # du cabinet (CDAL, staff DigitalHS) ou par un domaine interne du cabinet
+    # ne doit JAMAIS déclencher un brouillon de réponse client — c'est une note
+    # interne (compte-rendu réunion, invitation calendrier, test CDAL…).
+    # Bloqué ici aussi (en plus du préfiltre) pour défense en profondeur, au cas
+    # où le classifier LLM principal passerait à côté.
+    effective_sender = (sender or reply_to or "").strip()
+    if _is_internal_email(effective_sender):
+        log.warning(
+            "generator.internal_sender_skip",
+            sender=effective_sender[:60],
+            mailbox=mailbox.name,
+            category=category,
+        )
+        return GenerationResult(
+            draft="",
+            raw_draft="",
+            language=language,
+            rag_pairs=[],
+            model_used="internal-sender-skip",
+            category=category,
+            note="Sender interne — brouillon skipped (v1.28.2)",
+        )
+
     pairs = await asyncio.to_thread(
         retrieve, mailbox.db_path, f"{incoming_subject}\n{incoming_body}", settings.rag_top_k
     )
