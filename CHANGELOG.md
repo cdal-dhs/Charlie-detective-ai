@@ -1,5 +1,19 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.28.1] — 2026-06-29 (livraison prod mail #672 Kirara — brouillon conforme Daniel)
+
+### Contexte
+Le mail **#672 (Olivier Kirara, filature fiancée datée 02/07 à Tournai)** a été **rejoué et livré en prod** le 2026-06-29 à 04:13:16 UTC via `scripts/deliver_pending_drafts --only-id 672 --apply`.
+Brouillon physiquement présent dans le dossier `Drafts` de la boîte Infomaniak `detective_belgique`, sujet `DEMANDE D'Approbation - Reponse Demande Client : Filature / surveillance — Olivier Kirara`, header `X-Detective-Mail-Id: 672` posé pour le réconcilieur 15 min.
+
+### Livré
+- Brouillon généré par `_build_mission_dated_draft()` (v1.28.0) — structurellement aligné sur le benchmark Daniel (capacité+date+réserve, méthode 2 détectives, urgence FR, Dans l'attente de votre retour, signature SRL).
+- Validation via simulateur super-admin `https://detective.digitalhs.biz/admin/draft-simulator` : 10/10 critères OK.
+- 368 tests verts (zéro régression vs v1.27.5).
+
+### Action manuelle
+Reset `draft_generated=0, ai_draft=NULL, draft_sent_at=NULL` puis regénération via `scripts/deliver_pending_drafts --only-id 672 --apply` (le poller ne régénère pas les mails déjà en base — uniquement les nouveaux mails entrants IMAP).
+
 ## [1.28.0] — 2026-06-29 (brique « mission datée » + détection enhanced — inspiration Daniel, fix mail #672 Kirara)
 
 ### Contexte
