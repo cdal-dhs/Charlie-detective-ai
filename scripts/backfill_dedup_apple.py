@@ -58,15 +58,27 @@ log = structlog.get_logger()
 # supprimer dans Drafts.
 _HEADER_MAIL_ID_RE = re.compile(r"X-Detective-Mail-Id\s*[:]\s*(\d+)", re.IGNORECASE)
 
+# Préfixe des sujets des brouillons V2a (déposés en IMAP Drafts par Charlie).
+# Un brouillon Charlie a TOUJOURS ce préfixe dans son sujet DB. On l'exclut
+# de la dédup pour ne pas risquer de marquer comme duplicate un brouillon
+# légitime en attente d'approbation Daniel (#672 Kirara, etc.).
+_BROUILLON_PREFIX = "DEMANDE D'Approbation"
+
 
 def _find_duplicate_groups(db_path: Path) -> dict[tuple[str, str], list[int]]:
     """Identifie les groupes de mails (sender, subject) qui se dédoublonnent.
+
+    Exclut :
+    - les mails déjà en status='duplicate' (cascade guard)
+    - les sujets commençant par 'DEMANDE D'Approbation' (= brouillons V2a Charlie,
+      JAMAIS à marquer comme duplicate — ce sont des brouillons en attente d'approbation)
 
     Returns:
         dict[(sender_n, subject_n), list[mail_id]] trié par id ASC.
     """
     conn = sqlite3.connect(db_path)
     try:
+        # Filtre brouillon V2a fait en Python (plus simple et lisible que LIKE en SQL).
         rows = conn.execute(
             """
             SELECT id, sender, subject, received_at, status
@@ -82,6 +94,11 @@ def _find_duplicate_groups(db_path: Path) -> dict[tuple[str, str], list[int]]:
 
     groups: dict[tuple[str, str], list[int]] = defaultdict(list)
     for mail_id, sender, subject, _received_at, _status in rows:
+        # Exclure les brouillons V2a : leur sujet commence TOUJOURS par
+        # 'DEMANDE D'Approbation'. On ne doit JAMAIS les marquer duplicate
+        # (risque de casser un brouillon en attente d'approbation Daniel).
+        if subject and subject.strip().lower().startswith(_BROUILLON_PREFIX.lower()):
+            continue
         s_n = normalize_sender(sender)
         sub_n = normalize_subject(subject)
         if not s_n or not sub_n:
