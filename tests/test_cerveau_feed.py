@@ -119,6 +119,7 @@ async def test_poller_feeds_cerveau2_for_draft(mock_settings, mock_msg):
         patch("app.workers.imap_poller.quick_classify", return_value=None),
         patch("app.workers.imap_poller.detect_language", return_value="fr"),
         patch("app.workers.imap_poller.is_logical_duplicate", return_value=(False, None)),
+        patch("app.workers.imap_poller._refresh_thread_subject", return_value=None),
         patch("app.workers.imap_poller.generate_draft", new_callable=AsyncMock) as mock_gen,
         patch("app.workers.imap_poller.feed_correspondance", new_callable=AsyncMock) as mock_feed,
     ):
@@ -192,6 +193,7 @@ async def test_poller_feeds_other_categories(mock_settings, mock_msg):
         patch("app.workers.imap_poller.assign_priority", return_value="normal"),
         patch("app.workers.imap_poller.quick_classify", return_value=None),
         patch("app.workers.imap_poller.is_logical_duplicate", return_value=(False, None)),
+        patch("app.workers.imap_poller._refresh_thread_subject", return_value=None),
         patch("app.workers.imap_poller.feed_correspondance", new_callable=AsyncMock) as mock_feed,
     ):
         await _process_single_mail(client, "12345", mailbox)

@@ -46,7 +46,7 @@ def _db_with_cols(tmp_path: Path, cols_sql: str) -> Path:
 
 def test_persist_stores_suggested_subject(tmp_path: Path) -> None:
     """Le poller doit persister gen.suggested_subject à l'INSERT (nouveau mail)."""
-    db = _db_with_cols(tmp_path, "suggested_subject TEXT, ")
+    db = _db_with_cols(tmp_path, "suggested_subject TEXT, message_id TEXT, in_reply_to TEXT, \"references\" TEXT, dossier_id TEXT, thread_id TEXT, thread_subject TEXT, ")
     mail_id = _persist(
         db_path=db,
         imap_uid="u643",
@@ -72,7 +72,7 @@ def test_persist_stores_suggested_subject(tmp_path: Path) -> None:
 def test_persist_update_enriches_suggested_subject(tmp_path: Path) -> None:
     """Sur un mail existant (UPDATE), suggested_subject est enrichi via COALESCE
     (n'écrase pas une valeur déjà présente)."""
-    db = _db_with_cols(tmp_path, "suggested_subject TEXT, ")
+    db = _db_with_cols(tmp_path, "suggested_subject TEXT, message_id TEXT, in_reply_to TEXT, \"references\" TEXT, dossier_id TEXT, thread_id TEXT, thread_subject TEXT, ")
     # 1er passage : INSERT avec suggested_subject
     mail_id = _persist(
         db_path=db,
@@ -110,7 +110,7 @@ def test_persist_update_enriches_suggested_subject(tmp_path: Path) -> None:
 
 def test_update_db_persists_suggested_subject(tmp_path: Path) -> None:
     """Le backfill _update_db doit écrire suggested_subject (COALESCE, n'écrase pas)."""
-    db = _db_with_cols(tmp_path, "suggested_subject TEXT, ")
+    db = _db_with_cols(tmp_path, "suggested_subject TEXT, message_id TEXT, in_reply_to TEXT, \"references\" TEXT, dossier_id TEXT, thread_id TEXT, thread_subject TEXT, ")
     conn = sqlite3.connect(db)
     conn.execute(
         "INSERT INTO mail_processed (id, category, draft_generated) VALUES (643, 'phishing', 0)"
@@ -138,7 +138,7 @@ def test_update_db_persists_suggested_subject(tmp_path: Path) -> None:
 
 def test_update_db_does_not_overwrite_existing_suggested_subject(tmp_path: Path) -> None:
     """_update_db avec suggested_subject vide ne doit pas écraser une valeur existante."""
-    db = _db_with_cols(tmp_path, "suggested_subject TEXT, ")
+    db = _db_with_cols(tmp_path, "suggested_subject TEXT, message_id TEXT, in_reply_to TEXT, \"references\" TEXT, dossier_id TEXT, thread_id TEXT, thread_subject TEXT, ")
     conn = sqlite3.connect(db)
     conn.execute(
         "INSERT INTO mail_processed (id, category, draft_generated, suggested_subject) "

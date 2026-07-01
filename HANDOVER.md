@@ -1,14 +1,14 @@
 # HANDOVER — Detective.be Agent IA (Charlie)
 
 > Document de transfert pour tout agent (Claude Sonnet/Opus 4.X, GPT, etc.).
-> **Dernière mise à jour**: 2026-07-01 · **Version courante**: v1.28.3 · **Déployé sur** : `detective.digitalhs.biz`
+> **Dernière mise à jour**: 2026-07-01 · **Version courante**: v1.29.0 · **Déployé sur** : `detective.digitalhs.biz`
 
 ---
 
 ## TABLE DES MATIÈRES (TL;DR)
 
 1. [Qui, quoi, pourquoi](#1-qui-quoi-pourquoi)
-2. [Architecture actuelle v1.28.2](#2-architecture-actuelle-v1282)
+2. [Architecture actuelle v1.29.0](#2-architecture-actuelle-v1290)
 3. [Le pipeline Charlie AI](#3-le-pipeline-charlie-ai)
 4. [Stack technique détaillée](#4-stack-technique-détaillée)
 5. [Cerveau2-Det — second cerveau](#5-cerveau2-det--second-cerveau)
@@ -38,7 +38,7 @@
 
 ---
 
-## 2. Architecture actuelle (v1.28.2)
+## 2. Architecture actuelle (v1.29.0)
 
 ```
 [4 boîtes email IMAP — 3 Infomaniak + 1 OVH] ──polling 5min──► [Worker asyncio Python]
@@ -108,7 +108,7 @@
 
 ---
 
-## 3. Le pipeline Charlie AI (état v1.28.2)
+## 3. Le pipeline Charlie AI (état v1.29.0)
 
 Le fichier `app/charlie.py` contient `ask_charlie()`. Flow exact :
 
@@ -193,7 +193,7 @@ if not response and rows:
 
 ---
 
-## 4. Stack technique détaillée (v1.28.2)
+## 4. Stack technique détaillée (v1.29.0)
 
 | Couche | Outil | Version / Détail |
 |---|---|---|
@@ -403,7 +403,7 @@ Le poller IMAP ne traite que les mails reçus depuis cette date. Les archives hi
 
 ### Règle 8 — Provider LLM pour Ollama Cloud = `openai/<model>` + `api_base=https://ollama.com/v1`
 - **JAMAIS** `ollama_chat/<model>` (force litellm vers `localhost:11434`).
-- **Modèles actuels (v1.28.2)** : `gemma4:31b` (principal, non-reasoning — réponse dans `message.content`), `glm-5.2:cloud` (fallback, reasoning model — réponse dans `reasoning_content`, extrait automatiquement par `complete()`).
+- **Modèles actuels (v1.29.0)** : `gemma4:31b` (principal, non-reasoning — réponse dans `message.content`), `glm-5.2:cloud` (fallback, reasoning model — réponse dans `reasoning_content`, extrait automatiquement par `complete()`).
 - **JAMAIS** `kimi-k2` (404), `ollama_chat/<model>` (Ollama local inexistant sur le VPS).
 - Si un nouveau modèle ne répond pas, vérifier immédiatement provider + api_base + nom.
 
@@ -418,9 +418,9 @@ Le poller IMAP ne traite que les mails reçus depuis cette date. Les archives hi
 
 ---
 
-## 9. Bugs résolus et points de vigilance (état au 2026-06-29, v1.28.2)
+## 9. Bugs résolus et points de vigilance (état au 2026-07-01, v1.29.0)
 
-### ✅ Bugs résolus récents (v1.22.0 → v1.28.2)
+### ✅ Bugs résolus récents (v1.22.0 → v1.29.0)
 
 | # | Problème | Statut | Fichier | Notes |
 |---|---|---|---|---|
@@ -462,6 +462,7 @@ Le poller IMAP ne traite que les mails reçus depuis cette date. Les archives hi
 | 36 | **Brouillon « qualifiant médiocre » sur mission datée (#672 Olivier Kirara, 2026-06-27)** — Charlie classait correctement en `infidelite_filature` mais `_build_standard_draft` posait les questions identitaires (« Vos nom et prénom complets », « Votre GSM de contact direct », « Votre adresse complète ») alors que **toutes les coordonnées étaient déjà reçues** dans le formulaire (nom, GSM, email, profil) ET que la mission était **explicitement datée** (« filature le 02/07 à Tournai »). Résultat : brouillon qui demandait au client ce qu'il souhaitait, alors que la mission était claire et la date connue. Faux négatif intolérable (un client qui attend une date précise doit recevoir une réponse alignée sur le benchmark Daniel — capacité+date+réserve, urgence FR, Dans l'attente). | ✅ **Corrigé v1.28.0** | `app/pipeline/qualification_builder.py` + `tests/test_mission_dated_draft.py` (nouveau) + `tests/fixtures/mail_672_kirara.json` (nouveau) | **RC1** Pattern `relation_match` élargi (`fiancé`/`fiancée`/`compagne`/`compagnon`/`concubin`/`concubine`) avec lookahead restrictif. **RC2** `_OPERATIONAL_SIGNAL_RE` accepte « mission le 02 juillet » / « durant le week-end du 5 juillet » / « journée du 02/07 ». **RC3**+**RC4** Extraction `_extract_case_info` ajoute `date_cible` (formats JJ/MM, JJ mois, semaine/week-end, été YYYY, etc.) et `ville_cible` (pattern `à/a/au/aux/en/pour/sur/destination/vers` + mot capitalisé, filtrage stopwords mois/jours). **RC4 rendu** `_format_received_info` affiche « Date de mission souhaitée » + « Ville / lieu de surveillance » en tête de bloc éléments reçus. **RC5** Nouvelle brique `_build_mission_dated_draft()` (~190 lignes) alignée sur le benchmark Daniel : salutation → accusé chaleureux avec « confiance » → **capacité+date+réserve** (« Nous pouvons effectivement organiser une mission de filature le 02/07 à Tournai, sous réserve de recevoir rapidement les informations nécessaires… ») → méthode pédagogique 2 détectives → éléments reçus (avec date+ville) → questions strictement manquantes filtrées (photo/véhicule/adresse/horaires/habitudes — **jamais** nom/prénom/GSM/profil déjà reçus) → tarifs → **phrase urgence FR** si date < 30j (« Compte tenu du caractère urgent de votre demande et de la date très proche de l'intervention ») → clôture « Dans l'attente de votre retour, Bien à vous » → signature SRL. Helpers `_is_mission_dated` (filtre formulations vagues « durant cet été 2026 » pour préserver wording « pour le dossier de votre client » sur les mails avocat #656), `_is_date_urgent`, `_mission_dated_verb`. Wording véhicule aligné Daniel (« Caractéristiques de son véhicule (marque, modèle, couleur, immatriculation si connue) »). **17 nouveaux tests TDD** (368 verts). **#672 livré en prod v1.28.1** via `scripts/deliver_pending_drafts --only-id 672 --apply` (brouillon physique dans Drafts Infomaniak, sujet `DEMANDE D'Approbation - Reponse Demande Client : Filature / surveillance — Olivier Kirara`, header `X-Detective-Mail-Id: 672`). |
 | 37 | **Brouillon aberrant sur mail interne (#686 CDAL→Daniel, 2026-06-29)** — CDAL a forwardé une note interne de réunion IT à la boîte `detective_belgique` (pour archive). Charlie a classé le mail en `demande_client` (le classifier v1.24+ est volontairement très permissif pour ne rater aucun vrai client) et a généré un brouillon client aberrant **livré en IMAP Drafts** : salutation « Bonjour PT » (extraction hallucinée du footer « PT Digital Highway Solutions »), accusé de réception d'une note de réunion interne comme si c'était un client. **5 autres mails internes CDAL→Daniel étaient déjà LIVRÉS** avec le même bug (#652, #582, #562, #474, #82 — tous des tests CDAL sauf #686 qui est une vraie note de fond). Cause racine : aucun filtre « sender interne » dans le préfiltre, le classifier, ni le générateur. Faux positif inacceptable (un brouillon aberrant livré dans la boîte Daniel = confusion garantie). | ✅ **Corrigé v1.28.2** | `app/pipeline/prefilter.py` + `app/pipeline/generator.py` + `tests/test_internal_sender_guard.py` (nouveau) | **Défense en profondeur, 3 maillons** : (1) `is_internal_sender()` dans `prefilter.py` détecte un mail interne selon 2 critères : **domaine interne** (`digitalhs.biz`) OU **local-part identifiant un membre** (`cdal`, `daniel` — n'importe quel domaine, ex `cdal@gmail.com`). **Whitelist d'exclusion** pour les préfixes techniques (`wordpress@`, `mail@`, `noreply@`, `no-reply@`, `contactform@`, `postmaster@`, `abuse@`, `newsletter@`, `contact@`, `info@`) pour ne pas casser `is_wordpress_contact_form()`. `quick_classify()` retourne `"autre"` en première position (avant WP). (2) `generate_draft()` court-circuite aussi (défense en profondeur) : si `_is_internal_email(sender)` est True, retourne `GenerationResult(raw_draft="", note="Sender interne — brouillon skipped (v1.28.2)")` AVANT d'invoquer RAG/case_classifier/LLM. Log `warning generator.internal_sender_skip` posé. (3) `GenerationResult` enrichi avec champ optionnel `note: str = ""` (debug). **11 nouveaux tests** (379 verts). **Backfill prod appliqué** : #686 brouillon supprimé des Drafts IMAP (UID 38) + DB rollback (`status=pending, draft_generated=0, ai_draft=NULL`) ; #652/#582/#562/#474/#82 reclassifiés `autre` + `draft_generated=0` (déjà absents des Drafts — Daniel les avait approuvés/rejetés). |
 | 38 | **Inbox polluée par cascade de doublons `Re: Votre reçu Apple` (#719-#722, 2026-07-01)** — depuis 2 jours, ~10 mails identiques (sender `dpdhuinvestigations@gmail.com`, sujet `Re: Votre reçu Apple`, brand-mais-pas-officiel — non capturé par `is_internal_sender()`) étaient persistés en `demande_client`/`high` dans l'inbox. Chaque doublon déclenchait un brouillon fantôme en Drafts IMAP. Cause racine : aucun check de dédup logique au poller — 10 `message-id` IMAP distincts = 10 ingestions + 10 brouillons candidats. Le préfiltre matchait `Re:` (`_FOLLOWUP_SUBJECT_RE`) et `_enforce_recall_over_precision` remontait tout en `demande_client` (règle d'or : faux positif acceptable). | ✅ **Corrigé v1.28.3** | `app/pipeline/dedup.py` (nouveau) + `app/workers/imap_poller.py` + `tests/test_dedup.py` (nouveau) + `tests/test_cerveau_feed.py` (patch) + `scripts/backfill_dedup_apple.py` (nouveau) | Nouveau module `is_logical_duplicate()` déterministe (< 5ms/mail, sans LLM) avec clé `(sender_normalized, subject_normalized)` sur fenêtre glissante 48h. Normalisation sujet : strip préfixes `Re:`/`Fwd:`/`AW:`/`TR:`/`SV:` multi-niveaux. Injection dans `_process_single_mail()` juste après le filtre `system_email_skipped` et AVANT `is_subject_suspect()` → 0 coût LLM, 0 brouillon, flag IMAP posé. Nouveau helper `_persist_duplicate()` marque les doublons en `status=duplicate`, `category=autre`, `priority=low`, `draft_generated=0`, `ai_draft=NULL` (audit only). **Cascade guard** : la requête SQL filtre `status != 'duplicate'` pour éviter qu'un doublon d'un doublon soit re-marqué (le parent le plus ancien reste la référence). **22 nouveaux tests TDD** (401 verts). Patch `test_cerveau_feed.py` : mock `is_logical_duplicate → (False, None)` sur 2 tests d'intégration pour que le flux nominal complet (classify → Cerveau2 feed) reste testable. Script de backfill `--dry-run` / `--apply` pour nettoyer les doublons pré-existants en prod (DB + suppression brouillons Drafts IMAP via header `X-Detective-Mail-Id`). Idempotent (un second run ne fait rien). **Note** : `dpdhuinvestigations@gmail.com` reste NON-interne (la dédup est le bon filet, pas l'extension de `is_internal_sender()` — risque de faux positif sur un vrai client nommé "DPDH"). |
+| 39 | **Cockpit inbox affiche 1 mail = 1 ligne même pour les fils de discussion (#740/748/746, 2026-07-01)** — quand un client envoie un mail initial puis des replies ping-pong avec sujet qui change (`Dossier Dupont : 740` → `Re: Dossier Dupont : 748` → `ajout au dossier : 746`), l'inbox cockpit montre 3 lignes non liées au lieu d'1 fil clair type Gmail/Outlook. La dédup v1.28.3 ne matche plus quand le sujet change (les Re: sont strippés mais les reformulations cassent la clé). Pas de groupement en DB. | ✅ **Corrigé v1.29.0** | `app/pipeline/threading.py` (nouveau) + `app/workers/imap_poller.py` + `app/web/app_routes.py` + `app/web/templates/app/inbox_rows.html` (macro `thread_row`) + `app/web/templates/app/inbox.html` (tabs view) + `app/web/api.py` + `tests/test_threading.py` (nouveau) + `tests/test_cerveau_feed.py` (patch) + `tests/test_imap_poller_resilience.py` (patch) + `tests/test_v1_25_22_fixes.py` (patch) + `tests/test_suggested_subject_v1_25_28.py` (patch) + `app/web/db_migrate.py` | Nouveau module `threading.py` (regex + heuristiques déterministes, pas de LLM) : `extract_dossier_name()` regex "Dossier Dupont" étendue (accents, composé "Dossier de la Rue", filtre anti-ref via `_is_name_with_lowercase`), `derive_dossier_id_threading()` hiérarchie name > ref > hash sha1[:16] stable, `compute_thread_id()` `f"{dossier_id}::{sender_n}"` ou `adhoc::...`, `pick_thread_subject()` sujet du plus ancien. **6 nouvelles colonnes `mail_processed`** : `message_id`, `in_reply_to`, `dossier_id`, `thread_id`, `thread_subject` + `references` (mot-clé SQL, ALTER séparé) + index `idx_mail_processed_thread`. Poller enrichi : capture headers IMAP `Message-ID`/`In-Reply-To`/`References`, dérive `dossier_id`/`thread_id` AVANT la dédup, helper `_refresh_thread_subject()` propage le sujet canonique. Cockpit : `_group_into_threads()` + macro `thread_row(t)` (parent + replies indentées, **border-l-4 sur le 1er `<td>`** — piège CSS respecté, badge `↳` sur replies, opacity réduite + line-through sur doublons) + tabs `?view=threads|flat|duplicates`. **19 nouveaux tests threading + 0 régression sur 401** = **420 verts**. Dédup v1.29.0 reste stricte : `thread_id` seul ne suffit PAS à marquer duplicate (sinon le parent + reply légitime serait zappé) — filet `subject_EXACT_lowercase` OU `Message-ID` identique OU `In-Reply-To` identique dans 60s. |
 
 ### 🔴 Points de vigilance ouverts (état au 2026-06-29)
 
@@ -502,7 +503,7 @@ Vérifier aussi les catégories de `boite2` (10 catégories dont `PRISE_CONTACT:
 
 #### Point de vigilance #2 — Provider litellm pour Ollama Cloud (CRITIQUE v1.21.1)
 `ollama_chat/<model>` force litellm vers `localhost:11434` (Ollama **local**). Le provider correct pour Ollama **Cloud** est `openai/<model>` avec `api_base=https://ollama.com/v1`.
-**Modèles actuels (v1.28.2)** : `openai/gemma4:31b` (principal + classifier + chat, non-reasoning), `openai/glm-5.2:cloud` (fallback, reasoning).
+**Modèles actuels (v1.29.0)** : `openai/gemma4:31b` (principal + classifier + chat, non-reasoning), `openai/glm-5.2:cloud` (fallback, reasoning).
 **Si un nouveau modèle ne répond pas** → vérifier immédiatement provider (openai/ vs ollama_chat/), l'URL api_base (`/v1` pas `/api`), et que le nom de modèle existe sur ollama.com/library.
 
 #### Point de vigilance #3 — glm-5.2:cloud (fallback) est un reasoning model
@@ -782,10 +783,10 @@ fi
 
 ## Note pour le prochain agent
 
-État au **2026-06-29** : **v1.28.2** déployée en prod (**379 tests verts**). **Dernières versions** (sprint de la journée) :
+État au **2026-07-01** : **v1.29.0** déployée en prod (**420 tests verts**). **Dernières versions** (sprint de la journée) :
+- **v1.29.0 (2026-07-01)** — Fil de discussion cockpit inbox (groupement parent + replies). `app/pipeline/threading.py` (extract_dossier_name regex "Dossier Dupont" + accents + composé, derive_dossier_id_threading hiérarchie name > ref > hash, compute_thread_id `f"{dossier_id}::{sender}"`, pick_thread_subject = sujet du plus ancien). DB : 6 nouvelles colonnes (message_id, in_reply_to, references, dossier_id, thread_id, thread_subject) + index `idx_mail_processed_thread`. Poller enrichi : capture headers IMAP, dérive thread_id AVANT dédup, `_refresh_thread_subject()` propage le sujet canonique. Cockpit : `_group_into_threads()` + macro `thread_row()` (parent + replies indentées, border-l-4 sur 1er `<td>`, badge `↳`, line-through sur doublons) + tabs `?view=threads|flat|duplicates`. **420 tests verts** (19 nouveaux threading + 0 régression). Fix inbox 740/748/746 (3 mails `Dossier Dupont` = 1 fil).
+- **v1.28.3 (2026-07-01)** — Déduplication logique runtime (fix #719-#722 inbox polluée). `app/pipeline/dedup.py` (is_logical_duplicate, fenêtre 48h, normalize sujet + sender), poller enrichi avec 2 helpers (_persist_duplicate + injection avant quick_classify), backfill script dry-run/apply pour les 11 Apple doublons historiques.
 - **v1.28.2 (2026-06-29)** — Garde-fou anti-brouillon-interne (#686). `is_internal_sender()` dans `prefilter.py` détecte un mail interne (domaine `digitalhs.biz` OU local-part `cdal`/`daniel`), whitelist d'exclusion pour préfixes techniques. `quick_classify()` retourne `"autre"` en première position, `generate_draft()` court-circuite avec `note="Sender interne — brouillon skipped"`. Backfill prod : #686 brouillon supprimé des Drafts IMAP (UID 38) + DB rollback ; #652/#582/#562/#474/#82 reclassifiés `autre` + `draft_generated=0`. 11 nouveaux tests.
-- **v1.28.1 (2026-06-29)** — Livraison prod #672 Olivier Kirara (brouillon conforme Daniel, livré via `deliver_pending_drafts --only-id 672 --apply`).
-- **v1.28.0 (2026-06-29)** — Brique « mission datée » (`_build_mission_dated_draft` aligné sur benchmark Daniel). RC1 fiancé/compagnon/concubin, RC2 `_OPERATIONAL_SIGNAL_RE` élargi, RC3+RC4 extraction `date_cible`/`ville_cible` cross-cas + affichage en tête de bloc. Garde-fou `_is_mission_dated` filtre les formulations vagues (« durant cet été 2026 ») pour préserver le wording « pour le dossier de votre client » sur les mails avocat (#656). 17 nouveaux tests.
 
 Contexte technique stable : **Le RAG est mis en pause** (v1.24.2, `rag_enabled=False`) — ce n'est plus un bug à corriger (voir point de vigilance #1). **Bascule LLM v1.25.0** : `gemma4:31b` (non-reasoning) principal sur toutes les tâches ; `glm-5.2:cloud` (reasoning) fallback. **Brouillon qualifiant déterministe** couvre tous les cas (infidélité, recherche personne, incapacité, dette, succession, violences, micros, indéterminé + **mission datée**) avec questions structurées, refus poli hors-légalité (v1.24.1), wording avocat (v1.27.5), exclusion des éléments déjà reçus.
 
@@ -797,5 +798,5 @@ Contexte technique stable : **Le RAG est mis en pause** (v1.24.2, `rag_enabled=F
 
 ---
 
-*Document mis à jour le 2026-06-29 pour la v1.28.2 de Detective.be Agent IA.*
+*Document mis à jour le 2026-07-01 pour la v1.29.0 de Detective.be Agent IA.*
 

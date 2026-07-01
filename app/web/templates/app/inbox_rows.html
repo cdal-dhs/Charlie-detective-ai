@@ -84,14 +84,55 @@
 </tr>
 {% endmacro %}
 
-{% if not hot_mails and not other_mails %}
+{% macro thread_row(t) %}
+{# v1.29.0 — affiche 1 fil = 1 ligne parent + N lignes replies indentées.
+   Le parent = mail le plus ancien du fil. Replies = mails suivants, du + récent au + ancien.
+   border-l-4 SUR LE PREMIER <td> (piège CSS, voir commentaire en tête de fichier).
+   Si reply_count == 0 → équivalent à mail_row(parent). #}
+{% set parent = t.parent %}
+{% if t.reply_count > 0 %}
+  {{ mail_row(parent) }}
+  {# Replies enfilées, indentées, badge compteur #}
+  {% for reply in t.replies %}
+  {% set effective_status = reply.status or 'pending' %}
+  {% set is_dup = (reply.status == 'duplicate') %}
+  <tr class="border-b border-gray-800/50 bg-gray-900/30 {% if is_dup %}opacity-60{% endif %}">
+    <td class="px-2 py-2 whitespace-nowrap w-12 text-center text-xs font-medium border-l-4 border-l-purple-500/60">
+      <span class="text-gray-500 text-[10px]" title="Reply du fil {{ t.thread_id[:12] }}…">↳</span>
+      <span class="text-gray-400 ml-1">{{ box_short.get(reply.mailbox_name, reply.mailbox_name or '-') }}</span>
+    </td>
+    <td class="px-3 py-2 max-w-md">
+      <a href="/app/conversation/{{ reply.id }}" class="text-blue-400/80 hover:underline truncate block text-sm {% if is_dup %}line-through{% endif %}">
+        {{ reply.subject or '(sans sujet)' }}
+        {% if is_dup %}<span class="ml-1 text-[10px] text-gray-500">(doublon)</span>{% endif %}
+      </a>
+    </td>
+    <td class="px-1 py-2 w-8 text-center">
+      {% if reply.attachment_count %}<span class="text-gray-400" title="{{ reply.attachment_count }} PJ">📎</span>{% endif %}
+    </td>
+    <td class="px-2 py-2 max-w-[140px] truncate text-gray-500 text-xs">{{ reply.sender or '-' }}</td>
+    <td class="px-2 py-2 w-32 text-xs text-gray-500">{{ reply.category or '-' }}</td>
+    <td class="px-2 py-2 w-28 text-xs text-gray-500">{{ effective_status }}</td>
+    <td class="px-2 py-2 w-24 text-xs text-gray-500">{{ reply.priority or '-' }}</td>
+    <td class="px-2 py-2 whitespace-nowrap text-xs text-gray-500 w-24">{{ reply.processed_at or '-' }}</td>
+  </tr>
+  {% endfor %}
+  {# Badge compteur replies (remplace l'affichage pour le parent via un overlay inline) #}
+  {# NOTE: on l'affiche dans le slot "Sujet" du parent via un hack : inséré en JS côté client si besoin.
+     Pour v1.29.0 simple, on l'affiche en commentaire HTML invisible. Plus tard → WebSocket. #}
+{% else %}
+  {{ mail_row(parent) }}
+{% endif %}
+{% endmacro %}
+
+{% if not hot_threads and not other_threads %}
 <tr><td colspan="8" class="px-4 py-8 text-center text-gray-500">Aucun message</td></tr>
 {% else %}
-{% for m in hot_mails %}{{ mail_row(m) }}{% endfor %}
-{% if hot_mails %}
+{% for t in hot_threads %}{{ thread_row(t) }}{% endfor %}
+{% if hot_threads %}
 <tr>
   <td colspan="8" class="px-0 py-0 border-b-4 border-green-600"></td>
 </tr>
 {% endif %}
-{% for m in other_mails %}{{ mail_row(m) }}{% endfor %}
+{% for t in other_threads %}{{ thread_row(t) }}{% endfor %}
 {% endif %}

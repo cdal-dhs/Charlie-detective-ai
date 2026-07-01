@@ -1,5 +1,44 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.29.0] — 2026-07-01 (fil de discussion cockpit inbox — groupement parent + replies)
+
+### Contexte
+L'inbox cockpit affichait 1 mail = 1 ligne, même quand un client envoyait un mail initial puis des replies ping-pong avec sujet qui change (`Dossier Dupont : 740` → `Re: Dossier Dupont : 748` → `ajout au dossier : 746`). Résultat : 3 lignes non liées visuellement au lieu d'1 fil clair. La dédup v1.28.3 = `(sender_normalized, subject_normalized)` ne matchait plus quand le sujet changeait. Pas de groupement en DB (pas de `thread_id`/`dossier_id`/`thread_subject`).
+
+### Ajouté
+- **`app/pipeline/threading.py`** : module pur (regex + heuristiques déterministes) avec `extract_dossier_name()` (regex "Dossier Dupont" étendue, accents, composé, filtre anti-ref via `_is_name_with_lowercase`), `derive_dossier_id_threading()` (hiérarchie name > ref > hash sha1[:16]), `compute_thread_id()` (`f"{dossier_id}::{sender_n}"` ou `adhoc::...`), `pick_thread_subject()` (sujet du mail le plus ancien). Pas de LLM, < 5ms par mail.
+- **`tests/test_threading.py`** : 19 tests TDD (regex compound, accents, hash fallback stable, thread_id cross-boîte, régressions Apple/Kirara, parent vs reply).
+- **6 nouvelles colonnes `mail_processed`** : `message_id`, `in_reply_to`, `dossier_id`, `thread_id`, `thread_subject` + `references` (mot-clé SQL, ALTER séparé). Index `idx_mail_processed_thread` sur `thread_id`. Migration idempotente via `_add_mail_processed_columns()` + backfill `_backfill_threading()`.
+- **`_refresh_thread_subject()`** helper dans `imap_poller.py` : 1 SELECT + 1 UPDATE pour propager le sujet canonique (sujet du plus ancien mail) à tous les rows du même fil. Appelé après chaque `_persist()`.
+- **Tabs cockpit** : `?view=threads|flat|duplicates` (défaut `threads` = 1 ligne par fil avec replies enfilées indentées ; `flat` = legacy 1 ligne par mail ; `duplicates` = audit v1.28.3).
+
+### Changé
+- **`app/web/app_routes.py`** : nouvelle fonction `_group_into_threads()` qui regroupe les mails par `thread_id` (parent = plus ancien, replies triées du + récent au + ancien). Endpoint `/app/` calcule maintenant `hot_threads`/`other_threads` au lieu de `hot_mails`/`other_mails`.
+- **`app/web/templates/app/inbox_rows.html`** : nouvelle macro `thread_row(t)` qui rend 1 ligne parent + N lignes replies indentées (border-l-4 sur le 1er `<td>` — piège CSS respecté), badge `↳` sur les replies + opacity réduite + line-through sur les doublons.
+- **`app/web/templates/app/inbox.html`** : tabs "Vue : 🧵 Fils / 📋 Brute / 🗑️ Doublons" + compteur de threads au lieu de mails.
+- **`app/workers/imap_poller.py`** : `_persist()` étendu avec 6 kwargs threading (message_id, in_reply_to, dossier_id, thread_id, thread_subject). `_process_single_mail()` capture les headers IMAP `Message-ID`/`In-Reply-To`/`References` et dérive `dossier_id`/`thread_id` AVANT la dédup. `is_logical_duplicate()` reçoit 3 kwargs optionnels (`thread_id`, `message_id`, `in_reply_to`) pour catch les doublons cross-boîtes accidentels sans casser les replies légitimes.
+- **`app/web/api.py`** : `/api/inbox` calcule aussi les threads (via `_group_into_threads()` importé) pour rester cohérent avec le template rows.
+
+### Fixé
+- **Inbox polluée 740/748/746** : 3 mails `Dossier Dupont` avec sujets reformulés forment maintenant **1 fil cockpit** (parent = mail 740, replies = 748/746 indentées en `↳`).
+- **Cross-boîte accident** : 2 mails même `Message-ID` arrivant à 30s sur 2 boîtes différentes sont détectés doublons par le nouveau kwarg.
+- **Reply légitime jamais perdue** : la dédup v1.29.0 reste stricte — le `thread_id` seul ne suffit pas à marquer duplicate (sinon le parent + reply légitime serait zappé). Filet de sécurité : `subject_EXACT_lowercase` identique OU `Message-ID` identique OU `In-Reply-To` identique dans 60s.
+
+### Tests
+- 19 nouveaux tests threading (`tests/test_threading.py`)
+- 0 régression sur les 22 dedup legacy + 379 autres tests = **420 verts** (avant v1.29.0 : 401)
+
+### Pièges techniques documentés
+- `references` est un mot-clé SQL → DDL ALTER séparé avec quoting.
+- `border-l-4` sur `<tr>` est ignoré par les navigateurs → toujours sur le 1er `<td>` (cf. `inbox_rows.html:6-7` et `hot_row_css_trap` memory).
+- Regex `extract_dossier_name` filtre les refs uppercase type `ABC123` via `_is_name_with_lowercase()` (sinon la regex matche `ABC` comme un nom valide).
+
+### Migration
+- Auto via `migrate()` (idempotent, 2x safe).
+- Backfill des mails historiques inclus dans `migrate()` (1 run, ~41 mails traités localement).
+
+---
+
 ## [1.28.3] — 2026-07-01 (déduplication logique des mails — fix inbox polluée #719-#722)
 
 ### Contexte

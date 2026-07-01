@@ -708,6 +708,12 @@ def _persist(
     status: str = "pending",
     reply_to: str = "",
     suggested_subject: str = "",
+    # v1.29.0 — threading cockpit (fil de discussion parent + replies).
+    message_id: str = "",
+    in_reply_to: str = "",
+    dossier_id: str = "",
+    thread_id: str = "",
+    thread_subject: str = "",
 ) -> int:
     """Persiste le mail. En cas de conflit, ne JAMAIS écraser category/priority/status cockpit.
 
@@ -722,6 +728,11 @@ def _persist(
     ai_draft = str(ai_draft) if ai_draft is not None else ""
     reply_to = str(reply_to) if reply_to is not None else ""
     suggested_subject = str(suggested_subject) if suggested_subject is not None else ""
+    message_id = str(message_id) if message_id is not None else ""
+    in_reply_to = str(in_reply_to) if in_reply_to is not None else ""
+    dossier_id = str(dossier_id) if dossier_id is not None else ""
+    thread_id = str(thread_id) if thread_id is not None else ""
+    thread_subject = str(thread_subject) if thread_subject is not None else ""
     # v1.25.24 — l'expéditeur stocké = expéditeur affiché : on masque le
     # forwarder/robot (newsletter@/wordpress@/mail@detective/noreply@) au
     # profit du vrai client (Reply-To valide, sinon email du body, sinon
@@ -768,8 +779,9 @@ def _persist(
             """
             INSERT INTO mail_processed
                 (imap_uid, mailbox_name, subject, sender, received_at, category, draft_generated,
-                 body_preview, body, ai_draft, status, priority, reply_to, suggested_subject)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 body_preview, body, ai_draft, status, priority, reply_to, suggested_subject,
+                 message_id, in_reply_to, dossier_id, thread_id, thread_subject)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id
             """,
             (
@@ -787,6 +799,11 @@ def _persist(
                 priority,
                 reply_to,
                 suggested_subject,
+                message_id,
+                in_reply_to,
+                dossier_id,
+                thread_id,
+                thread_subject,
             ),
         )
         row = cursor.fetchone()
@@ -833,6 +850,39 @@ def _persist_duplicate(
             (imap_uid, mailbox_name),
         ).fetchone()
         return row[0] if row else 0
+    finally:
+        conn.close()
+
+
+def _refresh_thread_subject(db_path: Path, thread_id: str) -> None:
+    """v1.29.0 — recalcule thread_subject = sujet du mail le plus ancien du fil.
+
+    1 SELECT + 1 UPDATE. Appelé après chaque `_persist()` ayant un thread_id.
+    Coût : < 1ms par mail. Pas d'effet si le thread n'existe pas encore.
+    """
+    if not thread_id:
+        return
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute(
+            """
+            SELECT subject FROM mail_processed
+            WHERE thread_id = ?
+            ORDER BY received_at ASC
+            LIMIT 1
+            """,
+            (thread_id,),
+        ).fetchone()
+        if not row:
+            return
+        canonical = row[0] or ""
+        if not canonical:
+            return
+        conn.execute(
+            "UPDATE mail_processed SET thread_subject = ? WHERE thread_id = ?",
+            (canonical, thread_id),
+        )
+        conn.commit()
     finally:
         conn.close()
 
@@ -1324,6 +1374,10 @@ async def _process_single_mail(
                 pass  # Si parsing échoue, on traite quand même
 
         message_id = msg.get("Message-ID", "")
+        # v1.29.0 — threading cockpit : on capte aussi In-Reply-To et References
+        # pour reconstruire la filiation. Cf. app/pipeline/threading.py.
+        in_reply_to = (msg.get("In-Reply-To") or "").strip()
+        references = (msg.get("References") or "").strip()
         body = _get_body_text(msg)
 
         # Skip système : emails auto-générés (magic links Resend, etc.)
@@ -1359,12 +1413,30 @@ async def _process_single_mail(
         # fenêtre 48h. Cas typique : campagnes mailing qui ré-essaient 10x,
         # forwarders auto, réexpéditions serveur → 1 seul traitement,
         # les autres marqués status='duplicate' pour audit.
+        #
+        # v1.29.0 — on calcule thread_id ICI (avant dédup) pour le passer à
+        # is_logical_duplicate. Cela permet de catch les doublons cross-boîtes
+        # accidentels (même thread_id dans 48h = doublon) sans casser les
+        # replies légitimes (la clé thread_id seule ne suffit pas — il faut
+        # aussi subject EXACT ou Message-ID identique).
+        from app.pipeline.threading import (
+            compute_thread_id,
+            derive_dossier_id_threading,
+        )
+
+        dossier_id = derive_dossier_id_threading(subject, body, sender)
+        thread_id = compute_thread_id(dossier_id, sender)
+
         is_dup, original_id = await asyncio.to_thread(
             is_logical_duplicate,
             settings.db_agent_state,
             sender,
             subject,
             received_at or datetime.utcnow().isoformat(),
+            # v1.29.0 — kwargs threading (rétrocompat : None par défaut)
+            thread_id,
+            message_id,
+            in_reply_to,
         )
         if is_dup:
             log.info(
@@ -1560,7 +1632,23 @@ async def _process_single_mail(
             status,
             reply_to,
             gen.suggested_subject if gen else "",
+            # v1.29.0 — threading cockpit
+            message_id,
+            in_reply_to,
+            dossier_id,
+            thread_id,
+            # thread_subject initial = sujet courant strippé des préfixes.
+            # Sera raffraîchi par _refresh_thread_subject juste après.
+            subject,
         )
+
+        # v1.29.0 — recalcule le thread_subject canonique (sujet du plus ancien
+        # mail du fil). Le sujet passé à _persist est best-effort (sujet du mail
+        # courant strippé) ; ce helper fait le tri par received_at et propage.
+        if thread_id:
+            await asyncio.to_thread(
+                _refresh_thread_subject, settings.db_agent_state, thread_id
+            )
 
         # --- Sauvegarde locale des pièces jointes (tous les emails) ---
         attachments = _extract_attachments(msg)

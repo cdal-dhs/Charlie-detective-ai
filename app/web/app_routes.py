@@ -205,6 +205,84 @@ async def _fetch_mails(
     return hot_mails, other_mails
 
 
+def _group_into_threads(mails: list[dict]) -> list[dict]:
+    """v1.29.0 — groupe les mails en fils de discussion par thread_id.
+
+    Args:
+        mails: liste de dicts (issus de _fetch_mails).
+
+    Returns:
+        Liste de threads triés par date du mail le plus récent DESC.
+        Chaque thread = {
+            "thread_id": str,
+            "parent": dict (mail avec received_at min),
+            "replies": [dict, ...] (du + récent au + ancien),
+            "reply_count": int,
+            "last_received": str (ISO du mail le + récent),
+            "all_duplicate": bool (tous les mails du fil sont status=duplicate)
+        }
+
+    Les mails sans thread_id (anciens, pré-v1.29.0) restent en 1-mail = 1-fil
+    (le grouping est best-effort, pas destructif).
+    """
+    threads_dict: dict[str, dict] = {}
+    orphans: list[dict] = []
+
+    for mail in mails:
+        tid = mail.get("thread_id") or ""
+        if not tid:
+            # Mail pré-v1.29.0 ou pas de thread — orphelin, traité comme 1 fil.
+            orphans.append(
+                {
+                    "thread_id": f"orphan::{mail['id']}",
+                    "parent": mail,
+                    "replies": [],
+                    "reply_count": 0,
+                    "last_received": mail.get("received_at") or mail.get("processed_at") or "",
+                    "all_duplicate": mail.get("status") == "duplicate",
+                }
+            )
+            continue
+        if tid not in threads_dict:
+            threads_dict[tid] = {
+                "thread_id": tid,
+                "parent": mail,
+                "replies": [],
+                "reply_count": 0,
+                "last_received": mail.get("received_at") or mail.get("processed_at") or "",
+                "all_duplicate": True,
+            }
+        else:
+            t = threads_dict[tid]
+            # Met à jour le parent si ce mail est plus ancien
+            cur_parent_dt = t["parent"].get("received_at") or ""
+            mail_dt = mail.get("received_at") or ""
+            if mail_dt < cur_parent_dt:
+                old_parent = t["parent"]
+                t["parent"] = mail
+                t["replies"].append(old_parent)
+            else:
+                t["replies"].append(mail)
+            # last_received
+            if (mail.get("received_at") or "") > t["last_received"]:
+                t["last_received"] = mail.get("received_at") or t["last_received"]
+        if mail.get("status") != "duplicate":
+            threads_dict[tid]["all_duplicate"] = False
+
+    # Calcul reply_count
+    for t in threads_dict.values():
+        t["reply_count"] = len(t["replies"])
+        # Tri replies du + récent au + ancien
+        t["replies"].sort(
+            key=lambda m: m.get("received_at") or "", reverse=True
+        )
+
+    threads = list(threads_dict.values()) + orphans
+    # Tri global par date du mail le plus récent DESC
+    threads.sort(key=lambda t: t["last_received"], reverse=True)
+    return threads
+
+
 async def _fetch_mailboxes() -> list[MailboxConfig]:
     """Retourne les boîtes configurées (pas seulement celles avec mails)."""
     settings = get_settings()
@@ -293,10 +371,70 @@ async def app_index(
     q = request.query_params.get("q") or None
     sort_col = request.query_params.get("sort") or "date"
     sort_order = request.query_params.get("order") or "desc"
+    # v1.29.0 — view tabs cockpit : threads (défaut) / flat / duplicates
+    view = request.query_params.get("view") or "threads"
 
     hot_mails, other_mails = await _fetch_mails(
         db, boxes, category, status, priority, q, sort_col, sort_order
     )
+
+    # v1.29.0 — vue par défaut = threads (regroupés par thread_id).
+    # Vue flat = 1 ligne = 1 mail (legacy). Vue duplicates = uniquement
+    # les status='duplicate' (audit/debug v1.28.3).
+    if view == "threads":
+        hot_threads = _group_into_threads(hot_mails)
+        other_threads = _group_into_threads(other_mails)
+    elif view == "duplicates":
+        # Filtre uniquement les doublons (status='duplicate') sur le tri descendant
+        hot_threads = [
+            {
+                "thread_id": f"dup::{m['id']}",
+                "parent": m,
+                "replies": [],
+                "reply_count": 0,
+                "last_received": m.get("received_at") or m.get("processed_at") or "",
+                "all_duplicate": True,
+            }
+            for m in hot_mails
+            if m.get("status") == "duplicate"
+        ]
+        other_threads = [
+            {
+                "thread_id": f"dup::{m['id']}",
+                "parent": m,
+                "replies": [],
+                "reply_count": 0,
+                "last_received": m.get("received_at") or m.get("processed_at") or "",
+                "all_duplicate": True,
+            }
+            for m in other_mails
+            if m.get("status") == "duplicate"
+        ]
+    else:
+        # view == "flat" — comportement legacy, 1 ligne = 1 mail
+        hot_threads = [
+            {
+                "thread_id": f"flat::{m['id']}",
+                "parent": m,
+                "replies": [],
+                "reply_count": 0,
+                "last_received": m.get("received_at") or m.get("processed_at") or "",
+                "all_duplicate": m.get("status") == "duplicate",
+            }
+            for m in hot_mails
+        ]
+        other_threads = [
+            {
+                "thread_id": f"flat::{m['id']}",
+                "parent": m,
+                "replies": [],
+                "reply_count": 0,
+                "last_received": m.get("received_at") or m.get("processed_at") or "",
+                "all_duplicate": m.get("status") == "duplicate",
+            }
+            for m in other_mails
+        ]
+
     mailboxes = await _fetch_mailboxes()
     counts = await _fetch_counts(
         db,
@@ -311,8 +449,9 @@ async def app_index(
         request,
         "app/inbox.html",
         {
-            "hot_mails": hot_mails,
-            "other_mails": other_mails,
+            "hot_threads": hot_threads,
+            "other_threads": other_threads,
+            "view": view,
             "filters": {
                 "box": box_raw,
                 "category": category,

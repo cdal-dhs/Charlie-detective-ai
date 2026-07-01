@@ -31,6 +31,20 @@ _MAIL_PROCESSED_COLS: list[tuple[str, str]] = [
     # (deliver_pending_drafts) de livrer un sujet propre au lieu du sujet original
     # (template WP absurde / tag [NO_EMAIL_IN_THE_FORM]). Cf. #643.
     ("suggested_subject", "TEXT"),
+    # v1.29.0 — système de fil de discussion (threading) cockpit inbox.
+    # Le mail initial (parent) + ses replies ping-pong sont regroupés sous un
+    # même thread_id. Le thread_subject canonique = sujet du mail le plus ancien.
+    # Le dossier_id est dérivé d'une regex "Dossier Dupont" + fallback ref/hash.
+    # Cf. tests/test_threading.py et app/pipeline/threading.py.
+    # NOTE: "references" est un mot-clé SQLite → on l'escape avec backticks dans
+    # les requêtes SQL. En DDL ALTER TABLE, SQLite accepte le nom nu mais certaines
+    # versions refusent — on l'ajoute quand même, la lecture SQL utilise des backticks.
+    ("message_id", "TEXT"),
+    ("in_reply_to", "TEXT"),
+    ("dossier_id", "TEXT"),
+    ("thread_id", "TEXT"),
+    ("thread_subject", "TEXT"),
+    # 'references' ajouté en DDL séparé car c'est un mot-clé SQL.
 ]
 
 
@@ -44,6 +58,8 @@ async def migrate(db_path: Path) -> None:
 
         await _create_tables(db)
         await _add_mail_processed_columns(db)
+        await _add_mail_processed_indexes(db)
+        await _backfill_threading(db)
         await _seed_default_users(db)
 
         await db.commit()
@@ -185,6 +201,85 @@ async def _add_mail_processed_columns(db: aiosqlite.Connection) -> None:
         if col_name not in existing:
             log.info("db.migrate.add_column", table="mail_processed", column=col_name)
             await db.execute(f"ALTER TABLE mail_processed ADD COLUMN {col_name} {col_type}")
+
+    # 'references' est un mot-clé SQL — DDL séparé (SQLite ≥ 3.30 l'accepte aussi
+    # en ADD COLUMN, mais on reste safe avec quoting pour toutes les versions).
+    if "references" not in existing:
+        log.info("db.migrate.add_column", table="mail_processed", column="references")
+        await db.execute('ALTER TABLE mail_processed ADD COLUMN "references" TEXT')
+
+
+async def _add_mail_processed_indexes(db: aiosqlite.Connection) -> None:
+    """v1.29.0 — index sur thread_id pour les requêtes fil de discussion cockpit.
+
+    Idempotent (IF NOT EXISTS). Log structuré.
+    """
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_mail_processed_thread ON mail_processed(thread_id)"
+    )
+    log.info("db.migrate.index_thread_ready")
+
+
+async def _backfill_threading(db: aiosqlite.Connection) -> None:
+    """v1.29.0 — backfill thread_id/thread_subject pour les mails déjà en base.
+
+    Idempotent : WHERE thread_id IS NULL OR thread_id = ''.
+    Isole la logique dans un module pur (threading.py) pour testabilité.
+    Pour les ~6k mails historiques, faire un run séparé via
+    `python -m scripts.backfill_threading --apply` — c'est plus rapide qu'au migrate.
+    """
+    from app.pipeline.threading import (
+        compute_thread_id,
+        derive_dossier_id_threading,
+        pick_thread_subject,
+    )
+
+    cursor = await db.execute(
+        """
+        SELECT id, subject, body, sender
+        FROM mail_processed
+        WHERE thread_id IS NULL OR thread_id = ''
+        """
+    )
+    rows = await cursor.fetchall()
+    if not rows:
+        log.info("db.migrate.backfill_threading_nothing_to_do")
+        return
+
+    log.info("db.migrate.backfill_threading_start", n=len(rows))
+    updated = 0
+    # Group by computed thread_id pour pick_thread_subject en batch
+    by_thread: dict[str, list[tuple[str, str]]] = {}
+    updates: list[tuple[str, str, int]] = []  # (thread_id, dossier_id, mail_id)
+
+    for mail_id, subject, body, sender in rows:
+        dossier_id = derive_dossier_id_threading(subject or "", body or "", sender or "")
+        thread_id = compute_thread_id(dossier_id, sender or "")
+        updates.append((thread_id, dossier_id, mail_id))
+        by_thread.setdefault(thread_id, []).append((subject or "", ""))
+
+    for thread_id, dossier_id, mail_id in updates:
+        await db.execute(
+            "UPDATE mail_processed SET thread_id = ?, dossier_id = ? WHERE id = ?",
+            (thread_id, dossier_id, mail_id),
+        )
+        updated += 1
+
+    # thread_subject = sujet du mail le plus ancien du fil.
+    # Simplification : on prend le sujet courant de chaque mail (pas de tri
+    # précis par received_at ici — fait dans le backfill script séparé qui
+    # a accès à plus de contexte). À la première ingérence, _refresh_thread_subject
+    # dans le poller fera le bon tri.
+    for thread_id, _ in by_thread.items():
+        subjects = by_thread[thread_id]
+        thread_subject = pick_thread_subject(subjects)
+        if thread_subject:
+            await db.execute(
+                "UPDATE mail_processed SET thread_subject = ? WHERE thread_id = ?",
+                (thread_subject, thread_id),
+            )
+
+    log.info("db.migrate.backfill_threading_done", updated=updated, threads=len(by_thread))
 
 
 async def _seed_default_users(db: aiosqlite.Connection) -> None:

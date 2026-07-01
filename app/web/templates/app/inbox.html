@@ -47,9 +47,21 @@
       >
         {{ label }}
         <span id="tab-count-{{ key }}" class="ml-1 text-xs text-gray-500">
-          ({% if key == 'all' %}{{ hot_mails|length + other_mails|length }}{% else %}{{ counts.get(key, 0) }}{% endif %})
+          ({% if key == 'all' %}{{ hot_threads|length + other_threads|length }}{% else %}{{ counts.get(key, 0) }}{% endif %})
         </span>
       </button>
+    {% endfor %}
+  </div>
+
+  <!-- v1.29.0 — tabs view (threads | flat | duplicates) -->
+  <div class="flex items-center gap-2 px-4 py-2 border-b border-gray-800">
+    <span class="text-xs text-gray-500 mr-2">Vue :</span>
+    {% for v, label in [('threads', '🧵 Fils (parent + replies)'), ('flat', '📋 Brute (1 ligne = 1 mail)'), ('duplicates', '🗑️ Doublons (audit v1.28.3)')] %}
+      <a href="?view={{ v }}{% if filters.box %}&box={{ filters.box }}{% endif %}{% if filters.q %}&q={{ filters.q }}{% endif %}"
+         class="px-3 py-1 text-xs rounded font-medium whitespace-nowrap
+                {% if view == v %}bg-blue-600 text-white{% else %}bg-gray-800 text-gray-300 hover:bg-gray-700{% endif %}">
+        {{ label }}
+      </a>
     {% endfor %}
   </div>
 

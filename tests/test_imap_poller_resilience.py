@@ -115,6 +115,12 @@ def _setup_db(tmp_path):
             priority TEXT,
             reply_to TEXT,
             suggested_subject TEXT,
+            message_id TEXT,
+            in_reply_to TEXT,
+            "references" TEXT,
+            dossier_id TEXT,
+            thread_id TEXT,
+            thread_subject TEXT,
             processed_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
         """
@@ -344,6 +350,8 @@ async def test_process_single_mail_does_not_set_agent_attempted_on_success(
     monkeypatch.setattr("app.workers.imap_poller.feed_document", AsyncMock())
     monkeypatch.setattr("app.workers.imap_poller._persist", MagicMock(return_value=42))
     monkeypatch.setattr("app.workers.imap_poller._is_system_email", MagicMock(return_value=False))
+    monkeypatch.setattr("app.workers.imap_poller._refresh_thread_subject", MagicMock())
+    monkeypatch.setattr("app.workers.imap_poller.is_logical_duplicate", MagicMock(return_value=(False, None)))
     monkeypatch.setattr(
         "app.workers.imap_poller._is_verified_demande_client", MagicMock(return_value=False)
     )

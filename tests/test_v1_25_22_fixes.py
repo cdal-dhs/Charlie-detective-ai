@@ -236,7 +236,9 @@ async def test_fetch_candidates_exclut_delivered(tmp_path) -> None:
                 subject TEXT, sender TEXT, received_at TEXT, category TEXT,
                 draft_generated INTEGER, body_preview TEXT, body TEXT,
                 ai_draft TEXT, status TEXT, priority TEXT, reply_to TEXT,
-                suggested_subject TEXT, delivered_at TEXT, processed_at TEXT
+                suggested_subject TEXT, delivered_at TEXT, processed_at TEXT,
+                message_id TEXT, in_reply_to TEXT, "references" TEXT,
+                dossier_id TEXT, thread_id TEXT, thread_subject TEXT
             )"""
         )
         # mail 100 : jamais livré (delivered_at NULL) -> candidat (crash silencieux)
@@ -398,7 +400,9 @@ def test_persist_masks_forwarder_sender(tmp_path) -> None:
         "mailbox_name TEXT, subject TEXT, sender TEXT, received_at TEXT, "
         "category TEXT, draft_generated INTEGER, body_preview TEXT, body TEXT, "
         "ai_draft TEXT, status TEXT, priority TEXT, reply_to TEXT, "
-        "suggested_subject TEXT, delivered_at TEXT, processed_at TEXT)"
+        "suggested_subject TEXT, delivered_at TEXT, processed_at TEXT, "
+        "message_id TEXT, in_reply_to TEXT, \"references\" TEXT, "
+        "dossier_id TEXT, thread_id TEXT, thread_subject TEXT)"
     )
     conn.commit()
     conn.close()
@@ -433,7 +437,9 @@ def test_persist_keeps_reply_to_as_sender(tmp_path) -> None:
         "mailbox_name TEXT, subject TEXT, sender TEXT, received_at TEXT, "
         "category TEXT, draft_generated INTEGER, body_preview TEXT, body TEXT, "
         "ai_draft TEXT, status TEXT, priority TEXT, reply_to TEXT, "
-        "suggested_subject TEXT, delivered_at TEXT, processed_at TEXT)"
+        "suggested_subject TEXT, delivered_at TEXT, processed_at TEXT, "
+        "message_id TEXT, in_reply_to TEXT, \"references\" TEXT, "
+        "dossier_id TEXT, thread_id TEXT, thread_subject TEXT)"
     )
     conn.commit()
     conn.close()

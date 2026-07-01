@@ -278,13 +278,20 @@ async def inbox_partial(
     hot_mails, other_mails = await _fetch_mails_partial(
         db, boxes, category, status, priority, q, sort_col, sort_order
     )
+    # v1.29.0 — vue API = toujours flat (l'API sert les mises à jour HTMX
+    # de l'inbox cockpit, on garde 1 ligne = 1 mail pour la perf et la
+    # simplicité — le cockpit full utilise _group_into_threads() pour le fil).
+    from app.web.app_routes import _group_into_threads
+
+    hot_threads = _group_into_threads(hot_mails)
+    other_threads = _group_into_threads(other_mails)
     mailboxes = get_settings().mailboxes()
     return templates.TemplateResponse(
         request,
         "app/inbox_rows.html",
         {
-            "hot_mails": hot_mails,
-            "other_mails": other_mails,
+            "hot_threads": hot_threads,
+            "other_threads": other_threads,
             "box_short": {mb.name: mb.short_code for mb in mailboxes},
             "filters": {
                 "box": box_raw,
