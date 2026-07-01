@@ -41,6 +41,7 @@ import sys
 from collections import defaultdict
 from datetime import datetime, timedelta
 from email import message_from_bytes
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 import aioimaplib
@@ -123,10 +124,18 @@ def _find_duplicate_groups(db_path: Path) -> dict[tuple[str, str], list[int]]:
             ).fetchall()
             parsed = []
             for (rt,) in times:
+                if not rt:
+                    continue
+                # mail_processed stocke received_at en RFC 2822 ('Tue, 30 Jun
+                # 2026 15:57:50 +0200') — pas ISO 8601. parsedate_to_datetime
+                # gère les 2 formats (fallback ISO si jamais la forme change).
                 try:
-                    parsed.append(datetime.fromisoformat(rt.replace("Z", "+00:00")))
-                except (ValueError, AttributeError):
-                    pass
+                    parsed.append(parsedate_to_datetime(rt))
+                except (ValueError, TypeError):
+                    try:
+                        parsed.append(datetime.fromisoformat(rt.replace("Z", "+00:00")))
+                    except (ValueError, AttributeError):
+                        pass
             if len(parsed) < 2:
                 continue
             spread = max(parsed) - min(parsed)
