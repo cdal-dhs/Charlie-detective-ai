@@ -1,5 +1,49 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.28.3] — 2026-07-01 (déduplication logique des mails — fix inbox polluée #719-#722)
+
+### Contexte
+L'inbox du cockpit montrait depuis 2 jours une cascade de **~10 doublons `Re: Votre reçu Apple`** (expéditeur `dpdhuinvestigations@gmail.com`, boîte `D_FR`) tous classés `demande_client`/`high`. Chaque doublon déclenchait un brouillon fantôme en Drafts IMAP, polluait visuellement l'inbox Daniel et faussait les compteurs stats. Cause racine : aucun check de dédup logique au poller — 10 `message-id` IMAP distincts = 10 ingestions + 10 brouillons candidats. `is_internal_sender()` (v1.28.2) ne capturait pas ce cas (sender brand-mais-pas-officiel : pas `digitalhs.biz`, local-part ≠ `cdal`/`daniel`).
+
+### Ajouté
+- **`app/pipeline/dedup.py`** : module `is_logical_duplicate()` qui détecte les doublons logiques via la clé `(sender_normalized, subject_normalized)` sur fenêtre glissante 48h. Normalisation sujet : strip préfixes `Re:`/`Fwd:`/`AW:`/`TR:`/`SV:` multi-niveaux. Déterministe, sans LLM, < 5ms par mail, requête SQL unique indexée.
+- **`tests/test_dedup.py`** : 22 tests TDD (normalisation sujet/sender, détection doublons, hors fenêtre, sender différent, cascade guard `status='duplicate'`, edge cases).
+- **`_persist_duplicate()`** dans `imap_poller.py` : helper qui persiste un doublon avec `status=duplicate`, `category=autre`, `priority=low`, `draft_generated=0` pour audit.
+- **`scripts/backfill_dedup_apple.py`** : script `--dry-run` / `--apply` pour nettoyer les doublons pré-existants en prod (DB + suppression brouillons Drafts IMAP via header `X-Detective-Mail-Id`).
+
+### Changé
+- **`app/workers/imap_poller.py`** : injection du check `is_logical_duplicate()` dans `_process_single_mail()` juste après le filtre `system_email_skipped` et AVANT `is_subject_suspect()`. Court-circuit propre = 0 coût LLM, 0 brouillon, flag IMAP posé. Nouvelle valeur de retour `"duplicate"` (cohérent avec `"skipped"`/`"error"`).
+- **Cascade guard** : la requête SQL filtre `status != 'duplicate'` pour éviter qu'un doublon d'un doublon soit re-marqué (le parent le plus ancien reste la référence).
+
+### Fixé
+- **#722 (et #719, #720, #721, #715-#718)** : cascade de doublons `Re: Votre reçu Apple` classés `demande_client`/`high` dans l'inbox. Expéditeur `dpdhuinvestigations@gmail.com` (brand-mais-pas-officiel) — non capturé par `is_internal_sender()`. Chaque doublon déclenchait un brouillon fantôme en Drafts IMAP.
+- **#720 (HBO [NO_EMAIL_IN_THE_FORM])** : placeholder sans email → dédupliqué par sender vide (laisse passer) ; le fix global de l'inbox polluée reste valide.
+- Polluait visuellement l'inbox Daniel et faussait les compteurs stats (catégories `demande_client`, priorité `high`).
+
+### Tests
+- **22 nouveaux tests TDD** (dedup) : normalisation sujet (7), normalisation sender (5), détection doublons (10 dont cascade guard, fenêtre, sender différent, multi-Re, display name).
+- **2 patches de test** : `tests/test_cerveau_feed.py` patch `is_logical_duplicate → (False, None)` pour que les tests d'intégration Cerveau2 restent verts (le nouveau check court-circuite par défaut, il faut mocker le retour pour tester le flux nominal complet).
+- **Total : 401 tests verts** (379 + 22 dedup).
+
+### Backfill prod
+```bash
+# 1. Dry-run
+docker exec detective-agent python -m scripts.backfill_dedup_apple --dry-run
+# Attendu : ~10 doublons listés pour #719-#722, 1 doublon HBO pour #720
+
+# 2. Validation CDAL → GO
+
+# 3. Apply
+docker exec detective-agent python -m scripts.backfill_dedup_apple --apply
+# Attendu : 8-10 doublons marqués status=duplicate, 8-10 brouillons Drafts supprimés
+```
+
+### Notes
+- Idempotent : un second run ne fait rien (les `status=duplicate` sont exclus).
+- Le sender `dpdhuinvestigations@gmail.com` reste NON-interne (la dédup est le bon filet, pas l'extension de `is_internal_sender()` — risque de faux positif sur un vrai client qui s'appellerait "DPDH" par hasard).
+
+---
+
 ## [1.28.2] — 2026-06-29 (garde-fou anti-brouillon-interne — fix régression #686)
 
 ### Contexte

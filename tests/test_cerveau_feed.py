@@ -19,6 +19,7 @@ class FakeMailbox:
 
 # --- Tests dossier_id ---
 
+
 def test_extract_dossier_ref_from_subject():
     assert extract_dossier_ref("Dossier ADF - suivi") == "ADF"
     assert extract_dossier_ref("Affaire: XYZ123") == "XYZ123"
@@ -55,6 +56,7 @@ def test_derive_dossier_id_from_sender():
 
 
 # --- Tests hook poller ---
+
 
 @pytest.fixture
 def mock_settings(monkeypatch):
@@ -106,18 +108,20 @@ async def test_poller_feeds_cerveau2_for_draft(mock_settings, mock_msg):
     client = _make_mock_client(mock_msg)
     mailbox = FakeMailbox()
 
-    with patch("app.workers.imap_poller.get_settings", return_value=mock_settings), \
-         patch("app.workers.imap_poller.message_from_bytes", return_value=mock_msg), \
-         patch("app.workers.imap_poller._get_body_text", return_value="Bonjour"), \
-         patch("app.workers.imap_poller._mail_exists", return_value=False), \
-         patch("app.workers.imap_poller._persist", return_value=42), \
-         patch("app.workers.imap_poller.classify", return_value="demande_client"), \
-         patch("app.workers.imap_poller.assign_priority", return_value="high"), \
-         patch("app.workers.imap_poller.quick_classify", return_value=None), \
-         patch("app.workers.imap_poller.detect_language", return_value="fr"), \
-         patch("app.workers.imap_poller.generate_draft", new_callable=AsyncMock) as mock_gen, \
-         patch("app.workers.imap_poller.feed_correspondance", new_callable=AsyncMock) as mock_feed:
-
+    with (
+        patch("app.workers.imap_poller.get_settings", return_value=mock_settings),
+        patch("app.workers.imap_poller.message_from_bytes", return_value=mock_msg),
+        patch("app.workers.imap_poller._get_body_text", return_value="Bonjour"),
+        patch("app.workers.imap_poller._mail_exists", return_value=False),
+        patch("app.workers.imap_poller._persist", return_value=42),
+        patch("app.workers.imap_poller.classify", return_value="demande_client"),
+        patch("app.workers.imap_poller.assign_priority", return_value="high"),
+        patch("app.workers.imap_poller.quick_classify", return_value=None),
+        patch("app.workers.imap_poller.detect_language", return_value="fr"),
+        patch("app.workers.imap_poller.is_logical_duplicate", return_value=(False, None)),
+        patch("app.workers.imap_poller.generate_draft", new_callable=AsyncMock) as mock_gen,
+        patch("app.workers.imap_poller.feed_correspondance", new_callable=AsyncMock) as mock_feed,
+    ):
         mock_gen.return_value = MagicMock(draft="Brouillon test")
         await _process_single_mail(client, "12345", mailbox)
 
@@ -134,16 +138,17 @@ async def test_poller_skips_newsletter(mock_settings, mock_msg):
     client = _make_mock_client(mock_msg)
     mailbox = FakeMailbox()
 
-    with patch("app.workers.imap_poller.get_settings", return_value=mock_settings), \
-         patch("app.workers.imap_poller.message_from_bytes", return_value=mock_msg), \
-         patch("app.workers.imap_poller._get_body_text", return_value="Newsletter"), \
-         patch("app.workers.imap_poller._mail_exists", return_value=False), \
-         patch("app.workers.imap_poller._persist", return_value=42), \
-         patch("app.workers.imap_poller.classify", return_value="newsletter"), \
-         patch("app.workers.imap_poller.assign_priority", return_value="low"), \
-         patch("app.workers.imap_poller.quick_classify", return_value=None), \
-         patch("app.workers.imap_poller.feed_correspondance", new_callable=AsyncMock) as mock_feed:
-
+    with (
+        patch("app.workers.imap_poller.get_settings", return_value=mock_settings),
+        patch("app.workers.imap_poller.message_from_bytes", return_value=mock_msg),
+        patch("app.workers.imap_poller._get_body_text", return_value="Newsletter"),
+        patch("app.workers.imap_poller._mail_exists", return_value=False),
+        patch("app.workers.imap_poller._persist", return_value=42),
+        patch("app.workers.imap_poller.classify", return_value="newsletter"),
+        patch("app.workers.imap_poller.assign_priority", return_value="low"),
+        patch("app.workers.imap_poller.quick_classify", return_value=None),
+        patch("app.workers.imap_poller.feed_correspondance", new_callable=AsyncMock) as mock_feed,
+    ):
         await _process_single_mail(client, "12345", mailbox)
 
         mock_feed.assert_not_called()
@@ -155,16 +160,17 @@ async def test_poller_skips_phishing(mock_settings, mock_msg):
     client = _make_mock_client(mock_msg)
     mailbox = FakeMailbox()
 
-    with patch("app.workers.imap_poller.get_settings", return_value=mock_settings), \
-         patch("app.workers.imap_poller.message_from_bytes", return_value=mock_msg), \
-         patch("app.workers.imap_poller._get_body_text", return_value="Click here"), \
-         patch("app.workers.imap_poller._mail_exists", return_value=False), \
-         patch("app.workers.imap_poller._persist", return_value=42), \
-         patch("app.workers.imap_poller.classify", return_value="phishing"), \
-         patch("app.workers.imap_poller.assign_priority", return_value="high"), \
-         patch("app.workers.imap_poller.quick_classify", return_value=None), \
-         patch("app.workers.imap_poller.feed_correspondance", new_callable=AsyncMock) as mock_feed:
-
+    with (
+        patch("app.workers.imap_poller.get_settings", return_value=mock_settings),
+        patch("app.workers.imap_poller.message_from_bytes", return_value=mock_msg),
+        patch("app.workers.imap_poller._get_body_text", return_value="Click here"),
+        patch("app.workers.imap_poller._mail_exists", return_value=False),
+        patch("app.workers.imap_poller._persist", return_value=42),
+        patch("app.workers.imap_poller.classify", return_value="phishing"),
+        patch("app.workers.imap_poller.assign_priority", return_value="high"),
+        patch("app.workers.imap_poller.quick_classify", return_value=None),
+        patch("app.workers.imap_poller.feed_correspondance", new_callable=AsyncMock) as mock_feed,
+    ):
         await _process_single_mail(client, "12345", mailbox)
 
         mock_feed.assert_not_called()
@@ -176,16 +182,18 @@ async def test_poller_feeds_other_categories(mock_settings, mock_msg):
     client = _make_mock_client(mock_msg)
     mailbox = FakeMailbox()
 
-    with patch("app.workers.imap_poller.get_settings", return_value=mock_settings), \
-         patch("app.workers.imap_poller.message_from_bytes", return_value=mock_msg), \
-         patch("app.workers.imap_poller._get_body_text", return_value="Facture impayée"), \
-         patch("app.workers.imap_poller._mail_exists", return_value=False), \
-         patch("app.workers.imap_poller._persist", return_value=42), \
-         patch("app.workers.imap_poller.classify", return_value="facture"), \
-         patch("app.workers.imap_poller.assign_priority", return_value="normal"), \
-         patch("app.workers.imap_poller.quick_classify", return_value=None), \
-         patch("app.workers.imap_poller.feed_correspondance", new_callable=AsyncMock) as mock_feed:
-
+    with (
+        patch("app.workers.imap_poller.get_settings", return_value=mock_settings),
+        patch("app.workers.imap_poller.message_from_bytes", return_value=mock_msg),
+        patch("app.workers.imap_poller._get_body_text", return_value="Facture impayée"),
+        patch("app.workers.imap_poller._mail_exists", return_value=False),
+        patch("app.workers.imap_poller._persist", return_value=42),
+        patch("app.workers.imap_poller.classify", return_value="facture"),
+        patch("app.workers.imap_poller.assign_priority", return_value="normal"),
+        patch("app.workers.imap_poller.quick_classify", return_value=None),
+        patch("app.workers.imap_poller.is_logical_duplicate", return_value=(False, None)),
+        patch("app.workers.imap_poller.feed_correspondance", new_callable=AsyncMock) as mock_feed,
+    ):
         await _process_single_mail(client, "12345", mailbox)
 
         mock_feed.assert_called_once()

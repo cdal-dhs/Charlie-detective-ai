@@ -23,6 +23,7 @@ from app.delivery.resend_notifier import IncomingMail, notify_draft
 from app.delivery.slack_notifier import notify_new_draft as notify_slack_draft
 from app.healthcheck import health
 from app.pipeline.classifier import _is_human_followup, _is_reply_to_daniel, classify
+from app.pipeline.dedup import is_logical_duplicate
 from app.pipeline.document_extract import extract_text_bytes, is_supported
 from app.pipeline.generator import generate_draft
 from app.pipeline.language import detect_language
@@ -795,6 +796,47 @@ def _persist(
         conn.close()
 
 
+def _persist_duplicate(
+    db_path: Path,
+    imap_uid: str,
+    mailbox_name: str,
+    sender: str,
+    subject: str,
+    body_preview: str,
+    original_id: int,
+) -> int:
+    """Persiste un doublon logique avec status=duplicate (audit only, v1.28.3).
+
+    - INSERT OR IGNORE : si le même uid arrive 2x (replay poller), on ne double pas.
+    - category='autre' + priority='low' + draft_generated=0 : pas d'alerte cockpit,
+      pas de brouillon. Le mail existe pour traçabilité (debug, stats).
+    - received_at = datetime('now') : on stocke l'heure de détection, pas celle
+      du header (qui peut être ancienne et fausserait les futures dédup).
+    """
+    sender = str(sender) if sender is not None else ""
+    subject = str(subject) if subject is not None else ""
+    body_preview = str(body_preview) if body_preview is not None else ""
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO mail_processed (
+                imap_uid, mailbox_name, subject, sender, received_at,
+                category, draft_generated, status, priority, body_preview
+            ) VALUES (?, ?, ?, ?, datetime('now'), 'autre', 0, 'duplicate', 'low', ?)
+            """,
+            (imap_uid, mailbox_name, subject[:500], sender[:200], body_preview[:2000]),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT id FROM mail_processed WHERE imap_uid = ? AND mailbox_name = ?",
+            (imap_uid, mailbox_name),
+        ).fetchone()
+        return row[0] if row else 0
+    finally:
+        conn.close()
+
+
 async def poll_mailbox(mailbox: MailboxConfig, stop_event: asyncio.Event) -> None:
     """Boucle de polling IMAP pour une boîte."""
     settings = get_settings()
@@ -1105,7 +1147,8 @@ async def _process_mailbox(mailbox: MailboxConfig) -> None:
         if needs_db_filter:
             before = len(uids)
             uids = [
-                uid for uid in uids
+                uid
+                for uid in uids
                 if not await asyncio.to_thread(
                     _mail_exists, settings.db_agent_state, uid.decode(), mailbox.name
                 )
@@ -1308,6 +1351,48 @@ async def _process_single_mail(
             subject=subject,
             message_id=message_id,
         )
+
+        # v1.28.3 — déduplication logique (fix #719-#722 inbox polluée).
+        # Court-circuite AVANT tout traitement coûteux (homoglyphes LLM,
+        # quick_classify, classify, generate_draft, append_draft) si un mail
+        # avec (sender_normalized, subject_normalized) existe déjà dans la
+        # fenêtre 48h. Cas typique : campagnes mailing qui ré-essaient 10x,
+        # forwarders auto, réexpéditions serveur → 1 seul traitement,
+        # les autres marqués status='duplicate' pour audit.
+        is_dup, original_id = await asyncio.to_thread(
+            is_logical_duplicate,
+            settings.db_agent_state,
+            sender,
+            subject,
+            received_at or datetime.utcnow().isoformat(),
+        )
+        if is_dup:
+            log.info(
+                "poller.logical_duplicate_skipped",
+                mailbox=mailbox.name,
+                uid=uid,
+                sender=sender,
+                subject=subject[:120],
+                original_id=original_id,
+            )
+            if not settings.dry_run:
+                body_preview = body[:2000] if body else ""
+                await asyncio.to_thread(
+                    _persist_duplicate,
+                    settings.db_agent_state,
+                    uid,
+                    mailbox.name,
+                    sender,
+                    subject,
+                    body_preview,
+                    original_id or 0,
+                )
+                store_resp = await client.store(uid, "+FLAGS", f"({AGENT_FLAG})")
+                if store_resp.result != "OK":
+                    log.warning(
+                        "poller.flag_failed", mailbox=mailbox.name, uid=uid, response=store_resp
+                    )
+            return "duplicate"
 
         # v1.25.3 — correction du sujet si homoglyphes (ex: itsme cyrillique #614).
         # Coût LLM nul (forfait Ollama Pro). Dégradation silencieuse si LLM échoue :
