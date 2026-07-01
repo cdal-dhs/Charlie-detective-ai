@@ -39,6 +39,7 @@ import re
 import sqlite3
 import sys
 from collections import defaultdict
+from datetime import datetime, timedelta
 from email import message_from_bytes
 from pathlib import Path
 
@@ -105,8 +106,44 @@ def _find_duplicate_groups(db_path: Path) -> dict[tuple[str, str], list[int]]:
             continue
         groups[(s_n, sub_n)].append(mail_id)
 
-    # Ne garder que les groupes avec ≥ 2 mails (sinon pas un doublon)
-    return {k: v for k, v in groups.items() if len(v) >= 2}
+    # Garde-fou supplémentaire : ne garder que les groupes où TOUS les mails
+    # sont arrivés dans une fenêtre de 10 minutes. C'est la signature d'un
+    # VRAI doublon serveur (campagne, retry IMAP) — pas une succession de
+    # réponses légitimes d'un client impatient (Kirara, rcvall, etc.).
+    safe_groups: dict[tuple[str, str], list[int]] = {}
+    conn = sqlite3.connect(db_path)
+    try:
+        for (s_n, sub_n), mail_ids in groups.items():
+            if len(mail_ids) < 2:
+                continue
+            placeholders = ",".join("?" for _ in mail_ids)
+            times = conn.execute(
+                f"SELECT received_at FROM mail_processed WHERE id IN ({placeholders})",
+                mail_ids,
+            ).fetchall()
+            parsed = []
+            for (rt,) in times:
+                try:
+                    parsed.append(datetime.fromisoformat(rt.replace("Z", "+00:00")))
+                except (ValueError, AttributeError):
+                    pass
+            if len(parsed) < 2:
+                continue
+            spread = max(parsed) - min(parsed)
+            if spread <= timedelta(minutes=30):
+                safe_groups[(s_n, sub_n)] = mail_ids
+            else:
+                log.info(
+                    "backfill.skip_group_outside_time_window",
+                    sender=s_n,
+                    subject=sub_n,
+                    n_mails=len(mail_ids),
+                    spread_minutes=int(spread.total_seconds() / 60),
+                )
+    finally:
+        conn.close()
+
+    return safe_groups
 
 
 def _print_groups_dry(groups: dict[tuple[str, str], list[int]], total_mails: int) -> None:
