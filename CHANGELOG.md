@@ -1,5 +1,44 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.30.0.5] — 2026-07-02 (anti-reply-orphelin en hot band)
+
+### Contexte
+- CDAL a signalé un bug structurel : la 1ère bande verte (hot = `demande_client` + `urgent`, toutes priorités, pending) affichait des **REPLY (›) en haut** — ce qui n'a aucun sens puisque :
+  - Si le parent est `pending`, c'est le **parent** qui doit s'afficher (et la reply enfilée en-dessous via `thread_row`).
+  - Si le parent est `traité/approved/rejected/sent`, la reply doit aller dans **OTHER** (Daniel a déjà traité le dossier implicitement en répondant).
+- Conséquence : 8 lignes `Re:` polluaient le haut de la hot band, masquant les vrais demande_client NEW.
+- Cause : `_group_into_threads()` retournait tous les threads sans distinction. La hot band ne filtrait que les `pending` au niveau ligne, pas au niveau fil parent.
+
+### Ajouté
+- **`app/web/app_routes.py:_group_into_threads()`** : signature changée — retourne maintenant `tuple[list[dict], list[dict]]` = `(keep, move_to_other)`.
+  - Logique de move vers `other` :
+    1. `is_reply_in_other` : thread avec `reply_count == 0` (donc un seul mail, considéré comme reply) ET `parent.thread_id` ET un sibling pending existe dans `all_thread_siblings` (cross-band) → move.
+    2. `is_orphan_reply_subject` : thread avec `reply_count == 0` ET sujet commence par `Re:`/`RE:`/`Fwd:`/`TR:`/`FW:`/`Réponse :` (regex insensible casse/accents) ET parent `pending` (pas de doublon) → move (un sujet `Re:` orphelin = forcément une réponse à un mail hors DB / déjà traité).
+  - `reply_count` était buggé (jamais incrémenté) : corrigé en `t["reply_count"] = len(t["replies"])`.
+  - Nouveau paramètre `all_thread_siblings: list[dict] | None = None` pour cross-band detection (siblings en `other_mails`).
+- **Helper `_looks_like_reply_subject(s)`** : regex compilée `_REPLY_SUBJECT_PREFIX = r"^\s*(re|réponse|rép\.?|fwd|forward|tr|fw|aw)\s*:\s*"` (case-insensitive, accents).
+- **Caller `app_index()`** : passe `all_thread_siblings=other_mails` et merge `hot_move` dans `other_threads` après le filtre.
+- **Cohérence `/api/inbox`** : `app/web/api.py:_fetch_mails_partial()` projette maintenant `has_draft`/`suggested_subject`/`thread_id` et utilise la nouvelle signature tuple. L'update HTMX `/api/inbox` reste aligné avec `/app/`.
+
+### Tests
+- **`tests/test_web_inbox_render.py`** : 8 nouveaux tests TDD :
+  - `test_hot_band_keeps_pending_parent_with_pending_reply` — parent+reply pending restent ensemble en hot.
+  - `test_hot_band_excludes_reply_when_parent_approved` — reply avec parent approved part en other.
+  - `test_hot_band_excludes_orphan_reply_with_re_prefix` — sujet `Re:` orphelin part en other.
+  - `test_hot_band_keeps_non_reply_orphan` — sujet sans préfixe reste en hot (NEW mail légitime).
+  - `test_hot_band_no_first_row_is_reply` — 1ère ligne jamais un reply (propriété globale).
+  - `test_thread_grouping_returns_keep_and_move` — test direct de la signature tuple.
+  - `test_thread_grouping_cross_band_move` — cross-band detection (parent en `other_mails`).
+  - `test_looks_like_reply_subject_helper` — coverage regex (Re:/RE:/Re :/réponse :/fwd:/TR :/etc.).
+
+### Vérification prod
+- DB prod copiée + `_group_into_threads` rejoué directement : **5 threads NEW en hot (aucun Re:)**, **10 replies Re: déplacées en other** — attendu CDAL.
+- Test client FastAPI sur DB prod : section `hot` = 5 conversation links (730, 725, 672, 699, 692), tous `subject` sans `Re:`.
+- 447 tests verts (8 nouveaux + 1 pré-existant régression `has_draft` corrigé par le passage à `app/web/api.py`).
+
+### Bump
+- `app/_version.py` : `1.30.0.4` → `1.30.0.5`.
+
 ## [1.30.0.4] — 2026-07-02 (garde-fou anti-bruit hot band — exclure newsletters et comptables)
 
 ### Contexte
