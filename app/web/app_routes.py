@@ -248,6 +248,28 @@ async def _fetch_mails(
         hot_exclude_clauses.append(f"LOWER(IFNULL(m.sender, '')) NOT LIKE ?")
     for pat in hot_exclude_subject_patterns:
         hot_exclude_clauses.append(f"LOWER(IFNULL(m.subject, '')) NOT LIKE ?")
+    # v1.30.0.13 — un mail dont le sujet commence par Re:/Re :/Re\xa0: (et
+    # variantes AW:/TR:/Fwd:) est une réponse. Son parent n'est pas dans
+    # la hot band (sinon le grouping l'aurait rattaché au fil parent) :
+    # c'est forcément un reply orphelin cross-band. Le sortir de la hot
+    # band pour que Daniel ne voie JAMAIS de "Re: ..." en première ligne
+    # verte (cf. demande CDAL — l'orphelin doit aller dans la other band).
+    # v1.30.0.5/v1.30.0.12 essayaient de le faire dans `_group_into_threads`
+    # mais le mail était DÉJÀ dans `hot_mails` à ce stade → déplacer après
+    # groupement ne résolvait rien. Le fix correct = exclure dès la requête
+    # SQL, AVANT le grouping.
+    hot_exclude_reply_prefix_patterns = [
+        "re:%",       # Re:Demande, Re: facture…
+        "re :%",      # Re : avec espace
+        "re\xa0:%",   # Re\xa0: avec espace insécable (NBSP, frequent sur Mac)
+        "aw:%",       # AW: Antwort
+        "tr:%",       # TR: Transfert/Réponse (Apple Mail)
+        "fwd:%",      # Fwd: Forward
+        "fw:%",       # Fw: Forward court
+        "sv:%",       # SV: Sent/Reply (Outlook)
+    ]
+    for pat in hot_exclude_reply_prefix_patterns:
+        hot_exclude_clauses.append(f"LOWER(IFNULL(m.subject, '')) NOT LIKE ?")
     hot_where = where + [
         "(category = 'demande_client' OR category = 'urgent')",
         "(status = 'pending' OR status IS NULL)",
@@ -267,7 +289,9 @@ async def _fetch_mails(
     hot_params = params.copy()
     # v1.30.0.4 — params des filtres anti-bruit de la hot (mêmes valeurs
     # en lowercase pour matcher les `LOWER(...) NOT LIKE ?` du WHERE).
-    for pat in hot_exclude_sender_patterns + hot_exclude_subject_patterns:
+    # v1.30.0.13 — inclut aussi les préfixes Re:/Re :/Re\xa0:/AW:/TR:/Fwd:
+    # pour exclure les replies orphelins de la hot band dès la requête SQL.
+    for pat in hot_exclude_sender_patterns + hot_exclude_subject_patterns + hot_exclude_reply_prefix_patterns:
         hot_params.append(pat.lower())
     hot_params.append(limit)
     async with db.execute(hot_sql, hot_params) as cursor:
@@ -296,7 +320,8 @@ async def _fetch_mails(
     other_params = params.copy()
     # v1.30.0.4 — other_params doit avoir les MÊMES params que hot_params puisque
     # other_where = NOT(hot_where) et hot_where inclut déjà le cutoff+filtres user.
-    for pat in hot_exclude_sender_patterns + hot_exclude_subject_patterns:
+    # v1.30.0.13 — inclut aussi les préfixes Re:/Re :/Re\xa0: pour cohérence.
+    for pat in hot_exclude_sender_patterns + hot_exclude_subject_patterns + hot_exclude_reply_prefix_patterns:
         other_params.append(pat.lower())
     other_params.append(limit)
     async with db.execute(other_sql, other_params) as cursor:

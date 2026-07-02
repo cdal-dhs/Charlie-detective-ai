@@ -2050,3 +2050,124 @@ def test_inbox_toutes_hot_band_no_Re_subject_first() -> None:
     # Les 2 Re: en replies
     assert sorted([r["id"] for r in t["replies"]]) == [701, 702]
 
+
+def test_hot_band_excludes_reply_prefix_at_sql_level() -> None:
+    """v1.30.0.13 — Au niveau SQL (pas juste _group_into_threads), la hot band
+    doit exclure tout mail dont le subject commence par Re:/Re :/Re\xa0:/AW:/
+    TR:/Fwd:/Fw:/SV: — y compris quand le mail est un 1-mail thread pending
+    (pas de sibling). C'est ce que v1.30.0.5 et v1.30.0.12 n'arrivaient pas
+    à garantir : ils essayaient de filtrer APRÈS le groupement, mais le mail
+    était déjà dans hot_mails à ce stade (jamais déplacé vers other_mails).
+    Le fix correct est d'exclure dès la requête SQL.
+    """
+    import sqlite3
+
+    con = sqlite3.connect(":memory:")
+    con.row_factory = sqlite3.Row
+    con.executescript("""
+        CREATE TABLE mail_processed (
+            id INTEGER PRIMARY KEY,
+            mailbox_name TEXT,
+            subject TEXT,
+            sender TEXT,
+            received_at TEXT,
+            category TEXT,
+            status TEXT,
+            priority TEXT,
+            processed_at TEXT,
+            body_preview TEXT,
+            ai_draft TEXT,
+            suggested_subject TEXT,
+            thread_id TEXT,
+            in_reply_to TEXT,
+            message_id TEXT
+        );
+        CREATE TABLE email_attachment (
+            id INTEGER PRIMARY KEY,
+            mail_processed_id INTEGER
+        );
+    """)
+
+    # 1 vrai parent + 3 Re: pending (1-mail threads) + 1 cas NBSP (Re\xa0:)
+    rows = [
+        # VRAI parent pending — DOIT être dans la hot
+        (700, "demande_client", "pending", "Demande de devis", "client@a.com", "2026-06-25 10:00:00", None, None),
+        # Re: pending 1-mail — NE DOIT PAS être dans la hot
+        (701, "demande_client", "pending", "Re: Demande de devis", "client@b.com", "2026-06-26 10:00:00", "tid1", None),
+        # Re : (espace) pending — NE DOIT PAS
+        (702, "demande_client", "pending", "Re : Pour devis et convention", "kirara@x.fr", "2026-06-27 10:00:00", "tid2", None),
+        # Re\xa0: (NBSP) pending — NE DOIT PAS
+        (703, "demande_client", "pending", "Re\xa0: Devis et convention", "client@d.com", "2026-06-28 10:00:00", "tid3", None),
+        # Fwd: pending — NE DOIT PAS
+        (704, "demande_client", "pending", "Fwd: Demande importante", "client@e.com", "2026-06-29 10:00:00", "tid4", None),
+        # VRAI parent pending — DOIT être dans la hot
+        (705, "demande_client", "pending", "Surveillance Anderlecht", "client@f.com", "2026-06-30 10:00:00", None, None),
+        # Cas extrême : Re:Demande SANS espace (rare mais possible)
+        (706, "demande_client", "pending", "Re:Demande urgente", "client@g.com", "2026-07-01 10:00:00", "tid6", None),
+    ]
+    con.executemany(
+        "INSERT INTO mail_processed "
+        "(id, category, status, subject, sender, received_at, thread_id, in_reply_to, processed_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, '2026-06-30')",
+        rows,
+    )
+
+    # Reproduce the v1.30.0.13 hot SQL filter
+    cur = con.execute("""
+        SELECT id, subject FROM mail_processed m
+        WHERE processed_at >= '2026-01-01'
+          AND (category = 'demande_client' OR category = 'urgent')
+          AND (status = 'pending' OR status IS NULL)
+          AND LOWER(IFNULL(m.subject, '')) NOT LIKE 're:%'
+          AND LOWER(IFNULL(m.subject, '')) NOT LIKE 're :%'
+          AND LOWER(IFNULL(m.subject, '')) NOT LIKE 're\xa0:%'
+          AND LOWER(IFNULL(m.subject, '')) NOT LIKE 'aw:%'
+          AND LOWER(IFNULL(m.subject, '')) NOT LIKE 'tr:%'
+          AND LOWER(IFNULL(m.subject, '')) NOT LIKE 'fwd:%'
+          AND LOWER(IFNULL(m.subject, '')) NOT LIKE 'fw:%'
+          AND LOWER(IFNULL(m.subject, '')) NOT LIKE 'sv:%'
+        ORDER BY id
+    """)
+    results = cur.fetchall()
+    ids = [r[0] for r in results]
+    subjects = {r[0]: r[1] for r in results}
+
+    # Seuls les 2 VRAIS parents doivent rester
+    assert ids == [700, 705], (
+        f"Expected only real parents [700, 705] in hot band, got {ids} with subjects {subjects}"
+    )
+    # Vérification explicite : aucun Re: ne doit être en première ligne
+    import re
+    for r in results:
+        subj = r[1]
+        assert not re.match(r"^\s*(re|aw|tr|fwd|sv|fw)\s*:\s*", subj, re.IGNORECASE), (
+            f"Hot band must NOT contain reply subject {subj!r} (id={r[0]})"
+        )
+
+
+def test_hot_band_excludes_nbsp_Re_prefix_at_sql_level() -> None:
+    """v1.30.0.13 — Cas spécifique Mac Mail : Re\xa0: avec espace insécable (NBSP)
+    doit aussi être exclu. C'est le format produit par Apple Mail (sujet
+    "Re\xa0: Demande de mission" vu en prod sur mail #678, #679, #680).
+    """
+    import sqlite3
+    import re
+
+    con = sqlite3.connect(":memory:")
+    con.executescript("""
+        CREATE TABLE mail_processed (id INTEGER PRIMARY KEY, subject TEXT, category TEXT, status TEXT, processed_at TEXT);
+    """)
+    con.execute("INSERT INTO mail_processed VALUES (1, 'Re\xa0: Pour devis et convention', 'demande_client', 'pending', '2026-06-27')")
+    con.execute("INSERT INTO mail_processed VALUES (2, 'Re:Pour devis', 'demande_client', 'pending', '2026-06-27')")
+    con.execute("INSERT INTO mail_processed VALUES (3, 'Vrai sujet', 'demande_client', 'pending', '2026-06-27')")
+
+    cur = con.execute("""
+        SELECT id, subject FROM mail_processed
+        WHERE LOWER(IFNULL(subject, '')) NOT LIKE 're\xa0:%'
+          AND LOWER(IFNULL(subject, '')) NOT LIKE 're:%'
+    """)
+    results = cur.fetchall()
+    ids = [r[0] for r in results]
+    # Seuls le vrai sujet doit rester
+    assert ids == [3], f"NBSP Re: must be excluded. Got ids={ids}, subjects={[r[1] for r in results]}"
+

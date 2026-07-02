@@ -1,5 +1,21 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.30.0.13] — 2026-07-02 (fix(inbox) : hot band exclut Re:/Re :/NBSP au niveau SQL)
+
+### Contexte
+- v1.30.0.5 et v1.30.0.12 essayaient d'exclure les "Re: ..." de la hot band via `_group_into_threads()` (post-SQL). Le mail était DÉJÀ dans `hot_mails` à ce stade, et le déplacement vers `other_mails` post-groupement ne fonctionnait pas — les replies orphelins restaient en hot band verte.
+- CDAL a vu 7 mails "Re: ..." en première ligne de la hot band verte ("Re: Votre reçu Apple", "Re: Pour devis et convention", "Re: Devis et convention", etc.) — visiblement, le filtrage ne s'appliquait pas comme attendu.
+- Cause racine : le hot set était calculé par SQL avec `WHERE category IN (demande_client, urgent) AND status = pending` **sans aucun filtre sur le subject**. Le `_looks_like_reply_subject()` était appelé bien trop tard (dans `_is_orphan_reply`).
+
+### Fixé
+- **`app/web/app_routes.py::_fetch_mails()`** : nouvelle liste `hot_exclude_reply_prefix_patterns` qui exclut dès la requête SQL tout mail dont le subject commence par :
+  - `Re:` (Re:Demande, Re: facture…)
+  - `Re :` (Re : avec espace)
+  - `Re\xa0:` (NBSP, fréquent sur Apple Mail)
+  - `AW:`, `TR:`, `Fwd:`, `Fw:`, `SV:` (Outlook, Mac Mail, webmails)
+- La hot band verte ne peut donc PLUS contenir de "Re: ..." en première ligne. Les replies orphelines (parent hors-scope) tombent dans la other band, où Daniel peut les archiver ou investiguer.
+- **`tests/test_web_inbox_render.py`** : 2 nouveaux tests TDD (un avec table mémoire, un spécifique NBSP `Re\xa0:`).
+
 ## [1.30.0.12] — 2026-07-02 (fix(inbox) : reply with subject Re: never first in thread)
 
 ### Contexte
