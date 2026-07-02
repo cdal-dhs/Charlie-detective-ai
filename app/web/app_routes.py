@@ -571,78 +571,21 @@ async def app_index(
     q = request.query_params.get("q") or None
     sort_col = request.query_params.get("sort") or "date"
     sort_order = request.query_params.get("order") or "desc"
-    # v1.29.0 — view tabs cockpit : threads (défaut) / flat / duplicates
-    view = request.query_params.get("view") or "threads"
+    # v1.30.0.6 — le paramètre `view` est IGNORÉ. Seule la vue Fils existe désormais.
 
     hot_mails, other_mails = await _fetch_mails(
         db, boxes, category, status, priority, q, sort_col, sort_order
     )
 
-    # v1.29.0 — vue par défaut = threads (regroupés par thread_id).
-    # Vue flat = 1 ligne = 1 mail (legacy). Vue duplicates = uniquement
-    # les status='duplicate' (audit/debug v1.28.3).
-    #
-    # v1.30.0.5 — `_group_into_threads` retourne (keep, move_to_other).
-    # Les "move_to_other" sont les replies pending dont le parent est déjà
-    # traité (CDAL : "un sous mail ne peut pas être en premier, il doit
-    # avoir un email parent !"). On fusionne ces 2 flux dans other_threads.
-    # `all_thread_siblings` permet de détecter un reply dont le parent est
-    # dans other_mails (cross-band check).
-    if view == "threads":
-        hot_keep, hot_move = _group_into_threads(hot_mails, all_thread_siblings=other_mails)
-        other_keep, _other_move = _group_into_threads(other_mails, all_thread_siblings=hot_mails)
-        hot_threads = hot_keep
-        other_threads = other_keep + hot_move
-    elif view == "duplicates":
-        # Filtre uniquement les doublons (status='duplicate') sur le tri descendant
-        hot_threads = [
-            {
-                "thread_id": f"dup::{m['id']}",
-                "parent": m,
-                "replies": [],
-                "reply_count": 0,
-                "last_received": m.get("received_at") or m.get("processed_at") or "",
-                "all_duplicate": True,
-            }
-            for m in hot_mails
-            if m.get("status") == "duplicate"
-        ]
-        other_threads = [
-            {
-                "thread_id": f"dup::{m['id']}",
-                "parent": m,
-                "replies": [],
-                "reply_count": 0,
-                "last_received": m.get("received_at") or m.get("processed_at") or "",
-                "all_duplicate": True,
-            }
-            for m in other_mails
-            if m.get("status") == "duplicate"
-        ]
-    else:
-        # view == "flat" — comportement legacy, 1 ligne = 1 mail
-        hot_threads = [
-            {
-                "thread_id": f"flat::{m['id']}",
-                "parent": m,
-                "replies": [],
-                "reply_count": 0,
-                "last_received": m.get("received_at") or m.get("processed_at") or "",
-                "all_duplicate": m.get("status") == "duplicate",
-            }
-            for m in hot_mails
-        ]
-        other_threads = [
-            {
-                "thread_id": f"flat::{m['id']}",
-                "parent": m,
-                "replies": [],
-                "reply_count": 0,
-                "last_received": m.get("received_at") or m.get("processed_at") or "",
-                "all_duplicate": m.get("status") == "duplicate",
-            }
-            for m in other_mails
-        ]
+    # v1.30.0.6 — vue unique = threads. CDAL ne veut QUE des fils de discussion.
+    # Les anciennes vues `flat` (1 ligne = 1 mail) et `duplicates` (audit v1.28.3)
+    # sont supprimées : si l'URL contient ?view=flat ou ?view=duplicates, on
+    # force `view='threads'` (le param est ignoré silencieusement).
+    view = "threads"
+    hot_keep, hot_move = _group_into_threads(hot_mails, all_thread_siblings=other_mails)
+    other_keep, _other_move = _group_into_threads(other_mails, all_thread_siblings=hot_mails)
+    hot_threads = hot_keep
+    other_threads = other_keep + hot_move
 
     mailboxes = await _fetch_mailboxes()
     counts = await _fetch_counts(
