@@ -154,7 +154,12 @@ async def _fetch_mails(
         "priority",
         "processed_at",
         "body_preview",
-        "body",
+        # v1.29.0.2 — `body` complet RETIRÉ de la projection inbox.
+        # Il pesait 0.9 MB pour 305 rows (avg 3256 chars/row) alors qu'il
+        # n'est utilisé NULLE PART dans la liste (juste dans la page
+        # conversation qui refetch séparément via _fetch_conversation).
+        # Gain perf : -90% payload SQL, -90% temps render Jinja2.
+        # Le body_preview (~200 chars) reste pour la recherche full-text.
         "attachment_count",
         "ai_draft",
         "suggested_subject",
@@ -179,7 +184,7 @@ async def _fetch_mails(
     ]
     hot_sql = (
         "SELECT m.id, m.mailbox_name, m.subject, m.sender, m.received_at, m.category, "
-        "m.status, m.priority, m.processed_at, m.body_preview, m.body, "
+        "m.status, m.priority, m.processed_at, m.body_preview, "
         "(SELECT COUNT(*) FROM email_attachment WHERE mail_processed_id = m.id) AS attachment_count, "
         "ai_draft, m.suggested_subject "
         "FROM mail_processed m WHERE " + " AND ".join(hot_where) + " "
@@ -197,7 +202,7 @@ async def _fetch_mails(
     ]
     other_sql = (
         "SELECT m.id, m.mailbox_name, m.subject, m.sender, m.received_at, m.category, "
-        "m.status, m.priority, m.processed_at, m.body_preview, m.body, "
+        "m.status, m.priority, m.processed_at, m.body_preview, "
         "(SELECT COUNT(*) FROM email_attachment WHERE mail_processed_id = m.id) AS attachment_count, "
         "ai_draft, m.suggested_subject "
         "FROM mail_processed m WHERE " + " AND ".join(other_where) + " "
