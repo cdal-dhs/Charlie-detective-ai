@@ -102,7 +102,14 @@ async def _fetch_mails(
     q: str | None,
     sort_col: str = "date",
     sort_order: str = "desc",
-    limit: int = 200,
+    # v1.29.0 — LIMIT relevé 200 → 1000. Le grouping threads se fait sur
+    # le résultat : si LIMIT tronque un fil (le parent est au-delà de
+    # la limite), `_group_into_threads` produit un fil incomplet avec
+    # reply_count=0 → l'inbox affiche le mail comme une ligne plate
+    # au lieu d'1 parent + N replies enfilées. 1000 couvre largement
+    # les 662 mails actuels + la croissance. Le proper fix (grouping
+    # en SQL natif) est tracké en v1.29.1.
+    limit: int = 1000,
 ) -> tuple[list[dict], list[dict]]:
     """Retourne (hot_mails, other_mails).
 
