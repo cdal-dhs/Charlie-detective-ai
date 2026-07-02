@@ -608,10 +608,65 @@ def _group_into_threads(
             else:
                 final_keep.append(t)
 
+    # v1.30.0.9 — GARDE-FOU ANTI-"Re: ORPHELIN" PROMU PARENT.
+    # Cas 1 (couvert par v1.30.0.5) : 1-mail thread, sujet commence par "Re:",
+    # parent absent de `mails` ET de `all_thread_siblings` → MOVE.
+    # Cas 2 (couvert par v1.30.0.5) : 1-mail thread, sujet commence par "Re:",
+    # pas de thread_id (orphelin pur) → MOVE.
+    # Cas 3 (NOUVEAU v1.30.0.9) : 1-mail thread, le mail a `in_reply_to` qui
+    # pointe vers un message_id ABSENT du système (true orphan-reply) →
+    # MOVE. AVANT : il était promu parent d'un 1-mail thread et affiché en
+    # première ligne de la hot band avec un `›` fantôme (ou sans › si
+    # parent_is_orphan=True). MAINTENANT : il DÉMÉNAGE dans l'autre band
+    # (son parent n'est nulle part dans le système, c'est du bruit pour
+    # Daniel — le parent est soit hors-système, soit supprimé, soit
+    # antérieur au cutoff 2026-05-20).
+    # Cas 4 (NOUVEAU v1.30.0.9) : 1-mail thread, le mail a un subject "Re: ..."
+    # mais AUCUN in_reply_to (le client n'a pas propagé l'header, ou c'est
+    # un forwarder WP qui l'a perdu) ET le parent n'est pas dans le set
+    # groupable → MOVE. C'est le cas de #672 (kirara.olivier) où 6 mails
+    # "Re: X" tombent dans 6 buckets différents (subjects reformulés) →
+    # chacun est un 1-mail thread "parent" en hot band alors qu'ils sont
+    # tous des replies au mail original id=672.
+    #
+    # Tous ces cas correspondent au critère CDAL : "un sous mail ne peut pas
+    # être en premier il doit avoir un email parent !". Un fil sans parent
+    # connu ne doit jamais apparaître en première ligne de la hot band.
+    # ─────────────────────────────────────────────────────────────────────
+    # NOTE : pour les threads avec replies (reply_count > 0), on GARDE le
+    # comportement actuel : le parent (vrai premier mail, non-orphan) reste
+    # en hot, les replies s'enfilent en dessous. Le MOVE ne s'applique
+    # qu'aux fils SANS parent connu en DB (1-mail thread, et le mail est
+    # soit explicitement "Re:" en sujet, soit a un in_reply_to orphelin).
+    final_keep_2: list[dict] = []
+    final_move_2: list[dict] = list(final_move)
+    for t in final_keep:
+        parent = t["parent"]
+        # Si le fil a des replies (1 parent + N replies), le parent est
+        # déjà le plus ancien non-orphelin (cf. boucle de re-parenting
+        # v1.30.0.8). On le GARDE, replies enfilées.
+        if t["reply_count"] > 0:
+            final_keep_2.append(t)
+            continue
+        # 1-mail thread (replies=[]). On check si le parent est un vrai
+        # premier mail ou un reply orphelin.
+        in_reply_to = (parent.get("in_reply_to") or "").strip()
+        has_unknown_in_reply_to = bool(in_reply_to) and in_reply_to not in known_message_ids
+        looks_like_reply = _looks_like_reply_subject(parent.get("subject"))
+        if has_unknown_in_reply_to or looks_like_reply:
+            # Reply orphelin dans un 1-mail thread → MOVE dans other.
+            # On force parent_is_orphan=True pour la sémantique (rendu sans ›).
+            t = dict(t)  # shallow copy
+            t["parent_is_orphan"] = True
+            t["all_orphans"] = True
+            final_move_2.append(t)
+        else:
+            final_keep_2.append(t)
+
     # Tri global par date du mail le plus récent DESC (chaque liste séparément)
-    final_keep.sort(key=lambda t: t["last_received"], reverse=True)
-    final_move.sort(key=lambda t: t["last_received"], reverse=True)
-    return final_keep, final_move
+    final_keep_2.sort(key=lambda t: t["last_received"], reverse=True)
+    final_move_2.sort(key=lambda t: t["last_received"], reverse=True)
+    return final_keep_2, final_move_2
 
 
 async def _fetch_mailboxes() -> list[MailboxConfig]:
@@ -723,6 +778,20 @@ async def app_index(
     other_keep, _other_move = _group_into_threads(other_mails, all_thread_siblings=hot_mails)
     hot_threads = hot_keep
     other_threads = other_keep + hot_move
+
+    # v1.30.0.9 — worklist mode = "Toutes" tab = liste de travail de Daniel.
+    # On SUPPRIME la bande OTHER du rendu. Cas concret : un 1-mail thread
+    # "Re: X" dont le parent n'est pas dans le set groupable est DÉPLACÉ
+    # dans other_threads par _group_into_threads (v1.30.0.5) — il NE DOIT
+    # PAS apparaître dans la worklist. La worklist = UNIQUEMENT la hot band.
+    # Les 7 lignes "Re: X" parasites du screenshot v1.30.0.8 (id=677, 678,
+    # 679, 684, 691, 696, 724) sont déplacées dans other_threads mais
+    # masquées ici — Daniel ne les voit plus dans "Toutes".
+    # Les autres onglets (catégorie explicite, statut, priorité) gardent
+    # le comportement 2 bandes (worklist=False → on n'entre pas dans ce
+    # bloc).
+    if worklist:
+        other_threads = []
 
     mailboxes = await _fetch_mailboxes()
     counts = await _fetch_counts(

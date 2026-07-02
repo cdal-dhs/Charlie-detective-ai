@@ -1580,3 +1580,269 @@ def test_worklist_disabled_when_category_filter_set(client_with_worklist_data) -
     # les 9+ ids (newsletter+spam+facture+autre+e-Box en other band).
     assert len(ids) >= 1, f"newsletter tab devrait afficher au moins la newsletter pending"
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# v1.30.0.9 — Worklist "Toutes" masque la bande OTHER (le rendu n'inclut
+# que la hot band, pas les replies orphelines déplacées en other).
+#
+# Bug fix : un 1-mail thread avec subject "Re: X" (parent hors-scope) est
+# DÉPLACÉ dans other_threads par `_group_into_threads` (v1.30.0.5) — c'est
+# le bon comportement. Mais le rendu de l'API `/api/inbox` en worklist mode
+# (= onglet "Toutes") INCLUAIT other_threads → Daniel voyait 7 lignes
+# "Re: X" parasites en bas de la liste de travail. Maintenant, worklist
+# = on n'envoie QUE hot_threads au template.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _make_db_with_worklist_replies(tmp_path: Path) -> Path:
+    """DB pour valider le worklist "Toutes" qui masque les replies orphelines.
+
+    Composition :
+    - 1 vrai parent demande_client pending (doit apparaître dans "Toutes")
+    - 3 mails "Re: X" 1-mail threads (doivent être déplacés dans other par
+      _group_into_threads, puis MASQUÉS par le worklist rendering)
+    """
+    db = tmp_path / "agent_state.db"
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        """
+        CREATE TABLE mail_processed (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            imap_uid TEXT NOT NULL,
+            mailbox_name TEXT NOT NULL,
+            subject TEXT,
+            sender TEXT,
+            received_at TEXT,
+            category TEXT,
+            draft_generated INTEGER DEFAULT 0,
+            draft_sent_at TEXT,
+            processed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            status TEXT,
+            priority TEXT,
+            ai_draft TEXT,
+            human_draft TEXT,
+            reviewed_by INTEGER,
+            reviewed_at DATETIME,
+            sent_at DATETIME,
+            sent_by INTEGER,
+            body_preview TEXT,
+            body TEXT,
+            delivered_at TEXT,
+            suggested_subject TEXT,
+            message_id TEXT,
+            in_reply_to TEXT,
+            "references" TEXT,
+            dossier_id TEXT,
+            thread_id TEXT,
+            thread_subject TEXT,
+            duplicate_of INTEGER,
+            UNIQUE(imap_uid, mailbox_name)
+        );
+        CREATE TABLE audit_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            action TEXT,
+            resource_type TEXT,
+            resource_id TEXT,
+            details TEXT,
+            ip_address TEXT,
+            user_agent TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE email_attachment (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            mail_processed_id INTEGER NOT NULL,
+            filename TEXT,
+            storage_path TEXT,
+            size_bytes INTEGER,
+            extracted_text_preview TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        """
+    )
+    # 1 vrai parent demande_client pending
+    conn.execute(
+        "INSERT INTO mail_processed "
+        "(id, imap_uid, mailbox_name, subject, sender, received_at, category, "
+        " status, priority, body_preview, body, ai_draft, draft_generated, processed_at, thread_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            400, "uid400", "detective_belgique",
+            "Demande initiale mission",
+            "client@example.com",
+            "2026-07-01 10:00:00",
+            "demande_client", "pending", "high",
+            "Bonjour, mission...",
+            "Bonjour, mission...",
+            "Brouillon 400", 1,
+            "2026-07-01 10:01:00",
+            "thread-P",
+        ),
+    )
+    # 3 mails "Re: X" en 1-mail threads (orphelins, parent hors-scope)
+    for i, (subj, sender, tid, mid) in enumerate([
+        ("Re: Demande de devis", "pierre.lixon.95@gmail.com", "thread-Q", "<msg_Q>"),
+        ("Re: facture", "nathalie@iweb-marketing.com", "thread-R", "<msg_R>"),
+        ("Re: Demande initiale", "lembourgmanon@gmail.com", "thread-S", "<msg_S>"),
+    ]):
+        conn.execute(
+            "INSERT INTO mail_processed "
+            "(id, imap_uid, mailbox_name, subject, sender, received_at, category, "
+            " status, priority, body_preview, body, ai_draft, draft_generated, processed_at, thread_id, in_reply_to, message_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                401 + i, f"uid{401+i}", "detective_belgique",
+                subj, sender,
+                "2026-07-01 11:00:00",
+                "demande_client", "pending", "high",
+                f"Suite mail {subj}",
+                f"Suite mail {subj}",
+                None, 0,
+                "2026-07-01 11:01:00",
+                tid,
+                "<unknown@external.com>",  # in_reply_to pointe vers du vide
+                mid,
+            ),
+        )
+    conn.commit()
+    conn.close()
+    return db
+
+
+@pytest.fixture
+def client_with_worklist_replies(tmp_path, operator_user):
+    """Client avec DB contenant 1 vrai parent + 3 replies orphelines."""
+    db_path = _make_db_with_worklist_replies(tmp_path)
+    app = make_app()
+    app.dependency_overrides[get_db] = _db_path_holder(db_path)
+    app.dependency_overrides[require_operator] = lambda: operator_user
+    return TestClient(app)
+
+
+def test_worklist_masks_other_band_with_replies(client_with_worklist_replies) -> None:
+    """v1.30.0.9 — Worklist "Toutes" : la bande OTHER est SUPPRIMÉE du rendu.
+    Les replies orphelines déplacées dans other_threads (par v1.30.0.5)
+    NE DOIVENT PAS apparaître dans la liste de travail.
+    """
+    resp = client_with_worklist_replies.get("/api/inbox")
+    assert resp.status_code == 200
+    import re
+    ids = re.findall(r"/app/conversation/(\d+)", resp.text)
+    unique_ids = set(int(i) for i in ids)
+    # Le vrai parent (id=400) DOIT être visible
+    assert 400 in unique_ids
+    # Les 3 "Re:" orphelins (id=401, 402, 403) NE DOIVENT PAS être visibles
+    # dans le worklist (ils sont dans other_threads, masqués par le rendu worklist).
+    assert 401 not in unique_ids
+    assert 402 not in unique_ids
+    assert 403 not in unique_ids
+
+
+def test_non_worklist_still_shows_other_band_with_replies(client_with_worklist_replies) -> None:
+    """v1.30.0.9 — Onglet Demandes client (?category=demande_client) garde
+    le comportement 2 bandes. Les "Re:" orphelins déplacés dans other
+    DOIVENT être visibles dans la bande other.
+    """
+    resp = client_with_worklist_replies.get("/api/inbox?category=demande_client")
+    assert resp.status_code == 200
+    import re
+    ids = re.findall(r"/app/conversation/(\d+)", resp.text)
+    unique_ids = set(int(i) for i in ids)
+    # Le vrai parent (id=400) DOIT être visible
+    assert 400 in unique_ids
+    # Les 3 "Re:" orphelins DOIVENT être visibles (dans la bande other)
+    assert 401 in unique_ids
+    assert 402 in unique_ids
+    assert 403 in unique_ids
+
+
+def test_worklist_hides_orphan_in_reply_to(client_with_worklist_replies) -> None:
+    """v1.30.0.9 — Worklist "Toutes" : un 1-mail thread avec in_reply_to
+    orphelin (pointe vers un message_id absent du système) est déplacé
+    dans other_threads et donc masqué du worklist.
+    """
+    resp = client_with_worklist_replies.get("/api/inbox")
+    assert resp.status_code == 200
+    # Vérifier qu'aucun "Re: X" n'apparaît dans le rendu
+    import re
+    # Cherche les liens vers les mails Re: (id 401-403)
+    assert "/app/conversation/401" not in resp.text
+    assert "/app/conversation/402" not in resp.text
+    assert "/app/conversation/403" not in resp.text
+    # Et le sujet ne doit pas apparaître non plus
+    assert "Re: Demande de devis" not in resp.text
+    assert "Re: facture" not in resp.text
+    assert "Re: Demande initiale" not in resp.text
+
+
+def test_orphan_in_reply_to_moved_to_other_in_grouping() -> None:
+    """v1.30.0.9 — `_group_into_threads` doit MOVE un 1-mail thread dont
+    le parent a un in_reply_to orphelin (pointe vers un message_id absent).
+    """
+    from app.web.app_routes import _group_into_threads
+
+    mails = [
+        # 1 vrai parent
+        {
+            "id": 1, "mailbox_name": "detective_belgique",
+            "subject": "Demande initiale", "sender": "client@a.com",
+            "received_at": "2026-06-25 10:00:00", "status": "pending",
+            "priority": "high", "category": "demande_client",
+            "thread_id": "thread-A", "has_draft": 0,
+            "in_reply_to": None, "message_id": "<msg1@a.com>",
+        },
+        # 1-mail thread avec in_reply_to orphelin
+        {
+            "id": 2, "mailbox_name": "detective_belgique",
+            "subject": "Suite mission", "sender": "client@b.com",
+            "received_at": "2026-07-01 10:00:00", "status": "pending",
+            "priority": "high", "category": "demande_client",
+            "thread_id": "thread-B", "has_draft": 0,
+            "in_reply_to": "<daniel@external.com>",  # orphelin
+            "message_id": "<msg2@b.com>",
+        },
+    ]
+    keep, move = _group_into_threads(mails)
+    # Le parent (id=1) reste en keep
+    keep_ids = [t["parent"]["id"] for t in keep]
+    assert keep_ids == [1]
+    # Le 1-mail thread avec in_reply_to orphelin (id=2) doit être dans move
+    move_ids = [t["parent"]["id"] for t in move]
+    assert move_ids == [2]
+
+
+def test_known_in_reply_to_keeps_in_keep() -> None:
+    """v1.30.0.9 — `_group_into_threads` doit GARDER un 1-mail thread dont
+    le parent a un in_reply_to connu (intra-thread ou global) — c'est un
+    vrai 1er mail d'un fil.
+    """
+    from app.web.app_routes import _group_into_threads
+
+    mails = [
+        # Vrai parent (1er mail) avec in_reply_to=None
+        {
+            "id": 1, "mailbox_name": "detective_belgique",
+            "subject": "Demande initiale", "sender": "client@a.com",
+            "received_at": "2026-06-25 10:00:00", "status": "pending",
+            "priority": "high", "category": "demande_client",
+            "thread_id": "thread-A", "has_draft": 0,
+            "in_reply_to": None, "message_id": "<msg1@a.com>",
+        },
+        # Autre parent (1er mail) avec in_reply_to connu (pointe vers msg1)
+        {
+            "id": 2, "mailbox_name": "detective_belgique",
+            "subject": "Autre sujet", "sender": "client@b.com",
+            "received_at": "2026-07-01 10:00:00", "status": "pending",
+            "priority": "high", "category": "demande_client",
+            "thread_id": "thread-B", "has_draft": 0,
+            "in_reply_to": "<msg1@a.com>",  # pointe vers un mail connu
+            "message_id": "<msg2@b.com>",
+        },
+    ]
+    keep, move = _group_into_threads(mails)
+    # Les 2 parents restent en keep
+    keep_ids = sorted([t["parent"]["id"] for t in keep])
+    assert keep_ids == [1, 2]
+    # Aucun move
+    assert move == []
+

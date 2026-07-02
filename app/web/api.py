@@ -359,6 +359,11 @@ async def inbox_partial(
     other_keep, _other_move = _group_into_threads(other_mails, all_thread_siblings=hot_mails)
     hot_threads = hot_keep
     other_threads = other_keep + hot_move
+    # v1.30.0.9 — worklist mode = "Toutes" tab. On SUPPRIME la bande OTHER
+    # du rendu API (cf. app_routes.app_index pour le détail). Les autres
+    # onglets (catégorie explicite) gardent le comportement 2 bandes.
+    if worklist:
+        other_threads = []
     mailboxes = get_settings().mailboxes()
     return templates.TemplateResponse(
         request,

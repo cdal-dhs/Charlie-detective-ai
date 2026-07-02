@@ -1,5 +1,35 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.30.0.9] — 2026-07-02 (worklist "Toutes" masque la bande OTHER)
+
+### Contexte
+- CDAL a signalé que l'onglet "Toutes" du cockpit `/app/` affichait **13 lignes dont 7 étaient des "Re: X" orphelins promus parents** (id=677, 678, 679, 684, 691, 696, 724). Tous sont des replies à des mails parents déjà traités ou hors-scope.
+- Le runtime v1.29.0.7 a éclaté le bucket `adhoc::unknown::*` en un thread par mail (hash sender+subject). Conséquence : un même client qui envoie 5 mails avec des subjects reformulés (Re: sujet1, Re: sujet2, ...) tombe dans 5 buckets différents → 5 "fils" 1-mail = 5 lignes parasites en hot band.
+- v1.30.0.5 DÉPLACE déjà les 1-mail threads "Re: X" dans other_threads (move-to-other). Mais v1.30.0.7 worklist mode INCLUAIT other_threads dans le rendu `/api/inbox` → Daniel voyait quand même les 7 replies orphelines sous la hot band, en plus des 6-8 vrais parents.
+
+### Fixé
+- **`app/web/app_routes.py:_group_into_threads()`** : nouveau bloc de re-parenting v1.30.0.9. Pour chaque thread dans `final_keep`, si c'est un 1-mail thread (replies=[]) ET le mail a un `in_reply_to` pointant vers un message_id ABSENT du système (true orphan-reply), on le DÉPLACE dans `final_move_2` avec `parent_is_orphan=True`, `all_orphans=True`. AVANT : il restait en keep et était promu parent du fil (la logique v1.30.0.8 marquait juste `parent_is_orphan=True` mais le fil restait en keep). Cas concret : id=730 (Yvelise) avec in_reply_to=`<...eurprd01.prod.exchangelabs.com>` pointe vers un mail de Daniel envoyé hors-système — ce mail n'est PAS un vrai parent, c'est un reply orphelin.
+- **`app/web/app_routes.py:app_index()`** : en worklist mode (= onglet "Toutes"), on FORCE `other_threads = []` avant de rendre le template. Conséquence : les replies orphelines déplacées dans other par v1.30.0.5 (sujet Re: X) et les in_reply_to orphelins déplacés par v1.30.0.9 (sujet non-Re:) sont MASQUÉS de la worklist. Daniel ne voit QUE les 6-8 vrais parents dans "Toutes". Les autres onglets (catégorie explicite) gardent le comportement 2 bandes (worklist=False → pas de masquage).
+- **`app/web/api.py:inbox_partial()`** : même fix worklist (`if worklist: other_threads = []`).
+
+### Comportement
+- **Onglet "Toutes" (worklist ON, par défaut)** : affiche UNIQUEMENT les vrais 1ers mails de fil. Aucune ligne "Re: X" parasite, aucun id=730 orphelin promu parent. Le 7 orphelins v1.30.0.8 sont masqués.
+- **Onglets Demandes client / Urgent / Newsletters / Factures / Spam / Phishing / Rappels / Autres (worklist OFF)** : comportement 2 bandes préservé (hot + other + move-to-other). Les "Re: X" orphelins sont visibles dans la bande other (archivés mais consultables).
+- **Threads avec replies (parent + 1+ replies)** : inchangé, le parent (vrai 1er mail) reste en keep, les replies s'enfilent en dessous.
+
+### Tests
+- **`tests/test_web_inbox_render.py`** : 5 nouveaux tests TDD :
+  - `test_worklist_masks_other_band_with_replies` — worklist "Toutes" : 1 vrai parent visible, 3 "Re:" orphelins masqués.
+  - `test_non_worklist_still_shows_other_band_with_replies` — onglet Demandes client : 1 vrai parent + 3 "Re:" orphelins visibles (2 bandes).
+  - `test_worklist_hides_orphan_in_reply_to` — worklist masque les 3 ids + 3 sujets.
+  - `test_orphan_in_reply_to_moved_to_other_in_grouping` — `_group_into_threads` MOVE un 1-mail thread avec in_reply_to orphelin.
+  - `test_known_in_reply_to_keeps_in_keep` — `_group_into_threads` GARDE un 1-mail thread avec in_reply_to connu (intra-thread).
+
+### Garde-fous
+- **Hot band "Toutes"** : 0 ligne avec "Re:" dans le subject OU avec in_reply_to orphelin.
+- **Hot band autres onglets** : 0 ligne avec "Re:" dans le subject (déjà couvert v1.30.0.5).
+- **Worklist rendering** : `_fetch_mails` retourne `(hot_mails, [])` en worklist (déjà v1.30.0.7), `_group_into_threads` peut toujours ajouter à `other_threads` via move-to-other, mais le rendu `app_index` et `inbox_partial` MASQUE `other_threads` en worklist.
+
 ## [1.30.0.8] — 2026-07-02 (anti-orphelin-reply + split bucket adhoc fourre-tout)
 
 ### Contexte
