@@ -628,11 +628,21 @@ def _group_into_threads(
             # (sujet Re: sans thread_id, sans siblings). Daniel veut les voir
             # dans la liste d'origine, pas dans other. C'est le rollback
             # v1.30.0.11 confirmé.
+            # v1.30.0.13 — on vérifie EN PLUS que le parent est un reply (sujet
+            # préfixé Re:/AW:/Fwd: OU in_reply_to orphelin). Sans ça, on
+            # déplace aussi le VRAI parent quand sa reply a été exclue du hot
+            # par le filtre Re: SQL — le parent n'a aucune raison de déménager
+            # dans other. Cas test `test_hot_band_keeps_pending_parent_with_pending_reply` :
+            # parent id=200 (sujet non-Re) + reply id=201 (Re:…, exclue du hot
+            # mais dans other via SQL). Le parent doit RESTER en hot band.
+            siblings_for_thread = siblings_by_tid.get(t["parent"].get("thread_id"), [])
+            same_thread_msgids = {s.get("message_id") for s in siblings_for_thread if s.get("message_id")}
             is_reply_in_other = (
                 t["reply_count"] == 0
                 and t["parent"].get("thread_id")
                 and t["parent"].get("status", "pending") in (None, "", "pending")
-                and siblings_by_tid.get(t["parent"].get("thread_id"))
+                and siblings_for_thread
+                and _is_orphan_reply(t["parent"], known_message_ids, same_thread_msgids)
             )
             if is_reply_in_other:
                 # Reply orphelin cross-band (parent ailleurs, déjà traité) → move

@@ -246,6 +246,10 @@ async def _fetch_mails_partial(
     # v1.30.0.4 — garde-fou anti-bruit (mêmes règles que app_routes._fetch_mails).
     # Cohérence stricte entre les 2 fonctions : si /app/ exclut un Pluxee de la hot,
     # /api/inbox doit faire pareil. Sans ça, l'update HTMX réinjecte le bruit.
+    # v1.30.0.13 — exclusion des Re:/Re :/Re\xa0:/AW:/TR:/Fwd: en SQL. Sans ça,
+    # /api/inbox réinjecterait des "Re: ..." en hot band à chaque poll HTMX
+    # alors que /app/ les aurait déjà exclus. Le user voit alors 2 versions
+    # de la même hot band selon qu'il hard-reload ou qu'il patiente 30s.
     hot_exclude_sender_patterns = [
         "%@digitalhs.biz",
         "%@cvfconsult.be",
@@ -256,10 +260,22 @@ async def _fetch_mails_partial(
         "%recu apple%",
         "%e-box%",
     ]
+    hot_exclude_reply_prefix_patterns = [
+        "re:%",
+        "re :%",
+        "re\xa0:%",
+        "aw:%",
+        "tr:%",
+        "fwd:%",
+        "fw:%",
+        "sv:%",
+    ]
     hot_exclude_clauses = []
     for _ in hot_exclude_sender_patterns:
         hot_exclude_clauses.append("LOWER(IFNULL(m.sender, '')) NOT LIKE ?")
     for _ in hot_exclude_subject_patterns:
+        hot_exclude_clauses.append("LOWER(IFNULL(m.subject, '')) NOT LIKE ?")
+    for _ in hot_exclude_reply_prefix_patterns:
         hot_exclude_clauses.append("LOWER(IFNULL(m.subject, '')) NOT LIKE ?")
     hot_where = where + [
         "(category = 'demande_client' OR category = 'urgent')",
@@ -276,7 +292,8 @@ async def _fetch_mails_partial(
     )
     hot_params = params.copy()
     # v1.30.0.4 — params des filtres anti-bruit (cf. app_routes._fetch_mails).
-    for pat in hot_exclude_sender_patterns + hot_exclude_subject_patterns:
+    # v1.30.0.13 — inclut aussi les préfixes Re:/Re :/Re\xa0:/AW:/TR:/Fwd:.
+    for pat in hot_exclude_sender_patterns + hot_exclude_subject_patterns + hot_exclude_reply_prefix_patterns:
         hot_params.append(pat.lower())
     hot_params.append(limit)
     async with db.execute(hot_sql, hot_params) as cursor:
@@ -298,7 +315,8 @@ async def _fetch_mails_partial(
     )
     other_params = params.copy()
     # v1.30.0.4 — autres params pour miroir de la hot.
-    for pat in hot_exclude_sender_patterns + hot_exclude_subject_patterns:
+    # v1.30.0.13 — inclut aussi les préfixes Re:/Re :/Re\xa0: pour cohérence.
+    for pat in hot_exclude_sender_patterns + hot_exclude_subject_patterns + hot_exclude_reply_prefix_patterns:
         other_params.append(pat.lower())
     other_params.append(limit)
     async with db.execute(other_sql, other_params) as cursor:

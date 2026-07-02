@@ -700,8 +700,13 @@ def client_with_reply_threads(tmp_path, operator_user):
 
 
 def test_hot_band_keeps_pending_parent_with_pending_reply(client_with_reply_threads) -> None:
-    """v1.30.0.5 — Thread avec parent pending + reply pending : les DEUX restent en hot,
-    le parent en premier, la reply enfilée en-dessous.
+    """v1.30.0.5 — Thread avec parent pending + reply pending : le parent reste en hot
+    en premier, la reply (sujet "Re: ...") doit être EXCLUE de la hot band dès le
+    niveau SQL depuis v1.30.0.13 (sinon elle s'affiche comme "Re:" en 1ère ligne,
+    ce qui est inacceptable pour CDAL).
+
+    La reply tombe dans la other band où Daniel peut la voir groupée avec son
+    parent si le parent est aussi pending.
     """
     resp = client_with_reply_threads.get("/api/inbox")
     assert resp.status_code == 200
@@ -709,16 +714,17 @@ def test_hot_band_keeps_pending_parent_with_pending_reply(client_with_reply_thre
     sep_idx = body.find("border-b-4 border-green-600")
     assert sep_idx > 0
     hot_section = body[:sep_idx]
-    # Le parent id=200 doit être dans la hot
+    other_section = body[sep_idx:]
+    # Le parent id=200 (sujet non-Re) doit être dans la hot
     assert "/app/conversation/200" in hot_section
-    # La reply id=201 doit aussi être dans la hot (enfilée)
-    assert "/app/conversation/201" in hot_section
-    # Le parent doit apparaître AVANT la reply (ordre des lignes)
-    parent_idx = hot_section.find("/app/conversation/200")
-    reply_idx = hot_section.find("/app/conversation/201")
-    assert parent_idx < reply_idx, (
-        f"Le parent doit précéder la reply (parent={parent_idx}, reply={reply_idx})"
+    # v1.30.0.13 — la reply id=201 (sujet "Re: Demande de devis") NE DOIT PAS
+    # être dans la hot (exclusion SQL des préfixes Re:). Elle doit tomber
+    # dans la other band.
+    assert "/app/conversation/201" not in hot_section, (
+        "v1.30.0.13: les 'Re:' ne doivent PLUS être en hot band, "
+        "même quand le parent est pending dans le même fil"
     )
+    assert "/app/conversation/201" in other_section
 
 
 def test_hot_band_excludes_reply_when_parent_approved(client_with_reply_threads) -> None:
@@ -753,6 +759,11 @@ def test_hot_band_excludes_orphan_reply_with_re_prefix(client_with_reply_threads
     band (visible) même avec sujet "Re:" et pas de thread_id. Daniel veut
     voir TOUS ses mails. Cf. commentaire rollback v1.30.0.11 dans
     `_group_into_threads`.
+
+    v1.30.0.13 — Re-rollback : les "Re:" doivent être EXCLUS de la hot band
+    DÈS LE NIVEAU SQL. Le rollback v1.30.0.12 n'a pas tenu : Daniel voyait
+    toujours des "Re:" en 1ère ligne de la hot band verte. Le fix correct est
+    d'exclure dans la clause WHERE (pas dans _group_into_threads).
     """
     resp = client_with_reply_threads.get("/api/inbox")
     assert resp.status_code == 200
@@ -760,9 +771,11 @@ def test_hot_band_excludes_orphan_reply_with_re_prefix(client_with_reply_threads
     sep_idx = body.find("border-b-4 border-green-600")
     assert sep_idx > 0
     hot_section = body[:sep_idx]
-    # id=220 (Re: Demande de devis, orphelin) DOIT être dans la hot
-    # (rollback v1.30.0.11 + v1.30.0.12 — Daniel veut voir tous ses mails)
-    assert "/app/conversation/220" in hot_section
+    other_section = body[sep_idx:]
+    # v1.30.0.13 — id=220 (Re: Demande de devis, orphelin) NE DOIT PAS être dans
+    # la hot. Il doit tomber dans la other band.
+    assert "/app/conversation/220" not in hot_section
+    assert "/app/conversation/220" in other_section
 
 
 def test_hot_band_keeps_non_reply_orphan(client_with_reply_threads) -> None:
