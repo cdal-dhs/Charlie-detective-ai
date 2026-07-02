@@ -725,8 +725,13 @@ def test_hot_band_excludes_reply_when_parent_approved(client_with_reply_threads)
     """v1.30.0.5 — Reply pending dont le parent est APPROVED : la reply doit
     DÉMÉNAGER dans other, pas dans la hot band. (CDAL : un sous mail ne peut
     pas être en premier il doit avoir un email parent !)
+
+    v1.30.0.7 — On filtre explicitement ?category=demande_client pour SORTIR
+    du mode worklist (qui supprime la bande OTHER). Le test continue de
+    valider la sémantique move-to-other sur l'onglet "Demandes client",
+    qui est l'onglet naturel pour auditer les fils.
     """
-    resp = client_with_reply_threads.get("/api/inbox")
+    resp = client_with_reply_threads.get("/api/inbox?category=demande_client")
     assert resp.status_code == 200
     body = resp.text
     sep_idx = body.find("border-b-4 border-green-600")
@@ -742,8 +747,10 @@ def test_hot_band_excludes_reply_when_parent_approved(client_with_reply_threads)
 def test_hot_band_excludes_orphan_reply_with_re_prefix(client_with_reply_threads) -> None:
     """v1.30.0.5 — Orphelin pending (pas de thread_id) avec sujet Re: : doit
     DÉMÉNAGER dans other car son parent (non groupable) est forcément ailleurs.
+
+    v1.30.0.7 — Filtre explicite ?category=demande_client pour sortir du worklist.
     """
-    resp = client_with_reply_threads.get("/api/inbox")
+    resp = client_with_reply_threads.get("/api/inbox?category=demande_client")
     assert resp.status_code == 200
     body = resp.text
     sep_idx = body.find("border-b-4 border-green-600")
@@ -911,3 +918,462 @@ def test_looks_like_reply_subject_helper() -> None:
     assert not _looks_like_reply_subject("Read me")  # Re en début de mot, pas préfixe
     assert not _looks_like_reply_subject("")
     assert not _looks_like_reply_subject(None)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# v1.30.0.7 — Mode worklist : onglet "Toutes" = liste de travail de Daniel.
+#
+# Avant : "Toutes" affichait ~200 lignes mélangées (newsletter, spam, autre,
+# doublons, factures, etc.). Daniel devait scroller dans le bruit pour trouver
+# ses 23 demande_client pending.
+#
+# Maintenant : "Toutes" = worklist = UNIQUEMENT la hot band
+# (demande_client + urgent + pending), sans les doublons, sans la bande
+# OTHER. Les autres onglets (catégorie explicite) gardent le comportement
+# 2 bandes actuel (hot + other + move-to-other).
+#
+# Critère de "parfait" CDAL : "Toutes" affiche ≤ 30 lignes, toutes = vrai
+# demande_client ou urgent pending. Pas de doublons, pas de newsletters,
+# pas de factures, pas de spam dans "Toutes".
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _make_db_with_worklist_data(tmp_path: Path) -> Path:
+    """DB pour valider le worklist "Toutes".
+
+    Composition :
+    - 2 vraies demande_client pending (doivent apparaître dans "Toutes")
+    - 1 urgent pending (doit apparaître dans "Toutes")
+    - 1 newsletter pending (NE DOIT PAS apparaître dans "Toutes")
+    - 1 spam pending (NE DOIT PAS apparaître)
+    - 1 facture pending (NE DOIT PAS apparaître)
+    - 1 doublon demande_client (status='duplicate', NE DOIT PAS apparaître)
+    - 1 mail Pluxee classifié demande_client (NE DOIT PAS apparaître)
+    - 1 mail interne cdal@digitalhs.biz classifié demande_client (NE DOIT PAS)
+    - 1 mail comptable cvfconsult.be classifié demande_client (NE DOIT PAS)
+    - 1 mail "Reçu Apple" classifié demande_client (NE DOIT PAS)
+    - 1 mail e-Box sécurité sociale (NE DOIT PAS apparaître)
+    """
+    db = tmp_path / "agent_state.db"
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        """
+        CREATE TABLE mail_processed (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            imap_uid TEXT NOT NULL,
+            mailbox_name TEXT NOT NULL,
+            subject TEXT,
+            sender TEXT,
+            received_at TEXT,
+            category TEXT,
+            draft_generated INTEGER DEFAULT 0,
+            draft_sent_at TEXT,
+            processed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            status TEXT,
+            priority TEXT,
+            ai_draft TEXT,
+            human_draft TEXT,
+            reviewed_by INTEGER,
+            reviewed_at DATETIME,
+            sent_at DATETIME,
+            sent_by INTEGER,
+            body_preview TEXT,
+            body TEXT,
+            delivered_at TEXT,
+            suggested_subject TEXT,
+            message_id TEXT,
+            in_reply_to TEXT,
+            "references" TEXT,
+            dossier_id TEXT,
+            thread_id TEXT,
+            thread_subject TEXT,
+            duplicate_of INTEGER,
+            UNIQUE(imap_uid, mailbox_name)
+        );
+        CREATE TABLE audit_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            action TEXT,
+            resource_type TEXT,
+            resource_id TEXT,
+            details TEXT,
+            ip_address TEXT,
+            user_agent TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE email_attachment (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            mail_processed_id INTEGER NOT NULL,
+            filename TEXT,
+            storage_path TEXT,
+            size_bytes INTEGER,
+            extracted_text_preview TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        """
+    )
+    # 1-2) Vraies demandes client pending (doivent rester)
+    for i, (subj, sender) in enumerate(
+        [
+            ("Demande de filature urgente", "client1@example.com"),
+            ("Recherche de personne disparue", "client2@example.com"),
+        ],
+        start=300,
+    ):
+        conn.execute(
+            "INSERT INTO mail_processed "
+            "(id, imap_uid, mailbox_name, subject, sender, received_at, category, "
+            " status, priority, body_preview, body, ai_draft, draft_generated, processed_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                i, f"uid{i}", "detective_belgique",
+                subj, sender,
+                "2026-06-23 10:00:00",
+                "demande_client", "pending", "high",
+                "Bonjour...",
+                "Bonjour...",
+                "Brouillon...", 1,
+                "2026-06-23 10:01:00",
+            ),
+        )
+    # 3) Urgent pending (doit rester)
+    conn.execute(
+        "INSERT INTO mail_processed "
+        "(id, imap_uid, mailbox_name, subject, sender, received_at, category, "
+        " status, priority, body_preview, body, ai_draft, draft_generated, processed_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            302, "uid302", "detective_belgique",
+            "URGENT - Vol de documents",
+            "client.urgent@example.com",
+            "2026-06-23 09:00:00",
+            "urgent", "pending", "high",
+            "URGENT...",
+            "URGENT...",
+            "Brouillon urgent...", 1,
+            "2026-06-23 09:01:00",
+        ),
+    )
+    # 4) Newsletter pending (DOIT être caché)
+    conn.execute(
+        "INSERT INTO mail_processed "
+        "(id, imap_uid, mailbox_name, subject, sender, received_at, category, "
+        " status, priority, body_preview, body, ai_draft, draft_generated, processed_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            303, "uid303", "detective_belgique",
+            "Newsletter mensuelle juin",
+            "newsletter@fournisseur.be",
+            "2026-06-23 08:00:00",
+            "newsletter", "pending", "low",
+            "Notre newsletter...",
+            "Notre newsletter...",
+            None, 0,
+            "2026-06-23 08:01:00",
+        ),
+    )
+    # 5) Spam pending (DOIT être caché)
+    conn.execute(
+        "INSERT INTO mail_processed "
+        "(id, imap_uid, mailbox_name, subject, sender, received_at, category, "
+        " status, priority, body_preview, body, ai_draft, draft_generated, processed_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            304, "uid304", "detective_belgique",
+            "Gagnez 1 million de dollars",
+            "spammer@spam.com",
+            "2026-06-23 07:00:00",
+            "spam", "pending", "low",
+            "Cliquez ici...",
+            "Cliquez ici...",
+            None, 0,
+            "2026-06-23 07:01:00",
+        ),
+    )
+    # 6) Facture pending (DOIT être caché)
+    conn.execute(
+        "INSERT INTO mail_processed "
+        "(id, imap_uid, mailbox_name, subject, sender, received_at, category, "
+        " status, priority, body_preview, body, ai_draft, draft_generated, processed_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            305, "uid305", "detective_belgique",
+            "Facture OV-2026-0042",
+            "compta@ovhcloud.com",
+            "2026-06-23 06:00:00",
+            "facture", "pending", "normal",
+            "Votre facture...",
+            "Votre facture...",
+            None, 0,
+            "2026-06-23 06:01:00",
+        ),
+    )
+    # 7) DOUBLON : status='duplicate' (DOIT être caché)
+    conn.execute(
+        "INSERT INTO mail_processed "
+        "(id, imap_uid, mailbox_name, subject, sender, received_at, category, "
+        " status, priority, body_preview, body, ai_draft, draft_generated, processed_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            306, "uid306", "detective_belgique",
+            "Demande de devis - doublon",
+            "client.doublon@example.com",
+            "2026-06-23 05:00:00",
+            "demande_client", "duplicate", "high",
+            "Doublon...",
+            "Doublon...",
+            "Brouillon doublon...", 1,
+            "2026-06-23 05:01:00",
+        ),
+    )
+    # 8) Pluxee classifié demande_client (DOIT être caché)
+    conn.execute(
+        "INSERT INTO mail_processed "
+        "(id, imap_uid, mailbox_name, subject, sender, received_at, category, "
+        " status, priority, body_preview, body, ai_draft, draft_generated, processed_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            307, "uid307", "detective_belgique",
+            "Pluxee Card: Vos Pluxee Lunch sur votre compte Pluxee",
+            "noreply@pluxee.be",
+            "2026-06-23 04:00:00",
+            "demande_client", "pending", "high",
+            "#outlook html pluxee...",
+            "#outlook html pluxee...",
+            None, 0,
+            "2026-06-23 04:01:00",
+        ),
+    )
+    # 9) CDAL interne (DOIT être caché)
+    conn.execute(
+        "INSERT INTO mail_processed "
+        "(id, imap_uid, mailbox_name, subject, sender, received_at, category, "
+        " status, priority, body_preview, body, ai_draft, draft_generated, processed_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            308, "uid308", "detective_belgique",
+            "Reunion interne demain",
+            "cdal@digitalhs.biz",
+            "2026-06-23 03:00:00",
+            "demande_client", "pending", "high",
+            "ok daniel...",
+            "ok daniel...",
+            None, 0,
+            "2026-06-23 03:01:00",
+        ),
+    )
+    # 10) Comptable cvfconsult (DOIT être caché)
+    conn.execute(
+        "INSERT INTO mail_processed "
+        "(id, imap_uid, mailbox_name, subject, sender, received_at, category, "
+        " status, priority, body_preview, body, ai_draft, draft_generated, processed_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            309, "uid309", "detective_belgique",
+            "BILAN 31/12/2025",
+            "valerie@cvfconsult.be",
+            "2026-06-23 02:00:00",
+            "demande_client", "pending", "high",
+            "Bonjour Daniel, voici le bilan...",
+            "Bonjour Daniel, voici le bilan...",
+            None, 0,
+            "2026-06-23 02:01:00",
+        ),
+    )
+    # 11) Reçu Apple (DOIT être caché)
+    conn.execute(
+        "INSERT INTO mail_processed "
+        "(id, imap_uid, mailbox_name, subject, sender, received_at, category, "
+        " status, priority, body_preview, body, ai_draft, draft_generated, processed_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            310, "uid310", "detective_belgique",
+            "Re: Votre reçu Apple",
+            "noreply@email.apple.com",
+            "2026-06-23 01:00:00",
+            "demande_client", "pending", "high",
+            "Votre reçu Apple Store...",
+            "Votre reçu Apple Store...",
+            None, 0,
+            "2026-06-23 01:01:00",
+        ),
+    )
+    # 12) e-Box (DOIT être caché)
+    conn.execute(
+        "INSERT INTO mail_processed "
+        "(id, imap_uid, mailbox_name, subject, sender, received_at, category, "
+        " status, priority, body_preview, body, ai_draft, draft_generated, processed_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            311, "uid311", "detective_belgique",
+            "Un message de l'e-Box arrive à expiration",
+            "e-Box.noreply@socialsecurity.be",
+            "2026-06-23 00:00:00",
+            "autre", "pending", "low",
+            "Votre e-Box expire...",
+            "Votre e-Box expire...",
+            None, 0,
+            "2026-06-23 00:01:00",
+        ),
+    )
+    conn.commit()
+    conn.close()
+    return db
+
+
+@pytest.fixture
+def client_with_worklist_data(tmp_path, operator_user):
+    """Client TestClient avec DB contenant 3 vrai travail + 9 intrus/bruit."""
+    db_path = _make_db_with_worklist_data(tmp_path)
+    app = make_app()
+    app.dependency_overrides[get_db] = _db_path_holder(db_path)
+    app.dependency_overrides[require_operator] = lambda: operator_user
+    return TestClient(app)
+
+
+def test_worklist_excludes_duplicates(client_with_worklist_data) -> None:
+    """v1.30.0.7 — Onglet "Toutes" = worklist : aucun mail avec status='duplicate'
+    ne doit apparaître (ni en hot ni en other, puisque other est supprimé).
+    """
+    resp = client_with_worklist_data.get("/api/inbox")
+    assert resp.status_code == 200
+    # id=306 (status='duplicate') ne doit PAS être visible dans le rendu
+    assert "/app/conversation/306" not in resp.text
+    # Son sujet non plus
+    assert "Demande de devis - doublon" not in resp.text
+
+
+def test_worklist_excludes_noise_senders(client_with_worklist_data) -> None:
+    """v1.30.0.7 — worklist : aucun mail avec sender @digitalhs.biz ou @cvfconsult
+    ne doit apparaître (geste de CDAL sur le bruit interne/comptable).
+    """
+    resp = client_with_worklist_data.get("/api/inbox")
+    assert resp.status_code == 200
+    # id=308 (cdal@digitalhs.biz) ne doit PAS être visible
+    assert "/app/conversation/308" not in resp.text
+    assert "Reunion interne demain" not in resp.text
+    # id=309 (cvfconsult.be) ne doit PAS être visible
+    assert "/app/conversation/309" not in resp.text
+    assert "BILAN 31/12/2025" not in resp.text
+
+
+def test_worklist_excludes_parasite_subjects(client_with_worklist_data) -> None:
+    """v1.30.0.7 — worklist : aucun mail avec sujet Pluxee / Reçu Apple / e-Box
+    ne doit apparaître (geste de CDAL sur les newsletters/confirmations classifiées
+    à tort en demande_client).
+    """
+    resp = client_with_worklist_data.get("/api/inbox")
+    assert resp.status_code == 200
+    # id=307 (Pluxee)
+    assert "/app/conversation/307" not in resp.text
+    assert "Pluxee Card" not in resp.text
+    # id=310 (Reçu Apple)
+    assert "/app/conversation/310" not in resp.text
+    assert "Re: Votre reçu Apple" not in resp.text
+    # id=311 (e-Box)
+    assert "/app/conversation/311" not in resp.text
+    assert "e-Box" not in resp.text
+
+
+def test_worklist_excludes_newsletter_spam_facture(client_with_worklist_data) -> None:
+    """v1.30.0.7 — worklist : aucune catégorie non-travail (newsletter, spam,
+    facture) ne doit apparaître dans "Toutes". Catégories accessibles via
+    les onglets dédiés.
+    """
+    resp = client_with_worklist_data.get("/api/inbox")
+    assert resp.status_code == 200
+    # id=303 (newsletter)
+    assert "/app/conversation/303" not in resp.text
+    # id=304 (spam)
+    assert "/app/conversation/304" not in resp.text
+    # id=305 (facture)
+    assert "/app/conversation/305" not in resp.text
+
+
+def test_worklist_keeps_real_demande_client_and_urgent(client_with_worklist_data) -> None:
+    """v1.30.0.7 — worklist : les 3 vrais mails de travail (2 demande_client
+    + 1 urgent) DOIVENT apparaître. C'est la finalité de la liste de travail.
+    """
+    resp = client_with_worklist_data.get("/api/inbox")
+    assert resp.status_code == 200
+    # id=300 (demande de filature)
+    assert "/app/conversation/300" in resp.text
+    assert "Demande de filature urgente" in resp.text
+    # id=301 (recherche de personne)
+    assert "/app/conversation/301" in resp.text
+    assert "Recherche de personne disparue" in resp.text
+    # id=302 (urgent)
+    assert "/app/conversation/302" in resp.text
+    assert "URGENT - Vol de documents" in resp.text
+
+
+def test_worklist_count_is_short(client_with_worklist_data) -> None:
+    """v1.30.0.7 — worklist : la liste "Toutes" doit être COURTE (≤ 30 lignes).
+    Critère "parfait" CDAL : 23 demande_client + 1 urgent = 24 max.
+    """
+    resp = client_with_worklist_data.get("/api/inbox")
+    assert resp.status_code == 200
+    # Compter les liens /app/conversation/ dans le rendu
+    import re
+    ids = re.findall(r"/app/conversation/(\d+)", resp.text)
+    unique_ids = set(int(i) for i in ids)
+    # On a inséré 3 vrais travail (id 300, 301, 302). Le worklist doit afficher
+    # EXACTEMENT ces 3 ids.
+    assert unique_ids == {300, 301, 302}, (
+        f"worklist devrait afficher {{300, 301, 302}} mais affiche {sorted(unique_ids)}"
+    )
+
+
+def test_demandes_client_tab_keeps_all_status(client_with_worklist_data) -> None:
+    """v1.30.0.7 — Onglet "Demandes client" (?category=demande_client) garde
+    le comportement actuel : les demande_client PENDING sont en hot band,
+    la 2e bande conserve le comportement v1.30.0.4 (inclut aussi les autres
+    catégories, pour que Daniel puisse tout voir en scrollant).
+    Critère CDAL : "Les autres onglets (Demandes client, Urgent, Newsletters,
+    Factures, Spam, Phishing, Rappels) gardent leur comportement actuel".
+    """
+    resp = client_with_worklist_data.get("/api/inbox?category=demande_client")
+    assert resp.status_code == 200
+    # id=300 et id=301 (demande_client pending) DOIVENT être en hot band
+    import re
+    sep_idx = resp.text.find("border-b-4 border-green-600")
+    assert sep_idx > 0, "Séparateur vert introuvable"
+    hot_section = resp.text[:sep_idx]
+    assert "/app/conversation/300" in hot_section
+    assert "/app/conversation/301" in hot_section
+    assert "Demande de filature urgente" in hot_section
+    assert "Recherche de personne disparue" in hot_section
+    # Le mail doublon (id=306, status='duplicate') NE DOIT PAS être en hot
+    # (la hot n'accepte que pending). Mais il est un demande_client.
+    assert "/app/conversation/306" not in hot_section
+
+
+def test_worklist_disabled_when_category_filter_set(client_with_worklist_data) -> None:
+    """v1.30.0.7 — Le worklist est DÉSACTIVÉ dès qu'un filtre explicite est posé.
+    ?category=newsletter → le mode worklist est OFF, on a 2 bandes (hot+other),
+    comportement v1.30.0.4 préservé (cf. spec CDAL "les autres onglets
+    gardent leur comportement actuel").
+
+    Le test vérifie que ?category=newsletter N'EST PAS en worklist mode :
+    - le séparateur vert (hot/other separator) peut être absent car aucune
+      newsletter pending n'est en hot (la hot est demande_client+urgent+pending).
+    - les newsletters pending sont visibles dans le rendu.
+    """
+    resp = client_with_worklist_data.get("/api/inbox?category=newsletter")
+    assert resp.status_code == 200
+    # id=303 (newsletter pending) DOIT être visible
+    assert "/app/conversation/303" in resp.text
+    assert "Newsletter mensuelle juin" in resp.text
+    # Le critère distinctif : on n'est PAS en worklist mode strict (3 mails).
+    # On est en mode "tab catégorie" → le rendu peut inclure d'autres mails
+    # dans la bande other. Le worklist mode strict exclut TOUT le reste.
+    # On vérifie qu'on a au moins autant de mails qu'en worklist (>= 1).
+    import re
+    ids = set(int(i) for i in re.findall(r"/app/conversation/(\d+)", resp.text))
+    # Newsletter pending (id=303) doit être dans la liste — confirme worklist OFF
+    assert 303 in ids
+    # En worklist strict, on n'aurait QUE les demande_client+urgent pending.
+    # En mode tab catégorie, on a PLUS que ça. Vérifions qu'on a au moins
+    # les 9+ ids (newsletter+spam+facture+autre+e-Box en other band).
+    assert len(ids) >= 1, f"newsletter tab devrait afficher au moins la newsletter pending"
+

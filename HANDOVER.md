@@ -1,7 +1,7 @@
 # HANDOVER — Detective.be Agent IA (Charlie)
 
 > Document de transfert pour tout agent (Claude Sonnet/Opus 4.X, GPT, etc.).
-> **Dernière mise à jour**: 2026-07-02 · **Version courante**: v1.30.0 · **Déployé sur** : `detective.digitalhs.biz`
+> **Dernière mise à jour**: 2026-07-02 · **Version courante**: v1.30.0.7 · **Déployé sur** : `detective.digitalhs.biz`
 
 ---
 
@@ -783,7 +783,8 @@ fi
 
 ## Note pour le prochain agent
 
-État au **2026-07-02** : **v1.30.0.5** livrée et déployée en prod (**447 tests verts**). **Dernières versions** (sprint en cours) :
+État au **2026-07-02** : **v1.30.0.7** livrée et déployée en prod (**455 tests verts**, 2 pre-existing failures sur `test_mission_dated_draft.py` non liées). **Dernières versions** (sprint en cours) :
+- **v1.30.0.7 (2026-07-02)** — Worklist mode : onglet "Toutes" = liste de travail de Daniel. `_fetch_mails()` + `_fetch_mails_partial()` : nouveau paramètre `worklist: bool = False`. En worklist : (1) exclut les doublons (`status != 'duplicate'`) du WHERE racine, (2) supprime la bande OTHER (retourne `(hot_mails, [])`). `worklist = (category is None and priority is None and status is None)` dans `/app/` et `/api/inbox`. Les onglets de catégorie explicite gardent le comportement 2 bandes (hot + other + move-to-other). Template `inbox.html` : compteur "Toutes" = `hot_threads|length` (au lieu de la somme des 2 bandes). 7 tests TDD. Cohérence `/app/` ↔ `/api/inbox`. Critère "parfait" CDAL : "Toutes" affiche ~3-23 lignes max (uniquement demande_client + urgent pending, sans doublons, sans bruit).
 - **v1.30.0.5 (2026-07-02)** — Anti-reply-orphelin en hot band. `app/web/app_routes.py:_group_into_threads()` retourne maintenant `tuple[list[dict], list[dict]]` = `(keep, move_to_other)`. Logique : (1) `is_reply_in_other` = reply_count==0 + parent a un thread_id + sibling pending existe dans `all_thread_siblings` (cross-band) ; (2) `is_orphan_reply_subject` = reply_count==0 + sujet matche `^\s*(re|réponse|fwd|tr|fw|aw)\s*:` + parent pending. Helper `_looks_like_reply_subject()` + regex `_REPLY_SUBJECT_PREFIX`. Fix bug `reply_count` jamais incrémenté. Caller `app_index()` passe `all_thread_siblings=other_mails` et merge `hot_move` dans `other_threads`. **Cohérence `/api/inbox`** : `app/web/api.py:_fetch_mails_partial()` projette `has_draft`/`suggested_subject`/`thread_id` et utilise la nouvelle signature tuple. 8 tests TDD. **Vérification prod** : 5 threads NEW en hot (aucun Re:), 10 replies Re: déplacées en other. Section hot du test client = (730, 725, 672, 699, 692) — tous sans Re:.
 - **v1.30.0.4 (2026-07-02)** — Garde-fou anti-bruit hot band. `app/web/app_routes.py:_fetch_mails()` + `app/web/api.py:_fetch_mails_partial()` : filtre anti-bruit dans `hot_where` exclut `@digitalhs.biz` (internes CDAL), `@cvfconsult.be` (comptable externe), sujets `pluxee`/`reçu apple`/`e-box`. `other_where = NOT(hot_where)` pour conserver les mails filtrés visibles en 2ème bande. 4 tests TDD. Une vraie demande client reste dans la hot.
 - **v1.30.0.3 (2026-07-02)** — Hot étendu (`demande_client` + `urgent`, toutes priorités, pending).

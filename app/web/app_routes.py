@@ -113,14 +113,31 @@ async def _fetch_mails(
     # les 662 mails actuels + la croissance. Le proper fix (grouping
     # en SQL natif) est tracké en v1.29.1.
     limit: int = 1000,
+    # v1.30.0.7 — worklist mode = "Toutes" tab = liste de travail de Daniel.
+    # Quand True :
+    #   1. Exclut les doublons (status='duplicate') — JAMAIS visibles dans la
+    #      liste de travail (CDAL : "trop de bruit avec les doublons").
+    #   2. Supprime la bande OTHER → l'inbox affiche UNIQUEMENT la hot band
+    #      (demande_client + urgent, pending). Les autres onglets (catégorie
+    #      explicite) gardent le comportement 2 bandes actuel.
+    # Déclenché par /app/ et /api/inbox quand category=NULL AND priority=NULL
+    # AND status=NULL (= "Toutes" tab = liste de travail par défaut).
+    worklist: bool = False,
 ) -> tuple[list[dict], list[dict]]:
     """Retourne (hot_mails, other_mails).
 
     hot_mails = demande_client + high + pending (toujours en haut).
     other_mails = le reste, avec le même tri intelligent.
+    En mode worklist, other_mails=[] et les doublons sont exclus du hot.
     """
     where = ["processed_at >= ?"]
     params = [_CUTOFF_DATE]
+    # v1.30.0.7 — worklist : exclure les doublons du SELECT racine.
+    # On l'ajoute à `where` (la base) plutôt qu'à hot_where pour que le NOT
+    # dans other_where (calculé depuis hot_where) ne les ré-inclue pas dans
+    # other. Cf. cas prod : 53 doublons en DB, invisibles en worklist.
+    if worklist:
+        where.append("(status IS NULL OR status != 'duplicate')")
     if boxes is not None:
         if boxes:
             placeholders = ",".join("?" for _ in boxes)
@@ -291,8 +308,17 @@ async def _fetch_mails(
         other_rows = await cursor.fetchall()
     other_mails = [_mask_sender(dict(zip(cols, row, strict=True))) for row in other_rows]
 
-    return hot_mails, other_mails
+    # v1.30.0.7 — worklist : on SUPPRIME la bande OTHER. Le but du mode
+    # worklist (= onglet "Toutes") est d'afficher UNIQUEMENT la hot band :
+    # Daniel voit sa liste de travail, pas un fourre-tout de 178 lignes
+    # (98 autre + 19 facture + 26 phishing + 10 rappel + 25 spam pending).
+    # Le SELECT other est tout de même exécuté pour préserver le contrat
+    # de la fonction (et permettre le cross-band move-to-other plus loin),
+    # mais on retourne une liste vide pour le rendu.
+    if worklist:
+        return hot_mails, []
 
+    return hot_mails, other_mails
 
 # v1.30.0.5 — heuristique "ce mail ressemble à une réponse (reply)".
 # Un mail pending dont le sujet commence par Re:/Re :/Re\xa0:/Re\xa0:/AW:/TR:/Fwd:
@@ -572,9 +598,15 @@ async def app_index(
     sort_col = request.query_params.get("sort") or "date"
     sort_order = request.query_params.get("order") or "desc"
     # v1.30.0.6 — le paramètre `view` est IGNORÉ. Seule la vue Fils existe désormais.
+    # v1.30.0.7 — worklist mode = "Toutes" tab = liste de travail de Daniel.
+    # worklist = (onglet "Toutes" = aucun filtre explicite catégorie/priorité/statut).
+    # Si l'utilisateur sélectionne un onglet de catégorie (Demandes client, Newsletters,
+    # etc.) OU un statut, on garde le comportement 2 bandes actuel.
+    worklist = category is None and priority is None and status is None
 
     hot_mails, other_mails = await _fetch_mails(
-        db, boxes, category, status, priority, q, sort_col, sort_order
+        db, boxes, category, status, priority, q, sort_col, sort_order,
+        worklist=worklist,
     )
 
     # v1.30.0.6 — vue unique = threads. CDAL ne veut QUE des fils de discussion.

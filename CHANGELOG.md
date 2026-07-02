@@ -1,5 +1,40 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.30.0.7] — 2026-07-02 (worklist mode — "Toutes" = liste de travail)
+
+### Contexte
+- CDAL a signalé que l'onglet "Toutes" du cockpit `/app/` affichait **~200 lignes mélangées** (newsletter, spam, autre, doublons, factures, etc.). Daniel devait scroller dans le bruit pour trouver ses 23 demande_client pending.
+- L'inbox par défaut doit être une **LISTE DE TRAVAIL** (le strict minimum à traiter), pas un fourre-tout.
+- Le mode 2 bandes (hot + other) reste pertinent pour les **autres onglets** (catégorie explicite) où Daniel veut auditer un sous-ensemble. C'est uniquement le défaut "Toutes" qui doit être nettoyé.
+
+### Ajouté
+- **`app/web/app_routes.py:_fetch_mails()`** : nouveau paramètre `worklist: bool = False`.
+  - En mode worklist, ajoute un filtre `(status IS NULL OR status != 'duplicate')` au WHERE racine pour exclure les doublons (53 en prod, jamais utiles dans la liste de travail).
+  - En mode worklist, retourne `(hot_mails, [])` : la bande OTHER est supprimée.
+- **`app/web/api.py:_fetch_mails_partial()`** : même paramètre `worklist` (cohérence stricte `/app/` ↔ `/api/inbox`).
+- **`/app/` et `/api/inbox`** : calculent `worklist = (category is None and priority is None and status is None)`. Si l'utilisateur sélectionne un onglet de catégorie ou un statut, worklist = False (les 2 bandes s'affichent comme avant).
+- **`app/web/templates/app/inbox.html`** : compteur de l'onglet "Toutes" affiche désormais `hot_threads|length` (au lieu de `hot_threads|length + other_threads|length`) — reflète la liste de travail effective.
+
+### Comportement
+- **Onglet "Toutes" (worklist ON, par défaut)** : affiche UNIQUEMENT la hot band (demande_client + urgent + pending), sans doublons. ~3-23 lignes max.
+- **Onglets Demandes client / Urgent / Newsletters / Factures / Spam / Phishing / Rappels / Autres (worklist OFF)** : comportement 2 bandes préservé (hot + other + move-to-other pour les replies orphelines).
+- **Garde-fous anti-bruit v1.30.0.4** (sender @digitalhs.biz, @cvfconsult.be, sujets Pluxee/Apple/e-Box) restent actifs dans les 2 modes.
+
+### Tests
+- **`tests/test_web_inbox_render.py`** : 7 nouveaux tests TDD :
+  - `test_worklist_excludes_duplicates` — id=306 (status='duplicate') invisible.
+  - `test_worklist_excludes_noise_senders` — @digitalhs.biz, @cvfconsult.be invisibles.
+  - `test_worklist_excludes_parasite_subjects` — Pluxee, Reçu Apple, e-Box invisibles.
+  - `test_worklist_excludes_newsletter_spam_facture` — catégories non-travail invisibles.
+  - `test_worklist_keeps_real_demande_client_and_urgent` — 2 demande_client + 1 urgent présents.
+  - `test_worklist_count_is_short` — exactement 3 ids (les vrais travail), pas plus.
+  - `test_demandes_client_tab_keeps_all_status` — l'onglet "Demandes client" garde le comportement 2 bandes.
+  - `test_worklist_disabled_when_category_filter_set` — `?category=newsletter` désactive le worklist.
+- 2 tests v1.30.0.5 (move-to-other) mis à jour pour passer `?category=demande_client` et préserver la sémantique hors worklist.
+
+### Bump
+- `app/_version.py` : `1.30.0.6` → `1.30.0.7`.
+
 ## [1.30.0.5] — 2026-07-02 (anti-reply-orphelin en hot band)
 
 ### Contexte

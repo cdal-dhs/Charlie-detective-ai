@@ -164,10 +164,19 @@ async def _fetch_mails_partial(
     sort_col: str = "date",
     sort_order: str = "desc",
     limit: int = 200,
+    # v1.30.0.7 — worklist mode = "Toutes" tab = liste de travail de Daniel.
+    # Cohérence stricte avec `_fetch_mails` (app_routes.py). Si /app/ supprime
+    # la bande OTHER en worklist, /api/inbox doit faire pareil (sinon le
+    # refresh HTMX réinjecte le bruit). Cf. CDAL "trop de bruit dans l'inbox".
+    worklist: bool = False,
 ) -> tuple[list[dict], list[dict]]:
-    """Retourne (hot_mails, other_mails)."""
+    """Retourne (hot_mails, other_mails). En worklist, other_mails=[] et
+    les doublons sont exclus du hot."""
     where = ["processed_at >= ?"]
     params = [_CUTOFF_DATE]
+    # v1.30.0.7 — worklist : exclure les doublons du SELECT racine (cf. app_routes).
+    if worklist:
+        where.append("(status IS NULL OR status != 'duplicate')")
     if boxes is not None:
         if boxes:
             placeholders = ",".join("?" for _ in boxes)
@@ -300,6 +309,10 @@ async def _fetch_mails_partial(
         other_rows = await cursor.fetchall()
     other_mails = [_mask_sender(dict(zip(cols, row, strict=True))) for row in other_rows]
 
+    # v1.30.0.7 — worklist : on supprime la bande OTHER (cf. app_routes._fetch_mails).
+    if worklist:
+        return hot_mails, []
+
     return hot_mails, other_mails
 
 
@@ -322,9 +335,13 @@ async def inbox_partial(
     q = request.query_params.get("q") or None
     sort_col = request.query_params.get("sort") or "date"
     sort_order = request.query_params.get("order") or "desc"
+    # v1.30.0.7 — worklist = "Toutes" tab = liste de travail de Daniel.
+    # worklist ON si aucun filtre explicite catégorie/priorité/statut.
+    worklist = category is None and priority is None and status is None
 
     hot_mails, other_mails = await _fetch_mails_partial(
-        db, boxes, category, status, priority, q, sort_col, sort_order
+        db, boxes, category, status, priority, q, sort_col, sort_order,
+        worklist=worklist,
     )
     # v1.29.0 — vue API = toujours flat (l'API sert les mises à jour HTMX
     # de l'inbox cockpit, on garde 1 ligne = 1 mail pour la perf et la
