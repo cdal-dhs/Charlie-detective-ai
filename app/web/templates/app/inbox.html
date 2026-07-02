@@ -48,7 +48,7 @@
       >
         {{ label }}
         <span id="tab-count-{{ key }}" class="ml-1 text-xs text-gray-500">
-          ({% if key == 'all' %}{{ hot_threads|length }}{% else %}{{ counts.get(key, 0) }}{% endif %})
+          ({% if key == 'all' %}{{ hot_threads|length + other_threads|length }}{% else %}{{ counts.get(key, 0) }}{% endif %})
         </span>
       </button>
     {% endfor %}
