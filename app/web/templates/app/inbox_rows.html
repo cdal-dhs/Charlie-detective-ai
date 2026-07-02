@@ -16,7 +16,7 @@
   <td class="px-2 py-3 whitespace-nowrap w-12 text-center text-xs font-medium {% if has_draft %}border-l-4 border-l-emerald-400{% elif is_hot %}border-l-4 border-l-green-500{% elif is_danger %}border-l-4 border-l-red-500{% endif %}">
     {% if has_draft %}
       <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-semibold ring-1 ring-emerald-500/40" title="Proposition de réponse générée par Charlie">
-        {{ box_short.get(m.mailbox_name, m.mailbox_name or '-') }}<span aria-hidden="true">✉️</span>
+        {{ box_short.get(m.mailbox_name, m.mailbox_name or '-') }}<span aria-hidden="true">✓</span>
       </span>
     {% else %}
       <span class="text-gray-400">{{ box_short.get(m.mailbox_name, m.mailbox_name or '-') }}</span>
@@ -95,14 +95,101 @@
    Si reply_count == 0 → équivalent à mail_row(parent). #}
 {% set parent = t.parent %}
 {% if t.reply_count > 0 %}
-  {{ mail_row(parent) }}
+  {# Parent custom avec badge "↓ N replies" à droite du sujet #}
+  {% set effective_status = parent.status or 'pending' %}
+  {% set is_hot = (parent.category == 'demande_client' and parent.priority == 'high' and effective_status == 'pending') %}
+  {% set is_danger = (parent.category == 'phishing') %}
+  {% set has_draft = parent.has_draft %}
+  <tr class="border-b border-gray-800 hover:bg-gray-800/50 {% if is_hot %}bg-green-900/40{% elif is_danger %}bg-red-900/40{% endif %}">
+    <td class="px-2 py-3 whitespace-nowrap w-12 text-center text-xs font-medium border-l-4 {% if has_draft %}border-l-emerald-400{% elif is_hot %}border-l-green-500{% elif is_danger %}border-l-red-500{% endif %}">
+      {% if has_draft %}
+        <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-semibold ring-1 ring-emerald-500/40" title="Proposition de réponse générée par Charlie">
+          {{ box_short.get(parent.mailbox_name, parent.mailbox_name or '-') }}<span aria-hidden="true">✉️</span>
+        </span>
+      {% else %}
+        <span class="text-gray-400">{{ box_short.get(parent.mailbox_name, parent.mailbox_name or '-') }}</span>
+      {% endif %}
+    </td>
+    <td class="px-3 py-3 max-w-md">
+      <div class="flex items-center gap-2">
+        <a href="/app/conversation/{{ parent.id }}" class="text-blue-400 hover:underline truncate flex-1">{{ parent.subject or '(sans sujet)' }}</a>
+        {# v1.29.1 — marqueur de fil à droite du sujet parent : "N replies" en pilule violette.
+           C'est le marqueur visuel clé du fil : on voit d'un coup d'œil que c'est un thread
+           avec N réponses en dessous, sans avoir à déplier. Style Gmail/Outlook. #}
+        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 font-semibold ring-1 ring-purple-500/40 text-xs whitespace-nowrap" title="{{ t.reply_count }} réponse(s) dans ce fil">
+          <span>{{ t.reply_count }}</span>
+          <span aria-hidden="true">›</span>
+        </span>
+      </div>
+    </td>
+    <td class="px-1 py-3 w-8 text-center">
+      {% if parent.attachment_count %}
+      <span class="text-gray-400" title="{{ parent.attachment_count }} pièce(s) jointe(s)">📎</span>
+      {% endif %}
+    </td>
+    <td class="px-2 py-3 max-w-[140px] truncate text-gray-400">{{ parent.sender or '-' }}</td>
+    <td class="px-2 py-3 w-32">
+      <form
+        class="inline"
+        hx-post="/api/mails/{{ parent.id }}/category"
+        hx-target="this"
+        hx-swap="outerHTML"
+        hx-trigger="change"
+      >
+        <select name="category" class="bg-gray-950 border border-gray-700 rounded px-1 py-1 text-xs text-gray-200 w-full">
+          <option value="demande_client" {% if parent.category == 'demande_client' %}selected{% endif %}>demande_client</option>
+          <option value="urgent" {% if parent.category == 'urgent' %}selected{% endif %}>urgent</option>
+          <option value="newsletter" {% if parent.category == 'newsletter' %}selected{% endif %}>newsletter</option>
+          <option value="facture" {% if parent.category == 'facture' %}selected{% endif %}>facture</option>
+          <option value="spam" {% if parent.category == 'spam' %}selected{% endif %}>spam</option>
+          <option value="phishing" {% if parent.category == 'phishing' %}selected{% endif %}>phishing</option>
+          <option value="rappel" {% if parent.category == 'rappel' %}selected{% endif %}>rappel</option>
+          <option value="autre" {% if parent.category == 'autre' %}selected{% endif %}>autre</option>
+        </select>
+      </form>
+    </td>
+    <td class="px-2 py-3 w-28">
+      <form
+        class="inline"
+        hx-post="/api/mails/{{ parent.id }}/status"
+        hx-target="this"
+        hx-swap="outerHTML"
+        hx-trigger="change"
+      >
+        <select name="status" class="bg-gray-950 border border-gray-700 rounded px-1 py-1 text-xs text-gray-200 w-full">
+          <option value="pending" {% if parent.status == 'pending' or not parent.status %}selected{% endif %}>pending</option>
+          <option value="approved" {% if parent.status == 'approved' %}selected{% endif %}>approved</option>
+          <option value="rejected" {% if parent.status == 'rejected' %}selected{% endif %}>rejected</option>
+          <option value="sent" {% if parent.status == 'sent' %}selected{% endif %}>sent</option>
+          <option value="reviewed" {% if parent.status == 'reviewed' %}selected{% endif %}>reviewed</option>
+        </select>
+      </form>
+    </td>
+    <td class="px-2 py-3 w-24">
+      <form
+        class="flex items-center gap-1"
+        hx-post="/api/mails/{{ parent.id }}/priority"
+        hx-target="this"
+        hx-swap="outerHTML"
+        hx-trigger="change"
+      >
+        <span class="{% if parent.priority == 'high' %}text-red-500{% elif parent.priority == 'normal' %}text-yellow-500{% else %}text-gray-500{% endif %}">●</span>
+        <select name="priority" class="bg-gray-950 border border-gray-700 rounded px-1 py-1 text-xs text-gray-200 w-full">
+          <option value="high" {% if parent.priority == 'high' %}selected{% endif %}>high</option>
+          <option value="normal" {% if parent.priority == 'normal' %}selected{% endif %}>normal</option>
+          <option value="low" {% if parent.priority == 'low' %}selected{% endif %}>low</option>
+        </select>
+      </form>
+    </td>
+    <td class="px-2 py-3 whitespace-nowrap text-xs text-gray-400 w-24">{{ parent.processed_at or '-' }}</td>
+  </tr>
   {# Replies enfilées, indentées, badge compteur #}
   {% for reply in t.replies %}
   {% set effective_status = reply.status or 'pending' %}
   {% set is_dup = (reply.status == 'duplicate') %}
   <tr class="border-b border-gray-800/50 bg-gray-900/30 {% if is_dup %}opacity-60{% endif %}">
     <td class="px-2 py-2 whitespace-nowrap w-12 text-center text-xs font-medium border-l-4 border-l-purple-400 bg-purple-500/10">
-      <span class="text-purple-300 text-base font-bold" title="Reply du fil {{ t.thread_id[:12] }}…">↳</span>
+      <span class="text-purple-300 text-base font-bold" title="Reply du fil {{ t.thread_id[:12] }}…">›</span>
       <span class="text-gray-400 ml-1">{{ box_short.get(reply.mailbox_name, reply.mailbox_name or '-') }}</span>
     </td>
     <td class="px-3 py-2 max-w-md">
