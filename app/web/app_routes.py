@@ -147,7 +147,16 @@ async def _fetch_mails(
 
     col = _SORTABLE_COLS.get(sort_col, "processed_at")
     order = "DESC" if sort_order.lower() == "desc" else "ASC"
-    # v1.30.0.2 — TRI PRIORITAIRE INCONDITIONNEL pour Daniel.
+    # v1.31.0 — RESTRICTION hot_where à priority='high' (URGENT seulement).
+    # v1.30.0.x laissait passer les priority='normal' (donc "Re: Pour devis" en normal
+    # apparaissait en hot band verte). Le user veut STRICTEMENT les high en vert.
+    # Les priority='normal' pending vont en other band (où ils sont toujours
+    # triés en tête par priority_order SQL, juste pas en cadre vert).
+    hot_where = where + [
+        "(category = 'demande_client' OR category = 'urgent')",
+        "(status = 'pending' OR status IS NULL)",
+        "priority = 'high'",
+    ] + hot_exclude_clauses
     # Quel que soit le filtre (boîte, catégorie, statut, vue Fils/Brute/Doublons)
     # ou le tri choisi par l'utilisateur (date/sujet/etc.) : les demande_client
     # pending sont TOUJOURS en premier. C'est le flux de travail de Daniel — il
@@ -273,6 +282,7 @@ async def _fetch_mails(
     hot_where = where + [
         "(category = 'demande_client' OR category = 'urgent')",
         "(status = 'pending' OR status IS NULL)",
+        "priority = 'high'",  # v1.31.0 — HOT = STRICTEMENT high priority
     ] + hot_exclude_clauses
     hot_sql = (
         "SELECT m.id, m.mailbox_name, m.subject, m.sender, m.received_at, m.category, "
