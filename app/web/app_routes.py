@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import aiosqlite
@@ -293,14 +294,49 @@ async def _fetch_mails(
     return hot_mails, other_mails
 
 
-def _group_into_threads(mails: list[dict]) -> list[dict]:
+# v1.30.0.5 — heuristique "ce mail ressemble à une réponse (reply)".
+# Un mail pending dont le sujet commence par Re:/Re :/Re\xa0:/Re\xa0:/AW:/TR:/Fwd:
+# est un reply dont le parent n'est PAS dans le set courant (sinon il aurait
+# été groupé avec son parent). Cas concret : mail #677 (siimiya) — sujet
+# "Re: DEMANDE D'Approbation..." mais parent #640 déjà approved → le parent
+# n'est pas dans le hot set (filtré) → ce mail doit aller dans OTHER, pas HOT.
+_REPLY_SUBJECT_PREFIX = re.compile(
+    r"^\s*(re|aw|tr|fwd|sv|fw)\s*:\s*", re.IGNORECASE
+)
+
+
+def _looks_like_reply_subject(subject: str | None) -> bool:
+    """True si le sujet commence par un préfixe de réponse (Re:/AW:/TR:/Fwd:).
+
+    Le préfixe `Re:` (et ses variantes unicode avec espace insécable \xa0)
+    est le marqueur universel d'un mail de réponse — Daniel ne doit pas voir
+    un "Re: ..." en première ligne de la hot band car son parent est forcément
+    ailleurs (déjà traité, hors-scope, ou étranger au thread groupable).
+    """
+    if not subject:
+        return False
+    return bool(_REPLY_SUBJECT_PREFIX.match(subject))
+
+
+def _group_into_threads(
+    mails: list[dict],
+    all_thread_siblings: list[dict] | None = None,
+) -> tuple[list[dict], list[dict]]:
     """v1.29.0 — groupe les mails en fils de discussion par thread_id.
 
     Args:
         mails: liste de dicts (issus de _fetch_mails).
+        all_thread_siblings: mails HORS du set `mails` mais qui partagent un
+            thread_id avec un mail de `mails` (typiquement les siblings du
+            other_mails set quand on groupe hot_mails). Permet de détecter
+            un reply pending dont le parent est dans other (déjà traité)
+            et de le DÉPLACER vers l'other band. Ignoré si None.
 
     Returns:
-        Liste de threads triés par date du mail le plus récent DESC.
+        Tuple (keep, move_to_other) :
+        - keep : threads à garder dans la liste appelante (hot OU other).
+        - move_to_other : entrées qui doivent DÉMÉNAGER dans l'autre band
+          (typiquement un reply pending dont le parent est déjà traité).
         Chaque thread = {
             "thread_id": str,
             "parent": dict (mail avec received_at min),
@@ -312,9 +348,26 @@ def _group_into_threads(mails: list[dict]) -> list[dict]:
 
     Les mails sans thread_id (anciens, pré-v1.29.0) restent en 1-mail = 1-fil
     (le grouping est best-effort, pas destructif).
+
+    v1.30.0.5 — la fonction retourne 2 listes. La logique de split a été
+    enrichie : un reply pending dont le parent est non-pending (ou dont le
+    sujet ressemble à un reply sans parent groupable) doit DÉMÉNAGER dans
+    l'autre band — son parent est déjà traité par Daniel, il n'a plus rien
+    à faire dans la hot band. Cf. CDAL "un sous mail ne peut pas être en
+    premier il doit avoir un email parent !".
     """
     threads_dict: dict[str, dict] = {}
     orphans: list[dict] = []
+
+    # v1.30.0.5 — index des siblings HORS `mails` (other_mails) par thread_id.
+    # Utilisé pour détecter les replies pending dont le parent est dans other
+    # (déjà traité par Daniel).
+    siblings_by_tid: dict[str, list[dict]] = {}
+    if all_thread_siblings:
+        for sib in all_thread_siblings:
+            sib_tid = sib.get("thread_id") or ""
+            if sib_tid:
+                siblings_by_tid.setdefault(sib_tid, []).append(sib)
 
     for mail in mails:
         tid = mail.get("thread_id") or ""
@@ -351,6 +404,12 @@ def _group_into_threads(mails: list[dict]) -> list[dict]:
                 t["replies"].append(old_parent)
             else:
                 t["replies"].append(mail)
+            # v1.30.0.5 — BUG FIX : reply_count n'était jamais incrémenté !
+            # Conséquence : un fil avec parent + reply voyait reply_count=0,
+            # le template affichait `mail_row(parent)` au lieu de thread_row
+            # → la reply était invisible (rendue uniquement si `t.replies`
+            # itéré manuellement, ce qui n'était jamais le cas).
+            t["reply_count"] = len(t["replies"])
             # last_received
             if (mail.get("received_at") or "") > t["last_received"]:
                 t["last_received"] = mail.get("received_at") or t["last_received"]
@@ -365,13 +424,21 @@ def _group_into_threads(mails: list[dict]) -> list[dict]:
     # Cas concret : le bucket `adhoc::unknown::50d8b4a9` regroupe 207 mails sans rapport
     # (Infomaniak, Coolblue, formations, etc.) sous un parent "Un message du fondateur
     # d'Infomaniak" déjà approved. Éclater le fil règle le bug "reply sans parent visible".
-    final_threads: list[dict] = []
+    #
+    # v1.30.0.5 — split en 2 listes : les replies pending dont le parent est non-pending
+    # doivent DÉMÉNAGER dans l'autre band (pas dans la hot si la hot est la band d'origine).
+    # Un reply dont le parent est déjà traité n'a pas de sens en hot band : Daniel ne peut
+    # PLUS rien faire dessus (le parent est clos). Il doit vivre dans OTHER pour archivage.
+    final_keep: list[dict] = []
+    final_move: list[dict] = []
     for t in list(threads_dict.values()) + orphans:
         parent_status = (t["parent"].get("status") or "").lower()
         if parent_status and parent_status != "pending":
             # Parent déjà traité → on convertit toutes les replies en orphelins
+            # et on les DÉPLACE dans l'autre band (le parent est clos, ces
+            # replies pending n'ont plus rien à faire avec le scope d'origine).
             for r in t["replies"]:
-                final_threads.append(
+                final_move.append(
                     {
                         "thread_id": f"orphan::{r['id']}",
                         "parent": r,
@@ -384,12 +451,35 @@ def _group_into_threads(mails: list[dict]) -> list[dict]:
             # Le parent lui-même : s'il est dans le scope pending il reste orphelin,
             # sinon il n'est pas dans la liste d'origine (déjà filtré par _fetch_mails).
         else:
-            final_threads.append(t)
-    threads = final_threads
+            # Parent pending (ou thread à 1 seul mail pending) : on le garde
+            # MAIS on vérifie aussi qu'il ne s'agit pas d'un reply orphelin.
+            # Cas 1 : thread_id présent + siblings dans `all_thread_siblings`
+            # (other_mails) → le parent est dans other (déjà traité), ce mail
+            # est un reply → MOVE.
+            # Cas 2 : pas de thread_id + sujet Re:/AW:/Fwd: → reply orphelin
+            # (le parent est forcément ailleurs, déjà traité) → MOVE.
+            is_reply_in_other = (
+                t["reply_count"] == 0
+                and t["parent"].get("thread_id")
+                and t["parent"].get("status", "pending") in (None, "", "pending")
+                and siblings_by_tid.get(t["parent"].get("thread_id"))
+            )
+            is_orphan_reply_subject = (
+                t["reply_count"] == 0
+                and t["parent"].get("status", "pending") in (None, "", "pending")
+                and not t["parent"].get("thread_id")  # vrai orphelin (pas de thread_id)
+                and _looks_like_reply_subject(t["parent"].get("subject"))
+            )
+            if is_reply_in_other or is_orphan_reply_subject:
+                # Reply orphelin (parent ailleurs, déjà traité) → move
+                final_move.append(t)
+            else:
+                final_keep.append(t)
 
-    # Tri global par date du mail le plus récent DESC
-    threads.sort(key=lambda t: t["last_received"], reverse=True)
-    return threads
+    # Tri global par date du mail le plus récent DESC (chaque liste séparément)
+    final_keep.sort(key=lambda t: t["last_received"], reverse=True)
+    final_move.sort(key=lambda t: t["last_received"], reverse=True)
+    return final_keep, final_move
 
 
 async def _fetch_mailboxes() -> list[MailboxConfig]:
@@ -490,9 +580,18 @@ async def app_index(
     # v1.29.0 — vue par défaut = threads (regroupés par thread_id).
     # Vue flat = 1 ligne = 1 mail (legacy). Vue duplicates = uniquement
     # les status='duplicate' (audit/debug v1.28.3).
+    #
+    # v1.30.0.5 — `_group_into_threads` retourne (keep, move_to_other).
+    # Les "move_to_other" sont les replies pending dont le parent est déjà
+    # traité (CDAL : "un sous mail ne peut pas être en premier, il doit
+    # avoir un email parent !"). On fusionne ces 2 flux dans other_threads.
+    # `all_thread_siblings` permet de détecter un reply dont le parent est
+    # dans other_mails (cross-band check).
     if view == "threads":
-        hot_threads = _group_into_threads(hot_mails)
-        other_threads = _group_into_threads(other_mails)
+        hot_keep, hot_move = _group_into_threads(hot_mails, all_thread_siblings=other_mails)
+        other_keep, _other_move = _group_into_threads(other_mails, all_thread_siblings=hot_mails)
+        hot_threads = hot_keep
+        other_threads = other_keep + hot_move
     elif view == "duplicates":
         # Filtre uniquement les doublons (status='duplicate') sur le tri descendant
         hot_threads = [

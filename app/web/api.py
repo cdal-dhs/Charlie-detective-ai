@@ -218,7 +218,15 @@ async def _fetch_mails_partial(
         "body_preview",
         "body",
         "attachment_count",
-        "ai_draft",
+        # v1.29.0.7 — `has_draft` (bool 0/1) au lieu de `ai_draft` (texte complet).
+        # Cohérence avec app_routes._fetch_mails — gain perf (pas de payload brouillon).
+        "has_draft",
+        "suggested_subject",
+        # v1.29.0.4 — `thread_id` AJOUTÉ à la projection. v1.30.0.5 — nécessaire
+        # pour que `_group_into_threads` puisse grouper les replies sous leur
+        # parent. Sans thread_id, TOUS les mails tombent en orphans et le fix
+        # anti-reply-orpheline ne s'applique pas correctement.
+        "thread_id",
     ]
 
     def _mask_sender(row_dict: dict) -> dict:
@@ -256,7 +264,8 @@ async def _fetch_mails_partial(
         "SELECT m.id, m.mailbox_name, m.subject, m.sender, m.received_at, m.category, "
         "m.status, m.priority, m.processed_at, m.body_preview, m.body, "
         "(SELECT COUNT(*) FROM email_attachment WHERE mail_processed_id = m.id) AS attachment_count, "
-        "m.ai_draft "
+        "CASE WHEN IFNULL(LENGTH(m.ai_draft), 0) > 0 THEN 1 ELSE 0 END AS has_draft, "
+        "m.suggested_subject, m.thread_id "
         "FROM mail_processed m WHERE " + " AND ".join(hot_where) + " "
         f"ORDER BY {priority_order}, {col} {order} LIMIT ?"
     )
@@ -277,7 +286,8 @@ async def _fetch_mails_partial(
         "SELECT m.id, m.mailbox_name, m.subject, m.sender, m.received_at, m.category, "
         "m.status, m.priority, m.processed_at, m.body_preview, m.body, "
         "(SELECT COUNT(*) FROM email_attachment WHERE mail_processed_id = m.id) AS attachment_count, "
-        "m.ai_draft "
+        "CASE WHEN IFNULL(LENGTH(m.ai_draft), 0) > 0 THEN 1 ELSE 0 END AS has_draft, "
+        "m.suggested_subject, m.thread_id "
         "FROM mail_processed m WHERE " + " AND ".join(other_where) + " "
         f"ORDER BY {priority_order}, {col} {order} LIMIT ?"
     )
@@ -319,10 +329,19 @@ async def inbox_partial(
     # v1.29.0 — vue API = toujours flat (l'API sert les mises à jour HTMX
     # de l'inbox cockpit, on garde 1 ligne = 1 mail pour la perf et la
     # simplicité — le cockpit full utilise _group_into_threads() pour le fil).
+    #
+    # v1.30.0.5 — `_group_into_threads` retourne (keep, move_to_other).
+    # On fusionne `move_to_other` dans other_threads (le reply pending dont
+    # le parent est traité n'a rien à faire en hot band). Cf. CDAL "un sous
+    # mail ne peut pas être en premier, il doit avoir un email parent !".
+    # `all_thread_siblings` permet la détection cross-band (un reply hot
+    # dont le parent est dans other_mails → move).
     from app.web.app_routes import _group_into_threads
 
-    hot_threads = _group_into_threads(hot_mails)
-    other_threads = _group_into_threads(other_mails)
+    hot_keep, hot_move = _group_into_threads(hot_mails, all_thread_siblings=other_mails)
+    other_keep, _other_move = _group_into_threads(other_mails, all_thread_siblings=hot_mails)
+    hot_threads = hot_keep
+    other_threads = other_keep + hot_move
     mailboxes = get_settings().mailboxes()
     return templates.TemplateResponse(
         request,
