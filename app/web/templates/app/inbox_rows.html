@@ -186,9 +186,13 @@
   {% for reply in t.replies %}
   {% set effective_status = reply.status or 'pending' %}
   {% set is_dup = (reply.status == 'duplicate') %}
+  {% set has_draft = reply.has_draft %}
   <tr class="border-b border-gray-800/50 bg-gray-900/30 {% if is_dup %}opacity-60{% endif %}">
-    <td class="px-2 py-2 whitespace-nowrap w-12 text-center text-xs font-medium border-l-4 border-l-purple-400 bg-purple-500/10">
-      <span class="text-purple-300 text-base font-bold leading-none">›</span>
+    <td class="px-2 py-2 whitespace-nowrap w-12 text-center text-xs font-medium border-l-4 {% if has_draft %}border-l-emerald-400{% else %}border-l-purple-400{% endif %} {% if has_draft %}bg-emerald-500/10{% else %}bg-purple-500/10{% endif %}">
+      <span class="{% if has_draft %}text-emerald-300{% else %}text-purple-300{% endif %} text-base font-bold leading-none">›</span>
+      {% if has_draft %}
+        <svg class="inline-block shrink-0 ml-1" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="color: rgb(110 231 183);" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="1.5"/><path d="m2.5 6.5 9.5 7 9.5-7"/></svg>
+      {% endif %}
       <span class="text-gray-400 ml-1">{{ box_short.get(reply.mailbox_name, reply.mailbox_name or '-') }}</span>
     </td>
     <td class="px-3 py-2 max-w-md">
