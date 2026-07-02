@@ -921,6 +921,209 @@ def test_looks_like_reply_subject_helper() -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# v1.30.0.8 — Détection des "replies orphelins" dans _group_into_threads()
+#
+# Avant : un mail avec in_reply_to pointant vers un message_id absent du
+# système était promu "parent" d'un fil (parce que c'était le mail le plus
+# ancien), avec les autres replies enfilés en dessous — l'utilisateur voyait
+# un "Re: …" sans parent connu en première ligne.
+#
+# Maintenant : le parent = le plus ancien mail du fil qui n'est PAS un
+# reply orphelin (in_reply_to pointe vers un message_id qu'on connaît).
+# Si TOUS les mails du fil sont orphelins, le parent = le plus ancien
+# mais rendu sans icône › ("premier mail connu", pas un vrai parent).
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_orphan_reply_not_promoted_to_parent_when_sibling_exists() -> None:
+    """v1.30.0.8 — Fil mixte : un mail avec in_reply_to="unknown" ne doit PAS
+    être promu parent si un autre mail du fil N'A PAS d'in_reply_to.
+
+    Cas concret : un client envoie "Bonjour" (id=1, in_reply_to=None) puis
+    "Re: Bonjour" (id=2, in_reply_to="<x@y.com>"). Le mail id=2 cite un
+    message_id jamais vu dans notre DB (réponse à un mail de Daniel envoyé
+    hors-système) → c'est un reply orphelin. Le parent = id=1 (le seul
+    non-orphelin), id=2 devient reply.
+    """
+    from app.web.app_routes import _group_into_threads
+
+    mails = [
+        {
+            "id": 1, "mailbox_name": "detective_belgique",
+            "subject": "Bonjour, je cherche un détective",
+            "sender": "client@example.com",
+            "received_at": "2026-06-25 10:00:00", "status": "pending",
+            "priority": "high", "category": "demande_client",
+            "thread_id": "thread-M", "has_draft": 0,
+            "in_reply_to": None, "message_id": "<msg1@example.com>",
+        },
+        {
+            "id": 2, "mailbox_name": "detective_belgique",
+            "subject": "Re: Bonjour, je cherche un détective",
+            "sender": "client@example.com",
+            "received_at": "2026-06-30 10:00:00", "status": "pending",
+            "priority": "high", "category": "demande_client",
+            "thread_id": "thread-M", "has_draft": 0,
+            "in_reply_to": "<x@y.com>",  # ← message_id absent du système
+            "message_id": "<msg2@example.com>",
+        },
+    ]
+    keep, move = _group_into_threads(mails)
+    assert len(keep) == 1
+    t = keep[0]
+    assert t["parent"]["id"] == 1, (
+        f"Le parent doit être id=1 (non-orphelin), pas id=2 (orphelin). "
+        f"Got parent id={t['parent']['id']}, replies={[r['id'] for r in t['replies']]}"
+    )
+    assert [r["id"] for r in t["replies"]] == [2]
+    assert t["parent_is_orphan"] is False
+    assert move == []
+
+
+def test_orphan_only_thread_marks_first_as_known_without_reply_icon() -> None:
+    """v1.30.0.8 — Fil où TOUS les mails sont des replies orphelins (aucun
+    n'a in_reply_to=None). Le parent = le plus ancien (premier mail connu
+    du fil), mais `parent_is_orphan=True` → le template rend le parent SANS
+    icône › (ce n'est pas un vrai parent de conversation, juste le 1er
+    mail qu'on a en DB).
+    """
+    from app.web.app_routes import _group_into_threads
+
+    mails = [
+        {
+            "id": 10, "mailbox_name": "detective_belgique",
+            "subject": "Re: Devis",
+            "sender": "c@c.com",
+            "received_at": "2026-06-20 10:00:00", "status": "pending",
+            "priority": "high", "category": "demande_client",
+            "thread_id": "thread-O", "has_draft": 0,
+            "in_reply_to": "<unknown@external.com>",
+            "message_id": "<msg10@c.com>",
+        },
+        {
+            "id": 11, "mailbox_name": "detective_belgique",
+            "subject": "Re: Re: Devis",
+            "sender": "c@c.com",
+            "received_at": "2026-06-25 10:00:00", "status": "pending",
+            "priority": "high", "category": "demande_client",
+            "thread_id": "thread-O", "has_draft": 0,
+            "in_reply_to": "<unknown2@external.com>",
+            "message_id": "<msg11@c.com>",
+        },
+        {
+            "id": 12, "mailbox_name": "detective_belgique",
+            "subject": "Re: Re: Re: Devis",
+            "sender": "c@c.com",
+            "received_at": "2026-06-30 10:00:00", "status": "pending",
+            "priority": "high", "category": "demande_client",
+            "thread_id": "thread-O", "has_draft": 0,
+            "in_reply_to": "<unknown3@external.com>",
+            "message_id": "<msg12@c.com>",
+        },
+    ]
+    keep, move = _group_into_threads(mails)
+    assert len(keep) == 1
+    t = keep[0]
+    # Le parent = le plus ancien (id=10), les autres = replies
+    assert t["parent"]["id"] == 10
+    assert sorted([r["id"] for r in t["replies"]]) == [11, 12]
+    # parent_is_orphan=True → rendu sans icône › sur le parent
+    assert t["parent_is_orphan"] is True
+    assert t["all_orphans"] is True
+    assert move == []
+
+
+def test_mixed_thread_real_parent_with_orphan_replies() -> None:
+    """v1.30.0.8 — Fil où le premier mail est SANS in_reply_to (vrai parent)
+    et les suivants sont des replies orphelins (in_reply_to pointe vers un
+    message_id externe). Le parent = le mail sans in_reply_to, les
+    orphelins sont en replies.
+    """
+    from app.web.app_routes import _group_into_threads
+
+    mails = [
+        {
+            "id": 20, "mailbox_name": "detective_belgique",
+            "subject": "Demande initiale",
+            "sender": "d@d.com",
+            "received_at": "2026-06-15 10:00:00", "status": "pending",
+            "priority": "high", "category": "demande_client",
+            "thread_id": "thread-Mix", "has_draft": 0,
+            "in_reply_to": None,  # ← vrai premier mail
+            "message_id": "<msg20@d.com>",
+        },
+        {
+            "id": 21, "mailbox_name": "detective_belgique",
+            "subject": "Re: Demande initiale",
+            "sender": "d@d.com",
+            "received_at": "2026-06-20 10:00:00", "status": "pending",
+            "priority": "high", "category": "demande_client",
+            "thread_id": "thread-Mix", "has_draft": 0,
+            "in_reply_to": "<msg20@d.com>",  # ← in_reply_to pointe vers id=20 OK
+            "message_id": "<msg21@d.com>",
+        },
+        {
+            "id": 22, "mailbox_name": "detective_belgique",
+            "subject": "Re: Re: Demande initiale",
+            "sender": "d@d.com",
+            "received_at": "2026-06-25 10:00:00", "status": "pending",
+            "priority": "high", "category": "demande_client",
+            "thread_id": "thread-Mix", "has_draft": 0,
+            "in_reply_to": "<daniel@external>",  # ← ORPHELIN (Daniel hors-système)
+            "message_id": "<msg22@d.com>",
+        },
+    ]
+    keep, move = _group_into_threads(mails)
+    assert len(keep) == 1
+    t = keep[0]
+    # Le parent = id=20 (le seul mail non-orphelin)
+    assert t["parent"]["id"] == 20, (
+        f"Parent doit être id=20 (vrai 1er mail), got {t['parent']['id']}"
+    )
+    # Les 2 autres sont en replies (id=21 et id=22)
+    assert sorted([r["id"] for r in t["replies"]]) == [21, 22]
+    # parent_is_orphan=False car le parent a un in_reply_to=None (vrai 1er mail)
+    assert t["parent_is_orphan"] is False
+    assert t["all_orphans"] is False
+    assert move == []
+
+
+def test_orphan_reply_helper_basic() -> None:
+    """v1.30.0.8 — `_is_orphan_reply` retourne True si in_reply_to pointe
+    vers un message_id absent du système.
+    """
+    from app.web.app_routes import _is_orphan_reply
+
+    known_msg_ids = {"<real@server.com>"}
+
+    # Cas orphelin : in_reply_to pointe vers inconnu
+    assert _is_orphan_reply(
+        {"in_reply_to": "<unknown@external.com>"},
+        known_message_ids=known_msg_ids,
+        same_thread_message_ids=set(),
+    ) is True
+    # Cas non-orphelin : in_reply_to pointe vers connu
+    assert _is_orphan_reply(
+        {"in_reply_to": "<real@server.com>"},
+        known_message_ids=known_msg_ids,
+        same_thread_message_ids=set(),
+    ) is False
+    # Cas non-orphelin : in_reply_to absent
+    assert _is_orphan_reply(
+        {"in_reply_to": None},
+        known_message_ids=known_msg_ids,
+        same_thread_message_ids=set(),
+    ) is False
+    # Cas non-orphelin : in_reply_to pointe vers un mail du MÊME fil
+    # (intra-thread knowledge)
+    assert _is_orphan_reply(
+        {"in_reply_to": "<sibling@thread.com>"},
+        known_message_ids=set(),  # pas connu globalement
+        same_thread_message_ids={"<sibling@thread.com>"},  # mais connu intra-thread
+    ) is False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # v1.30.0.7 — Mode worklist : onglet "Toutes" = liste de travail de Daniel.
 #
 # Avant : "Toutes" affichait ~200 lignes mélangées (newsletter, spam, autre,

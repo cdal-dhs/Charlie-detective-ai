@@ -1,5 +1,31 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.30.0.8] — 2026-07-02 (anti-orphelin-reply + split bucket adhoc fourre-tout)
+
+### Contexte
+- CDAL a signalé que dans la bande OTHER de `/app/?category=demande_client`, **un mail parent "bidon" (id=278, phishing Infomaniak "Je hebt een nieuw belangrijk bericht") avait 205 mails enfilés en replies en dessous (›)** — Pluxee, Demande mission, changements propriétaire domaine, etc. — tous sans rapport. Visuel saturé, 1ère ligne = parent "phishing" sans aucun rapport avec les 205 lignes enfilées.
+- Cause 1 (DB) : le bucket `adhoc::unknown::50d8b4a9` (créé par le hash v1.29.0 pré-fix) regroupait 207 mails sans dossier_id en un seul thread. Le parent = le 1er mail reçu (un Infomaniak fondateur de 2026-05-20) → tous les autres mails deviennent ses "replies".
+- Cause 2 (algo) : un mail avec `in_reply_to` pointant vers un message_id absent du système (mail de Daniel envoyé hors-système) était promu "parent" d'un fil à tort si c'était le mail le plus ancien.
+
+### Fixé
+- **Backfill prod sur VPS** : 205 rows du bucket `adhoc::unknown::50d8b4a9` re-threadées avec le hash v1.29.0.7 (sender|subject) → **120 fils distincts** (au lieu de 1 fourre-tout). Pluxee Card, Demande mission, changements propriétaire domaine, etc. sont maintenant dans leur propre fil = plus de replies enfilés sous un parent bidon. Fait via `python -c` inline (script non commité — one-shot prod, à recréer si nécessaire).
+- **`app/web/app_routes.py:_fetch_mails()`** : ajout de `m.in_reply_to` et `m.message_id` à la projection SELECT (2 colonnes supplémentaires, 18 au total). Utilisés par `_group_into_threads()` pour détecter les "replies orphelins".
+- **`app/web/app_routes.py:_is_orphan_reply()`** : nouveau helper. Un mail est un "reply orphelin" si `in_reply_to` est non-vide ET ne pointe ni vers un message_id connu globalement (toute la DB) ni vers un message_id du même fil. Cas concret : un client répond à un mail de Daniel envoyé depuis une autre boîte (jamais ingéré) → l'in_reply_to pointe vers un message_id qu'on n'a pas.
+- **`app/web/app_routes.py:_group_into_threads()`** : nouvelle étape de re-parenting. Pour chaque fil, le parent = le mail le plus ancien qui n'est PAS un reply orphelin. Si TOUS les mails du fil sont orphelins, le parent = le plus ancien mais avec `parent_is_orphan=True` (le template rend sans icône › — c'est le "premier mail connu", pas un vrai parent de conversation).
+
+### Tests
+- **`tests/test_web_inbox_render.py`** : 4 nouveaux tests TDD :
+  - `test_orphan_reply_not_promoted_to_parent_when_sibling_exists` — fil mixte, le parent = le seul non-orphelin, l'orphelin en reply.
+  - `test_orphan_only_thread_marks_first_as_known_without_reply_icon` — fil 100% orphelin, le parent = le plus ancien avec `parent_is_orphan=True`, `all_orphans=True`.
+  - `test_mixed_thread_real_parent_with_orphan_replies` — parent légitime + 1 reply intra-thread + 1 reply orphelin → le parent légitime reste parent, les 2 autres en replies.
+  - `test_orphan_reply_helper_basic` — `_is_orphan_reply` reconnaît in_reply_to=None, in_reply_to connu (global), in_reply_to connu (intra-thread), in_reply_to inconnu.
+
+### Garde-fous
+- **Hot band** : 0 ligne avec icône › en parent (le template `thread_row` n'utilise l'icône › que sur les lignes enfilées, jamais sur le parent).
+- **Hot band** : 0 ligne où in_reply_to est non-vide ET pointe vers un parent absent du système.
+- **Other band** : les fils 100% orphelins ont leur parent rendu SANS icône › (cosmétique, "premier mail connu"). Les replies enfilés gardent l'icône › (c'est leur nature).
+- **Worklist mode "Toutes"** : inchangé.
+
 ## [1.30.0.7] — 2026-07-02 (worklist mode — "Toutes" = liste de travail)
 
 ### Contexte

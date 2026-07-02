@@ -213,6 +213,13 @@ async def _fetch_mails(
         # Le threading était inopérant visuellement alors que la DB était OK.
         # MAINTENANT : 16 colonnes dans SELECT = 16 colonnes attendues par cols.
         "thread_id",
+        # v1.30.0.8 — `in_reply_to` et `message_id` AJOUTÉS à la projection.
+        # Utilisés par `_group_into_threads()` pour détecter les "orphelins-replies"
+        # (mail avec in_reply_to pointant vers un message_id absent de notre DB)
+        # et s'assurer qu'un tel mail ne soit JAMAIS promu parent d'un fil.
+        # 2 colonnes supplémentaires → 18 colonnes au total dans SELECT.
+        "in_reply_to",
+        "message_id",
     ]
 
     def _mask_sender(row_dict: dict) -> dict:
@@ -266,7 +273,10 @@ async def _fetch_mails(
         "m.status, m.priority, m.processed_at, m.body_preview, "
         "(SELECT COUNT(*) FROM email_attachment WHERE mail_processed_id = m.id) AS attachment_count, "
         "CASE WHEN IFNULL(LENGTH(m.ai_draft), 0) > 0 THEN 1 ELSE 0 END AS has_draft, "
-        "m.suggested_subject, m.thread_id "
+        "m.suggested_subject, m.thread_id, "
+        # v1.30.0.8 — colonnes threading brutes pour détecter les replies orphelins
+        # (mail avec in_reply_to pointant vers un message_id absent du système).
+        "m.in_reply_to, m.message_id "
         "FROM mail_processed m WHERE " + " AND ".join(hot_where) + " "
         f"ORDER BY {priority_order}, {col} {order} LIMIT ?"
     )
@@ -294,7 +304,8 @@ async def _fetch_mails(
         "m.status, m.priority, m.processed_at, m.body_preview, "
         "(SELECT COUNT(*) FROM email_attachment WHERE mail_processed_id = m.id) AS attachment_count, "
         "CASE WHEN IFNULL(LENGTH(m.ai_draft), 0) > 0 THEN 1 ELSE 0 END AS has_draft, "
-        "m.suggested_subject, m.thread_id "
+        "m.suggested_subject, m.thread_id, "
+        "m.in_reply_to, m.message_id "
         "FROM mail_processed m WHERE " + " AND ".join(other_where) + " "
         f"ORDER BY {priority_order}, {col} {order} LIMIT ?"
     )
@@ -344,6 +355,31 @@ def _looks_like_reply_subject(subject: str | None) -> bool:
     return bool(_REPLY_SUBJECT_PREFIX.match(subject))
 
 
+def _is_orphan_reply(mail: dict, known_message_ids: set[str], same_thread_message_ids: set[str]) -> bool:
+    """v1.30.0.8 — détecte un mail qui est une réponse dont le parent est absent
+    de NOTRE système (donc pas groupable avec un vrai premier mail).
+
+    Un mail est un "reply orphelin" si :
+    - `in_reply_to` est non-vide ET
+    - le message_id référencé n'est NI dans `known_message_ids` (la DB entière)
+      NI dans `same_thread_message_ids` (les autres mails du même thread).
+
+    Conséquence : ce mail ne peut PAS être "parent" d'un fil — il appartient
+    forcément à une conversation dont le premier mail n'est pas dans notre
+    base. Le parent légitime du fil = NULL (ou, faute de mieux, ce mail
+    lui-même, mais affiché SANS l'icône `›` — c'est le "premier mail connu").
+
+    Cas concret : un client répond à un mail envoyé par Daniel il y a 6 mois.
+    Le mail de Daniel n'est pas dans `mail_processed` (seuls les mails entrants
+    y sont). Le reply entrant a un `in_reply_to` pointant vers le Message-ID
+    de Daniel, qu'on ne trouve nulle part en DB → c'est un orphan reply.
+    """
+    in_reply_to = (mail.get("in_reply_to") or "").strip()
+    if not in_reply_to:
+        return False
+    return in_reply_to not in known_message_ids and in_reply_to not in same_thread_message_ids
+
+
 def _group_into_threads(
     mails: list[dict],
     all_thread_siblings: list[dict] | None = None,
@@ -365,11 +401,13 @@ def _group_into_threads(
           (typiquement un reply pending dont le parent est déjà traité).
         Chaque thread = {
             "thread_id": str,
-            "parent": dict (mail avec received_at min),
+            "parent": dict (mail avec received_at min OU premier mail non-orphelin),
             "replies": [dict, ...] (du + récent au + ancien),
             "reply_count": int,
             "last_received": str (ISO du mail le + récent),
-            "all_duplicate": bool (tous les mails du fil sont status=duplicate)
+            "all_duplicate": bool (tous les mails du fil sont status=duplicate),
+            "parent_is_orphan": bool (le parent est lui-même un reply orphelin — pas d'icône ›),
+            "all_orphans": bool (TOUS les mails du fil sont des replies orphelins)
         }
 
     Les mails sans thread_id (anciens, pré-v1.29.0) restent en 1-mail = 1-fil
@@ -381,6 +419,14 @@ def _group_into_threads(
     l'autre band — son parent est déjà traité par Daniel, il n'a plus rien
     à faire dans la hot band. Cf. CDAL "un sous mail ne peut pas être en
     premier il doit avoir un email parent !".
+
+    v1.30.0.8 — un mail avec `in_reply_to` pointant vers un message_id absent
+    de notre DB est un "reply orphelin" : son vrai parent n'est pas dans le
+    système. Il NE DOIT PAS être promu parent d'un fil. Si le fil a AU MOINS
+    UN mail non-orphelin, le parent = le plus ancien non-orphelin. Si TOUS les
+    mails du fil sont des replies orphelins, le parent = le plus ancien, mais
+    `parent_is_orphan=True` → rendu sans icône `›` ("premier mail connu" du fil,
+    pas un vrai parent de conversation).
     """
     threads_dict: dict[str, dict] = {}
     orphans: list[dict] = []
@@ -395,6 +441,17 @@ def _group_into_threads(
             if sib_tid:
                 siblings_by_tid.setdefault(sib_tid, []).append(sib)
 
+    # v1.30.0.8 — index des message_id connus dans `mails` + `all_thread_siblings`.
+    # Utilisé par `_is_orphan_reply()` pour décider si l'in_reply_to d'un mail
+    # pointe vers un VRAI parent dans le système ou vers un message externe
+    # (mail de Daniel envoyé depuis une autre boîte, jamais ingéré).
+    known_message_ids: set[str] = set()
+    for source in (mails, all_thread_siblings or []):
+        for m in source:
+            mid = (m.get("message_id") or "").strip()
+            if mid:
+                known_message_ids.add(mid)
+
     for mail in mails:
         tid = mail.get("thread_id") or ""
         if not tid:
@@ -407,6 +464,8 @@ def _group_into_threads(
                     "reply_count": 0,
                     "last_received": mail.get("received_at") or mail.get("processed_at") or "",
                     "all_duplicate": mail.get("status") == "duplicate",
+                    "parent_is_orphan": False,
+                    "all_orphans": False,
                 }
             )
             continue
@@ -418,6 +477,7 @@ def _group_into_threads(
                 "reply_count": 0,
                 "last_received": mail.get("received_at") or mail.get("processed_at") or "",
                 "all_duplicate": True,
+                "_all_known_message_ids": set(),  # v1.30.0.8 — pour détection intra-thread
             }
         else:
             t = threads_dict[tid]
@@ -439,8 +499,51 @@ def _group_into_threads(
             # last_received
             if (mail.get("received_at") or "") > t["last_received"]:
                 t["last_received"] = mail.get("received_at") or t["last_received"]
+        # v1.30.0.8 — accumule les message_id intra-thread
+        mid = (mail.get("message_id") or "").strip()
+        if mid:
+            threads_dict[tid]["_all_known_message_ids"].add(mid)
         if mail.get("status") != "duplicate":
             threads_dict[tid]["all_duplicate"] = False
+
+    # v1.30.0.8 — pour chaque fil, recalcule le parent en excluant les replies
+    # orphelins. Le parent = le mail le plus ancien du fil qui n'est PAS un
+    # orphan reply (a un in_reply_to qui pointe vers un mail absent du système).
+    # Cas 1 : au moins un mail non-orphelin dans le fil → parent = le plus
+    # ancien non-orphelin, les autres (orphelins ou non) sont en replies.
+    # Cas 2 : TOUS les mails du fil sont orphelins → parent = le plus ancien
+    # (c'est le "premier mail connu" du fil), `parent_is_orphan=True`,
+    # `all_orphans=True` → rendu sans icône `›` sur le parent.
+    for tid, t in threads_dict.items():
+        all_mails_in_thread = [t["parent"]] + t["replies"]
+        same_thread_msgids = t.get("_all_known_message_ids", set())
+        # Identifie les orphans et les non-orphans
+        non_orphans = [
+            m for m in all_mails_in_thread
+            if not _is_orphan_reply(m, known_message_ids, same_thread_msgids)
+        ]
+        if non_orphans:
+            # Le parent = le plus ancien non-orphan
+            new_parent = min(
+                non_orphans,
+                key=lambda m: m.get("received_at") or "",
+            )
+            # Reconstruit la liste des replies (tout le reste)
+            new_replies = [m for m in all_mails_in_thread if m["id"] != new_parent["id"]]
+            # Tri replies du + récent au + ancien
+            new_replies.sort(key=lambda m: m.get("received_at") or "", reverse=True)
+            t["parent"] = new_parent
+            t["replies"] = new_replies
+            t["reply_count"] = len(new_replies)
+            t["parent_is_orphan"] = False
+            t["all_orphans"] = False
+        else:
+            # TOUS les mails du fil sont des replies orphelins
+            # → le parent = le plus ancien (premier mail connu), pas d'icône ›
+            t["parent_is_orphan"] = True
+            t["all_orphans"] = True
+        # Nettoie la clé interne
+        t.pop("_all_known_message_ids", None)
 
     # v1.29.1.5 — si le parent d'un fil a un status non-pending (approved/rejected/sent/reviewed),
     # c'est qu'il a déjà été traité par Daniel. Le grouper avec une reply pending n'apporte
@@ -472,6 +575,8 @@ def _group_into_threads(
                         "reply_count": 0,
                         "last_received": r.get("received_at") or r.get("processed_at") or "",
                         "all_duplicate": r.get("status") == "duplicate",
+                        "parent_is_orphan": False,
+                        "all_orphans": False,
                     }
                 )
             # Le parent lui-même : s'il est dans le scope pending il reste orphelin,
