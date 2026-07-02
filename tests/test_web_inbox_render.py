@@ -859,9 +859,13 @@ def test_thread_grouping_returns_keep_and_move() -> None:
         + [r["id"] for t in keep for r in t.get("replies", [])]
     )
     assert keep_ids == [1, 2, 6], f"keep devrait contenir 1, 2, 6 mais a {keep_ids}"
-    # move = reply du thread B (parent approved = split) + orphelin Re:
+    # v1.30.0.11 — move = thread B éclaté (parent approved + son reply)
+    # + orphelin Re: (id=5). Avant, le parent approved (id=3) était droppé
+    # silencieusement (commentaire "n'est pas dans la liste d'origine" FAUX
+    # pour les parents qui SONT dans la liste avec un statut non-pending).
+    # Maintenant, on déplace aussi le parent approved → on l'ajoute en move.
     move_ids = sorted([t["parent"]["id"] for t in move])
-    assert move_ids == [4, 5], f"move devrait contenir 4, 5 mais a {move_ids}"
+    assert move_ids == [3, 4, 5], f"move devrait contenir 3, 4, 5 mais a {move_ids}"
 
 
 def test_thread_grouping_cross_band_move() -> None:
@@ -1124,20 +1128,15 @@ def test_orphan_reply_helper_basic() -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# v1.30.0.7 — Mode worklist : onglet "Toutes" = liste de travail de Daniel.
-#
-# Avant : "Toutes" affichait ~200 lignes mélangées (newsletter, spam, autre,
-# doublons, factures, etc.). Daniel devait scroller dans le bruit pour trouver
-# ses 23 demande_client pending.
-#
-# Maintenant : "Toutes" = worklist = UNIQUEMENT la hot band
-# (demande_client + urgent + pending), sans les doublons, sans la bande
-# OTHER. Les autres onglets (catégorie explicite) gardent le comportement
-# 2 bandes actuel (hot + other + move-to-other).
-#
-# Critère de "parfait" CDAL : "Toutes" affiche ≤ 30 lignes, toutes = vrai
-# demande_client ou urgent pending. Pas de doublons, pas de newsletters,
-# pas de factures, pas de spam dans "Toutes".
+# v1.30.0.11 — Rollback du worklist mode.
+# Avant (v1.30.0.7) : "Toutes" affichait UNIQUEMENT la hot band (3 vrais mails).
+# Maintenant : "Toutes" affiche TOUS les mails, répartis en 2 bandes :
+#   - hot (verte) : demande_client + urgent + pending
+#   - other (grise) : tout le reste (newsletter, spam, facture, autre, doublons,
+#     traités, replies orphelines, mails internes, etc.)
+# Le tri `priority_order` garde les demande_client pending en tête de la hot
+# band, mais aucune catégorie ni aucun statut n'est masqué.
+# C'est le comportement d'avant v1.30.0.7.
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -1434,96 +1433,66 @@ def client_with_worklist_data(tmp_path, operator_user):
     return TestClient(app)
 
 
-def test_worklist_excludes_duplicates(client_with_worklist_data) -> None:
-    """v1.30.0.7 — Onglet "Toutes" = worklist : aucun mail avec status='duplicate'
-    ne doit apparaître (ni en hot ni en other, puisque other est supprimé).
+def test_toutes_tab_shows_all_mails_hot_band_first(client_with_worklist_data) -> None:
+    """v1.30.0.11 — Onglet "Toutes" = liste COMPLÈTE : tous les mails sont
+    visibles, répartis en 2 bandes (hot verte + other grise). Plus de masquage.
     """
     resp = client_with_worklist_data.get("/api/inbox")
     assert resp.status_code == 200
-    # id=306 (status='duplicate') ne doit PAS être visible dans le rendu
-    assert "/app/conversation/306" not in resp.text
-    # Son sujet non plus
-    assert "Demande de devis - doublon" not in resp.text
-
-
-def test_worklist_excludes_noise_senders(client_with_worklist_data) -> None:
-    """v1.30.0.7 — worklist : aucun mail avec sender @digitalhs.biz ou @cvfconsult
-    ne doit apparaître (geste de CDAL sur le bruit interne/comptable).
-    """
-    resp = client_with_worklist_data.get("/api/inbox")
-    assert resp.status_code == 200
-    # id=308 (cdal@digitalhs.biz) ne doit PAS être visible
-    assert "/app/conversation/308" not in resp.text
-    assert "Reunion interne demain" not in resp.text
-    # id=309 (cvfconsult.be) ne doit PAS être visible
-    assert "/app/conversation/309" not in resp.text
-    assert "BILAN 31/12/2025" not in resp.text
-
-
-def test_worklist_excludes_parasite_subjects(client_with_worklist_data) -> None:
-    """v1.30.0.7 — worklist : aucun mail avec sujet Pluxee / Reçu Apple / e-Box
-    ne doit apparaître (geste de CDAL sur les newsletters/confirmations classifiées
-    à tort en demande_client).
-    """
-    resp = client_with_worklist_data.get("/api/inbox")
-    assert resp.status_code == 200
-    # id=307 (Pluxee)
-    assert "/app/conversation/307" not in resp.text
-    assert "Pluxee Card" not in resp.text
-    # id=310 (Reçu Apple)
-    assert "/app/conversation/310" not in resp.text
-    assert "Re: Votre reçu Apple" not in resp.text
-    # id=311 (e-Box)
-    assert "/app/conversation/311" not in resp.text
-    assert "e-Box" not in resp.text
-
-
-def test_worklist_excludes_newsletter_spam_facture(client_with_worklist_data) -> None:
-    """v1.30.0.7 — worklist : aucune catégorie non-travail (newsletter, spam,
-    facture) ne doit apparaître dans "Toutes". Catégories accessibles via
-    les onglets dédiés.
-    """
-    resp = client_with_worklist_data.get("/api/inbox")
-    assert resp.status_code == 200
-    # id=303 (newsletter)
-    assert "/app/conversation/303" not in resp.text
-    # id=304 (spam)
-    assert "/app/conversation/304" not in resp.text
-    # id=305 (facture)
-    assert "/app/conversation/305" not in resp.text
-
-
-def test_worklist_keeps_real_demande_client_and_urgent(client_with_worklist_data) -> None:
-    """v1.30.0.7 — worklist : les 3 vrais mails de travail (2 demande_client
-    + 1 urgent) DOIVENT apparaître. C'est la finalité de la liste de travail.
-    """
-    resp = client_with_worklist_data.get("/api/inbox")
-    assert resp.status_code == 200
-    # id=300 (demande de filature)
+    # Les 3 vrais mails de travail (id 300, 301, 302) DOIVENT être visibles
     assert "/app/conversation/300" in resp.text
-    assert "Demande de filature urgente" in resp.text
-    # id=301 (recherche de personne)
     assert "/app/conversation/301" in resp.text
-    assert "Recherche de personne disparue" in resp.text
-    # id=302 (urgent)
     assert "/app/conversation/302" in resp.text
-    assert "URGENT - Vol de documents" in resp.text
+    # Les doublons sont désormais visibles (plus de masquage)
+    assert "/app/conversation/306" in resp.text
+    # Les newsletters/spam/factures sont visibles dans la bande other
+    assert "/app/conversation/303" in resp.text
+    assert "/app/conversation/304" in resp.text
+    assert "/app/conversation/305" in resp.text
 
 
-def test_worklist_count_is_short(client_with_worklist_data) -> None:
-    """v1.30.0.7 — worklist : la liste "Toutes" doit être COURTE (≤ 30 lignes).
-    Critère "parfait" CDAL : 23 demande_client + 1 urgent = 24 max.
+def test_toutes_tab_hot_band_isolates_demande_client_urgent_pending(
+    client_with_worklist_data,
+) -> None:
+    """v1.30.0.11 — La hot band ne contient QUE les demande_client + urgent
+    pending (avec garde-fou anti-bruit digitalhs/cvfconsult).
     """
     resp = client_with_worklist_data.get("/api/inbox")
     assert resp.status_code == 200
-    # Compter les liens /app/conversation/ dans le rendu
     import re
-    ids = re.findall(r"/app/conversation/(\d+)", resp.text)
-    unique_ids = set(int(i) for i in ids)
-    # On a inséré 3 vrais travail (id 300, 301, 302). Le worklist doit afficher
-    # EXACTEMENT ces 3 ids.
-    assert unique_ids == {300, 301, 302}, (
-        f"worklist devrait afficher {{300, 301, 302}} mais affiche {sorted(unique_ids)}"
+    sep_idx = resp.text.find("border-b-4 border-green-600")
+    assert sep_idx > 0, "Séparateur vert introuvable"
+    hot_section = resp.text[:sep_idx]
+    # id=300, 301 (demande_client pending) DOIVENT être en hot
+    assert "/app/conversation/300" in hot_section
+    assert "/app/conversation/301" in hot_section
+    # id=302 (urgent pending) DOIT être en hot
+    assert "/app/conversation/302" in hot_section
+    # id=303 (newsletter), id=304 (spam), id=305 (facture) NE DOIVENT PAS être en hot
+    assert "/app/conversation/303" not in hot_section
+    assert "/app/conversation/304" not in hot_section
+    assert "/app/conversation/305" not in hot_section
+    # id=306 (doublon demande_client) NE DOIT PAS être en hot (la hot = pending only)
+    assert "/app/conversation/306" not in hot_section
+    # id=308 (cdal@digitalhs.biz), id=309 (cvfconsult) NE DOIVENT PAS être en hot
+    # (geste anti-bruit préservé)
+    assert "/app/conversation/308" not in hot_section
+    assert "/app/conversation/309" not in hot_section
+
+
+def test_toutes_tab_count_is_full(client_with_worklist_data) -> None:
+    """v1.30.0.11 — Onglet "Toutes" affiche TOUS les 12 mails (3 hot + 9 other).
+    Plus aucun masquage (vs v1.30.0.7 qui n'en affichait que 3).
+    """
+    resp = client_with_worklist_data.get("/api/inbox")
+    assert resp.status_code == 200
+    import re
+    ids = set(int(i) for i in re.findall(r"/app/conversation/(\d+)", resp.text))
+    # Les 12 mails (id 300-311) doivent TOUS être visibles
+    expected = set(range(300, 312))
+    assert ids == expected, (
+        f"Onglet 'Toutes' devrait afficher tous les 12 mails (300-311) "
+        f"mais affiche {sorted(ids)}"
     )
 
 
@@ -1551,46 +1520,27 @@ def test_demandes_client_tab_keeps_all_status(client_with_worklist_data) -> None
     assert "/app/conversation/306" not in hot_section
 
 
-def test_worklist_disabled_when_category_filter_set(client_with_worklist_data) -> None:
-    """v1.30.0.7 — Le worklist est DÉSACTIVÉ dès qu'un filtre explicite est posé.
-    ?category=newsletter → le mode worklist est OFF, on a 2 bandes (hot+other),
-    comportement v1.30.0.4 préservé (cf. spec CDAL "les autres onglets
-    gardent leur comportement actuel").
-
-    Le test vérifie que ?category=newsletter N'EST PAS en worklist mode :
-    - le séparateur vert (hot/other separator) peut être absent car aucune
-      newsletter pending n'est en hot (la hot est demande_client+urgent+pending).
-    - les newsletters pending sont visibles dans le rendu.
+def test_category_filter_still_shows_other_band(client_with_worklist_data) -> None:
+    """v1.30.0.11 — Un filtre explicite (ex: ?category=newsletter) garde
+    le comportement 2 bandes : onglet catégorie = liste filtrée + other.
     """
     resp = client_with_worklist_data.get("/api/inbox?category=newsletter")
     assert resp.status_code == 200
     # id=303 (newsletter pending) DOIT être visible
     assert "/app/conversation/303" in resp.text
     assert "Newsletter mensuelle juin" in resp.text
-    # Le critère distinctif : on n'est PAS en worklist mode strict (3 mails).
-    # On est en mode "tab catégorie" → le rendu peut inclure d'autres mails
-    # dans la bande other. Le worklist mode strict exclut TOUT le reste.
-    # On vérifie qu'on a au moins autant de mails qu'en worklist (>= 1).
     import re
     ids = set(int(i) for i in re.findall(r"/app/conversation/(\d+)", resp.text))
-    # Newsletter pending (id=303) doit être dans la liste — confirme worklist OFF
-    assert 303 in ids
     # En worklist strict, on n'aurait QUE les demande_client+urgent pending.
-    # En mode tab catégorie, on a PLUS que ça. Vérifions qu'on a au moins
-    # les 9+ ids (newsletter+spam+facture+autre+e-Box en other band).
+    # En mode tab catégorie, on a PLUS que ça. On attend au moins 1 mail (la newsletter).
+    assert 303 in ids
     assert len(ids) >= 1, f"newsletter tab devrait afficher au moins la newsletter pending"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# v1.30.0.9 — Worklist "Toutes" masque la bande OTHER (le rendu n'inclut
-# que la hot band, pas les replies orphelines déplacées en other).
-#
-# Bug fix : un 1-mail thread avec subject "Re: X" (parent hors-scope) est
-# DÉPLACÉ dans other_threads par `_group_into_threads` (v1.30.0.5) — c'est
-# le bon comportement. Mais le rendu de l'API `/api/inbox` en worklist mode
-# (= onglet "Toutes") INCLUAIT other_threads → Daniel voyait 7 lignes
-# "Re: X" parasites en bas de la liste de travail. Maintenant, worklist
-# = on n'envoie QUE hot_threads au template.
+# v1.30.0.11 — Rollback v1.30.0.9 : les 1-mail threads "Re:" (orphelins,
+# parent hors-scope) sont désormais visibles dans la bande other de l'onglet
+# "Toutes". Plus de masquage, Daniel voit TOUS ses mails.
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -1719,10 +1669,12 @@ def client_with_worklist_replies(tmp_path, operator_user):
     return TestClient(app)
 
 
-def test_worklist_masks_other_band_with_replies(client_with_worklist_replies) -> None:
-    """v1.30.0.9 — Worklist "Toutes" : la bande OTHER est SUPPRIMÉE du rendu.
-    Les replies orphelines déplacées dans other_threads (par v1.30.0.5)
-    NE DOIVENT PAS apparaître dans la liste de travail.
+def test_toutes_tab_shows_orphan_replies_in_other_band(
+    client_with_worklist_replies,
+) -> None:
+    """v1.30.0.11 — Onglet "Toutes" : les replies orphelines (1-mail thread
+    avec in_reply_to absent du système) sont visibles dans la bande other.
+    Plus de masquage, Daniel voit tout.
     """
     resp = client_with_worklist_replies.get("/api/inbox")
     assert resp.status_code == 200
@@ -1731,17 +1683,19 @@ def test_worklist_masks_other_band_with_replies(client_with_worklist_replies) ->
     unique_ids = set(int(i) for i in ids)
     # Le vrai parent (id=400) DOIT être visible
     assert 400 in unique_ids
-    # Les 3 "Re:" orphelins (id=401, 402, 403) NE DOIVENT PAS être visibles
-    # dans le worklist (ils sont dans other_threads, masqués par le rendu worklist).
-    assert 401 not in unique_ids
-    assert 402 not in unique_ids
-    assert 403 not in unique_ids
+    # Les 3 "Re:" orphelins (id=401, 402, 403) DOIVENT être visibles
+    # (rollback v1.30.0.9 qui les masquait)
+    assert 401 in unique_ids
+    assert 402 in unique_ids
+    assert 403 in unique_ids
 
 
-def test_non_worklist_still_shows_other_band_with_replies(client_with_worklist_replies) -> None:
-    """v1.30.0.9 — Onglet Demandes client (?category=demande_client) garde
-    le comportement 2 bandes. Les "Re:" orphelins déplacés dans other
-    DOIVENT être visibles dans la bande other.
+def test_demandes_client_tab_still_shows_other_band_with_replies(
+    client_with_worklist_replies,
+) -> None:
+    """v1.30.0.11 — Onglet Demandes client (?category=demande_client) garde
+    le comportement 2 bandes. Les "Re:" orphelins DOIVENT être visibles
+    dans la bande other.
     """
     resp = client_with_worklist_replies.get("/api/inbox?category=demande_client")
     assert resp.status_code == 200
@@ -1756,28 +1710,28 @@ def test_non_worklist_still_shows_other_band_with_replies(client_with_worklist_r
     assert 403 in unique_ids
 
 
-def test_worklist_hides_orphan_in_reply_to(client_with_worklist_replies) -> None:
-    """v1.30.0.9 — Worklist "Toutes" : un 1-mail thread avec in_reply_to
-    orphelin (pointe vers un message_id absent du système) est déplacé
-    dans other_threads et donc masqué du worklist.
+def test_toutes_tab_shows_orphan_in_reply_to(client_with_worklist_replies) -> None:
+    """v1.30.0.11 — Les 1-mail threads avec in_reply_to orphelin sont
+    désormais visibles dans l'onglet "Toutes" (rollback v1.30.0.9).
     """
     resp = client_with_worklist_replies.get("/api/inbox")
     assert resp.status_code == 200
-    # Vérifier qu'aucun "Re: X" n'apparaît dans le rendu
-    import re
-    # Cherche les liens vers les mails Re: (id 401-403)
-    assert "/app/conversation/401" not in resp.text
-    assert "/app/conversation/402" not in resp.text
-    assert "/app/conversation/403" not in resp.text
-    # Et le sujet ne doit pas apparaître non plus
-    assert "Re: Demande de devis" not in resp.text
-    assert "Re: facture" not in resp.text
-    assert "Re: Demande initiale" not in resp.text
+    # Les 4 mails (id 400-403) doivent TOUS être visibles
+    assert "/app/conversation/400" in resp.text
+    assert "/app/conversation/401" in resp.text
+    assert "/app/conversation/402" in resp.text
+    assert "/app/conversation/403" in resp.text
+    # Les sujets "Re:" sont visibles
+    assert "Re: Demande de devis" in resp.text
+    assert "Re: facture" in resp.text
+    assert "Re: Demande initiale" in resp.text
 
 
-def test_orphan_in_reply_to_moved_to_other_in_grouping() -> None:
-    """v1.30.0.9 — `_group_into_threads` doit MOVE un 1-mail thread dont
+def test_orphan_in_reply_to_kept_in_grouping() -> None:
+    """v1.30.0.11 — `_group_into_threads` doit GARDER un 1-mail thread dont
     le parent a un in_reply_to orphelin (pointe vers un message_id absent).
+    Avant v1.30.0.9, ce mail était déplacé dans `move`. Avec le rollback
+    v1.30.0.11, il reste dans `keep` (Daniel veut voir tous ses mails).
     """
     from app.web.app_routes import _group_into_threads
 
@@ -1803,12 +1757,11 @@ def test_orphan_in_reply_to_moved_to_other_in_grouping() -> None:
         },
     ]
     keep, move = _group_into_threads(mails)
-    # Le parent (id=1) reste en keep
-    keep_ids = [t["parent"]["id"] for t in keep]
-    assert keep_ids == [1]
-    # Le 1-mail thread avec in_reply_to orphelin (id=2) doit être dans move
-    move_ids = [t["parent"]["id"] for t in move]
-    assert move_ids == [2]
+    # Les 2 parents restent en keep (rollback v1.30.0.9)
+    keep_ids = sorted([t["parent"]["id"] for t in keep])
+    assert keep_ids == [1, 2]
+    # Aucun move (comportement d'avant v1.30.0.9)
+    assert move == []
 
 
 def test_known_in_reply_to_keeps_in_keep() -> None:

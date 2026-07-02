@@ -1,5 +1,28 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.30.0.11] — 2026-07-02 (fix(inbox) : restore all emails in Toutes tab — rollback worklist mask)
+
+### Contexte
+- CDAL a perdu patience avec le mode worklist (introduit v1.30.0.7, durci v1.30.0.8/.9) qui masquait la bande OTHER dans l'onglet "Toutes" — Daniel ne voyait que les 5-8 demande_client pending, sans accès à ses replies, traités, doublons, newsletters, etc.
+- Comportement attendu (avant v1.30.0.7) : "Toutes" = liste COMPLÈTE avec hot band verte (demande_client+urgent pending) en haut + other band grise (TOUT LE RESTE) en dessous. Aucun masquage.
+
+### Fixé
+- **`app/web/app_routes.py`** :
+  - `app_index()` : suppression du `worklist: bool = False` et de la branche `if worklist: other_threads = []`. La bande OTHER est désormais TOUJOURS affichée.
+  - `app_index()` : suppression de la double-grouping (v1.30.0.5) sur `other_mails`. On ne groupe plus que `hot_mails` (passe `other_mails` comme `all_thread_siblings` pour les cross-band moves). `other_mails` est converti en 1-mail threads (sans grouping) pour éviter que des "Re:" 1-mail threads soient déplacés dans `hot_move`.
+  - `_group_into_threads()` (rollback v1.30.0.9) : suppression de la 2e passe qui déplaçait les 1-mail threads avec `in_reply_to` orphelin ou sujet "Re:" dans `final_move`. Tout reste dans la liste principale. Daniel veut voir TOUS ses mails.
+  - `_group_into_threads()` (fix bug) : le parent déjà traité (status=approved/rejected/sent/duplicate) était droppé silencieusement (commentaire "n'est pas dans la liste d'origine" était FAUX pour les parents qui SONT dans la liste avec un statut non-pending, ex: status='duplicate' qui passe le WHERE `pending OR NULL` puis est exclu du hot et tombe dans other). MAINTENANT, on ajoute le parent lui-même en `final_move` pour qu'il apparaisse dans l'autre band.
+  - `_fetch_mails()` : suppression du `worklist: bool = False` et de la branche `if worklist: return hot_mails, []`. La fonction retourne toujours (hot, other) avec TOUT.
+- **`app/web/api.py`** : changements symétriques (`inbox_partial()` et `_fetch_mails_partial()`).
+- **`tests/test_web_inbox_render.py`** : refonte des tests worklist (v1.30.0.7) pour valider le nouveau comportement — "Toutes" affiche TOUS les mails (3 hot + 9 other = 12 mails dans le fixture).
+- **`app/_version.py`** : bump 1.30.0.10 → 1.30.0.11.
+
+### Comportement
+- Onglet "Toutes" = liste COMPLÈTE : 2 bandes (hot verte + other grise), AUCUN masquage.
+- Onglets par catégorie (Demandes client, Newsletters, etc.) = comportement préservé (filtre par catégorie + 2 bandes).
+- Garde-fous anti-bruit de la hot band (Pluxee, Reçu Apple, e-Box, @digitalhs.biz, @cvfconsult) sont conservés — Daniel ne voit toujours pas de newsletters classifiées à tort en demande_client.
+- 32 tests inbox verts.
+
 ## [1.30.0.10] — 2026-07-02 (CSS inbox : colonnes 8 tiennent dans 1280px viewport)
 
 ### Contexte

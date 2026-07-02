@@ -164,19 +164,15 @@ async def _fetch_mails_partial(
     sort_col: str = "date",
     sort_order: str = "desc",
     limit: int = 200,
-    # v1.30.0.7 — worklist mode = "Toutes" tab = liste de travail de Daniel.
-    # Cohérence stricte avec `_fetch_mails` (app_routes.py). Si /app/ supprime
-    # la bande OTHER en worklist, /api/inbox doit faire pareil (sinon le
-    # refresh HTMX réinjecte le bruit). Cf. CDAL "trop de bruit dans l'inbox".
-    worklist: bool = False,
 ) -> tuple[list[dict], list[dict]]:
-    """Retourne (hot_mails, other_mails). En worklist, other_mails=[] et
-    les doublons sont exclus du hot."""
+    """Retourne (hot_mails, other_mails).
+
+    hot_mails = demande_client + urgent + pending (toujours en haut).
+    other_mails = tout le reste (toutes catégories, statuts, replies, doublons,
+    traités, etc.) — rien n'est masqué.
+    """
     where = ["processed_at >= ?"]
     params = [_CUTOFF_DATE]
-    # v1.30.0.7 — worklist : exclure les doublons du SELECT racine (cf. app_routes).
-    if worklist:
-        where.append("(status IS NULL OR status != 'duplicate')")
     if boxes is not None:
         if boxes:
             placeholders = ",".join("?" for _ in boxes)
@@ -309,10 +305,7 @@ async def _fetch_mails_partial(
         other_rows = await cursor.fetchall()
     other_mails = [_mask_sender(dict(zip(cols, row, strict=True))) for row in other_rows]
 
-    # v1.30.0.7 — worklist : on supprime la bande OTHER (cf. app_routes._fetch_mails).
-    if worklist:
-        return hot_mails, []
-
+    # v1.30.0.11 — rollback du mode worklist : on retourne hot + other.
     return hot_mails, other_mails
 
 
@@ -335,13 +328,9 @@ async def inbox_partial(
     q = request.query_params.get("q") or None
     sort_col = request.query_params.get("sort") or "date"
     sort_order = request.query_params.get("order") or "desc"
-    # v1.30.0.7 — worklist = "Toutes" tab = liste de travail de Daniel.
-    # worklist ON si aucun filtre explicite catégorie/priorité/statut.
-    worklist = category is None and priority is None and status is None
-
+    # v1.30.0.11 — rollback du worklist mode. Plus de masquage de other_threads.
     hot_mails, other_mails = await _fetch_mails_partial(
         db, boxes, category, status, priority, q, sort_col, sort_order,
-        worklist=worklist,
     )
     # v1.29.0 — vue API = toujours flat (l'API sert les mises à jour HTMX
     # de l'inbox cockpit, on garde 1 ligne = 1 mail pour la perf et la
@@ -356,14 +345,22 @@ async def inbox_partial(
     from app.web.app_routes import _group_into_threads
 
     hot_keep, hot_move = _group_into_threads(hot_mails, all_thread_siblings=other_mails)
-    other_keep, _other_move = _group_into_threads(other_mails, all_thread_siblings=hot_mails)
     hot_threads = hot_keep
-    other_threads = other_keep + hot_move
-    # v1.30.0.9 — worklist mode = "Toutes" tab. On SUPPRIME la bande OTHER
-    # du rendu API (cf. app_routes.app_index pour le détail). Les autres
-    # onglets (catégorie explicite) gardent le comportement 2 bandes.
-    if worklist:
-        other_threads = []
+    # v1.30.0.11 — on ne groupe PAS other_mails (rollback). Conversion
+    # mails → 1-mail threads pour le rendu (le template attend des threads).
+    other_threads = [
+        {
+            "thread_id": f"orphan::{m['id']}",
+            "parent": m,
+            "replies": [],
+            "reply_count": 0,
+            "last_received": m.get("received_at") or m.get("processed_at") or "",
+            "all_duplicate": m.get("status") == "duplicate",
+            "parent_is_orphan": False,
+            "all_orphans": False,
+        }
+        for m in other_mails
+    ] + hot_move
     mailboxes = get_settings().mailboxes()
     return templates.TemplateResponse(
         request,

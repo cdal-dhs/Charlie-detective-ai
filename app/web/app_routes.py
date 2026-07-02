@@ -113,31 +113,15 @@ async def _fetch_mails(
     # les 662 mails actuels + la croissance. Le proper fix (grouping
     # en SQL natif) est tracké en v1.29.1.
     limit: int = 1000,
-    # v1.30.0.7 — worklist mode = "Toutes" tab = liste de travail de Daniel.
-    # Quand True :
-    #   1. Exclut les doublons (status='duplicate') — JAMAIS visibles dans la
-    #      liste de travail (CDAL : "trop de bruit avec les doublons").
-    #   2. Supprime la bande OTHER → l'inbox affiche UNIQUEMENT la hot band
-    #      (demande_client + urgent, pending). Les autres onglets (catégorie
-    #      explicite) gardent le comportement 2 bandes actuel.
-    # Déclenché par /app/ et /api/inbox quand category=NULL AND priority=NULL
-    # AND status=NULL (= "Toutes" tab = liste de travail par défaut).
-    worklist: bool = False,
 ) -> tuple[list[dict], list[dict]]:
     """Retourne (hot_mails, other_mails).
 
-    hot_mails = demande_client + high + pending (toujours en haut).
-    other_mails = le reste, avec le même tri intelligent.
-    En mode worklist, other_mails=[] et les doublons sont exclus du hot.
+    hot_mails = demande_client + urgent + pending (toujours en haut).
+    other_mails = tout le reste (toutes catégories, statuts, replies, doublons,
+    traités, etc.) — rien n'est masqué, tout est visible.
     """
     where = ["processed_at >= ?"]
     params = [_CUTOFF_DATE]
-    # v1.30.0.7 — worklist : exclure les doublons du SELECT racine.
-    # On l'ajoute à `where` (la base) plutôt qu'à hot_where pour que le NOT
-    # dans other_where (calculé depuis hot_where) ne les ré-inclue pas dans
-    # other. Cf. cas prod : 53 doublons en DB, invisibles en worklist.
-    if worklist:
-        where.append("(status IS NULL OR status != 'duplicate')")
     if boxes is not None:
         if boxes:
             placeholders = ",".join("?" for _ in boxes)
@@ -319,16 +303,11 @@ async def _fetch_mails(
         other_rows = await cursor.fetchall()
     other_mails = [_mask_sender(dict(zip(cols, row, strict=True))) for row in other_rows]
 
-    # v1.30.0.7 — worklist : on SUPPRIME la bande OTHER. Le but du mode
-    # worklist (= onglet "Toutes") est d'afficher UNIQUEMENT la hot band :
-    # Daniel voit sa liste de travail, pas un fourre-tout de 178 lignes
-    # (98 autre + 19 facture + 26 phishing + 10 rappel + 25 spam pending).
-    # Le SELECT other est tout de même exécuté pour préserver le contrat
-    # de la fonction (et permettre le cross-band move-to-other plus loin),
-    # mais on retourne une liste vide pour le rendu.
-    if worklist:
-        return hot_mails, []
-
+    # v1.30.0.11 — rollback du mode worklist : on n'affiche plus UNIQUEMENT
+    # la hot band dans "Toutes". Tout est visible (hot + other) pour donner
+    # à Daniel une vision complète de sa boîte. Le tri `priority_order` garde
+    # les demande_client pending en tête, mais aucune catégorie ni aucun statut
+    # n'est masqué — c'est le comportement d'avant v1.30.0.7.
     return hot_mails, other_mails
 
 # v1.30.0.5 — heuristique "ce mail ressemble à une réponse (reply)".
@@ -579,8 +558,16 @@ def _group_into_threads(
                         "all_orphans": False,
                     }
                 )
-            # Le parent lui-même : s'il est dans le scope pending il reste orphelin,
-            # sinon il n'est pas dans la liste d'origine (déjà filtré par _fetch_mails).
+            # v1.30.0.11 — le parent lui-même est aussi déplacé. Avant, le
+            # commentaire disait "il n'est pas dans la liste d'origine" — c'est
+            # vrai pour les parents qui n'ont pas le statut pending (déjà filtrés
+            # par _fetch_mails), mais FAUX pour les parents qui SONT dans la
+            # liste d'origine avec un statut non-pending (ex: status='duplicate'
+            # qui passe par le WHERE `pending OR NULL` puis est exclu du hot et
+            # tombe dans other). Sans ce fix, on perdait le mail 306 (doublon
+            # dans le test worklist). On l'ajoute en `final_move` pour qu'il
+            # apparaisse dans l'autre band (other).
+            final_move.append(t)
         else:
             # Parent pending (ou thread à 1 seul mail pending) : on le garde
             # MAIS on vérifie aussi qu'il ne s'agit pas d'un reply orphelin.
@@ -608,65 +595,15 @@ def _group_into_threads(
             else:
                 final_keep.append(t)
 
-    # v1.30.0.9 — GARDE-FOU ANTI-"Re: ORPHELIN" PROMU PARENT.
-    # Cas 1 (couvert par v1.30.0.5) : 1-mail thread, sujet commence par "Re:",
-    # parent absent de `mails` ET de `all_thread_siblings` → MOVE.
-    # Cas 2 (couvert par v1.30.0.5) : 1-mail thread, sujet commence par "Re:",
-    # pas de thread_id (orphelin pur) → MOVE.
-    # Cas 3 (NOUVEAU v1.30.0.9) : 1-mail thread, le mail a `in_reply_to` qui
-    # pointe vers un message_id ABSENT du système (true orphan-reply) →
-    # MOVE. AVANT : il était promu parent d'un 1-mail thread et affiché en
-    # première ligne de la hot band avec un `›` fantôme (ou sans › si
-    # parent_is_orphan=True). MAINTENANT : il DÉMÉNAGE dans l'autre band
-    # (son parent n'est nulle part dans le système, c'est du bruit pour
-    # Daniel — le parent est soit hors-système, soit supprimé, soit
-    # antérieur au cutoff 2026-05-20).
-    # Cas 4 (NOUVEAU v1.30.0.9) : 1-mail thread, le mail a un subject "Re: ..."
-    # mais AUCUN in_reply_to (le client n'a pas propagé l'header, ou c'est
-    # un forwarder WP qui l'a perdu) ET le parent n'est pas dans le set
-    # groupable → MOVE. C'est le cas de #672 (kirara.olivier) où 6 mails
-    # "Re: X" tombent dans 6 buckets différents (subjects reformulés) →
-    # chacun est un 1-mail thread "parent" en hot band alors qu'ils sont
-    # tous des replies au mail original id=672.
-    #
-    # Tous ces cas correspondent au critère CDAL : "un sous mail ne peut pas
-    # être en premier il doit avoir un email parent !". Un fil sans parent
-    # connu ne doit jamais apparaître en première ligne de la hot band.
-    # ─────────────────────────────────────────────────────────────────────
-    # NOTE : pour les threads avec replies (reply_count > 0), on GARDE le
-    # comportement actuel : le parent (vrai premier mail, non-orphan) reste
-    # en hot, les replies s'enfilent en dessous. Le MOVE ne s'applique
-    # qu'aux fils SANS parent connu en DB (1-mail thread, et le mail est
-    # soit explicitement "Re:" en sujet, soit a un in_reply_to orphelin).
-    final_keep_2: list[dict] = []
-    final_move_2: list[dict] = list(final_move)
-    for t in final_keep:
-        parent = t["parent"]
-        # Si le fil a des replies (1 parent + N replies), le parent est
-        # déjà le plus ancien non-orphelin (cf. boucle de re-parenting
-        # v1.30.0.8). On le GARDE, replies enfilées.
-        if t["reply_count"] > 0:
-            final_keep_2.append(t)
-            continue
-        # 1-mail thread (replies=[]). On check si le parent est un vrai
-        # premier mail ou un reply orphelin.
-        in_reply_to = (parent.get("in_reply_to") or "").strip()
-        has_unknown_in_reply_to = bool(in_reply_to) and in_reply_to not in known_message_ids
-        looks_like_reply = _looks_like_reply_subject(parent.get("subject"))
-        if has_unknown_in_reply_to or looks_like_reply:
-            # Reply orphelin dans un 1-mail thread → MOVE dans other.
-            # On force parent_is_orphan=True pour la sémantique (rendu sans ›).
-            t = dict(t)  # shallow copy
-            t["parent_is_orphan"] = True
-            t["all_orphans"] = True
-            final_move_2.append(t)
-        else:
-            final_keep_2.append(t)
-
+    # v1.30.0.11 — rollback v1.30.0.9 : on NE déplace plus les 1-mail threads
+    # avec in_reply_to orphelin (ou sujet "Re:") dans other. Tout reste dans
+    # la liste principale (hot ou other selon la catégorisation SQL). Daniel
+    # veut voir TOUS ses mails, y compris les replies orphelines, dans la
+    # bande grise. C'est le comportement d'avant v1.30.0.7.
     # Tri global par date du mail le plus récent DESC (chaque liste séparément)
-    final_keep_2.sort(key=lambda t: t["last_received"], reverse=True)
-    final_move_2.sort(key=lambda t: t["last_received"], reverse=True)
-    return final_keep_2, final_move_2
+    final_keep.sort(key=lambda t: t["last_received"], reverse=True)
+    final_move.sort(key=lambda t: t["last_received"], reverse=True)
+    return final_keep, final_move
 
 
 async def _fetch_mailboxes() -> list[MailboxConfig]:
@@ -758,15 +695,11 @@ async def app_index(
     sort_col = request.query_params.get("sort") or "date"
     sort_order = request.query_params.get("order") or "desc"
     # v1.30.0.6 — le paramètre `view` est IGNORÉ. Seule la vue Fils existe désormais.
-    # v1.30.0.7 — worklist mode = "Toutes" tab = liste de travail de Daniel.
-    # worklist = (onglet "Toutes" = aucun filtre explicite catégorie/priorité/statut).
-    # Si l'utilisateur sélectionne un onglet de catégorie (Demandes client, Newsletters,
-    # etc.) OU un statut, on garde le comportement 2 bandes actuel.
-    worklist = category is None and priority is None and status is None
+    # v1.30.0.11 — rollback du worklist mode : "Toutes" affiche TOUS les mails
+    # répartis en 2 bandes (hot verte + other grise). Plus de masquage.
 
     hot_mails, other_mails = await _fetch_mails(
         db, boxes, category, status, priority, q, sort_col, sort_order,
-        worklist=worklist,
     )
 
     # v1.30.0.6 — vue unique = threads. CDAL ne veut QUE des fils de discussion.
@@ -774,24 +707,35 @@ async def app_index(
     # sont supprimées : si l'URL contient ?view=flat ou ?view=duplicates, on
     # force `view='threads'` (le param est ignoré silencieusement).
     view = "threads"
+    # v1.30.0.5 — on groupe les hot_mails en fils, en passant other_mails comme
+    # siblings pour détecter les cross-band moves (reply pending dont le parent
+    # est déjà traité dans other).
+    # v1.30.0.11 — on ne groupe PAS other_mails (rollback de la double-grouping).
+    # other_mails a déjà la bonne catégorisation (hot exclude clauses), on
+    # les passe tels quels pour éviter que des "Re:" 1-mail threads soient
+    # déplacés dans hot_move par le grouping. Tout doit rester visible.
     hot_keep, hot_move = _group_into_threads(hot_mails, all_thread_siblings=other_mails)
-    other_keep, _other_move = _group_into_threads(other_mails, all_thread_siblings=hot_mails)
     hot_threads = hot_keep
-    other_threads = other_keep + hot_move
+    # Convertit chaque mail other en fil 1-mail pour le rendu (le template
+    # attend des threads, pas des mails). Cf. `_group_into_threads` qui
+    # produit déjà ce format pour les orphans.
+    other_threads = [
+        {
+            "thread_id": f"orphan::{m['id']}",
+            "parent": m,
+            "replies": [],
+            "reply_count": 0,
+            "last_received": m.get("received_at") or m.get("processed_at") or "",
+            "all_duplicate": m.get("status") == "duplicate",
+            "parent_is_orphan": False,
+            "all_orphans": False,
+        }
+        for m in other_mails
+    ] + hot_move
 
-    # v1.30.0.9 — worklist mode = "Toutes" tab = liste de travail de Daniel.
-    # On SUPPRIME la bande OTHER du rendu. Cas concret : un 1-mail thread
-    # "Re: X" dont le parent n'est pas dans le set groupable est DÉPLACÉ
-    # dans other_threads par _group_into_threads (v1.30.0.5) — il NE DOIT
-    # PAS apparaître dans la worklist. La worklist = UNIQUEMENT la hot band.
-    # Les 7 lignes "Re: X" parasites du screenshot v1.30.0.8 (id=677, 678,
-    # 679, 684, 691, 696, 724) sont déplacées dans other_threads mais
-    # masquées ici — Daniel ne les voit plus dans "Toutes".
-    # Les autres onglets (catégorie explicite, statut, priorité) gardent
-    # le comportement 2 bandes (worklist=False → on n'entre pas dans ce
-    # bloc).
-    if worklist:
-        other_threads = []
+    # v1.30.0.11 — on n'écrase plus other_threads. Tout est visible : la hot
+    # band verte (demande_client+urgent pending) en haut, puis la other band
+    # grise (tout le reste : replies, traités, doublons, autres catégories).
 
     mailboxes = await _fetch_mailboxes()
     counts = await _fetch_counts(
