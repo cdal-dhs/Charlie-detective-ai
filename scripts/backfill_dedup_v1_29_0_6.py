@@ -65,8 +65,16 @@ def _parse_dt(s: str) -> datetime | None:
         return None
 
 
-def find_duplicates(db_path: Path) -> list[tuple[int, int, str, str]]:
-    """Retourne [(original_id, dup_id, sender_n, subject_n), ...]."""
+def find_duplicates(
+    db_path: Path, window_hours: int = 48
+) -> list[tuple[int, int, str, str]]:
+    """Retourne [(original_id, dup_id, sender_n, subject_n), ...].
+
+    v1.29.0.6 — applique la même logique que `is_logical_duplicate()` :
+    un doublon = (sender_n, subject_n) dans une fenêtre glissante [now - window_h].
+    C'est crucial pour ne pas marquer en 'duplicate' des e-Box / notifications
+    mensuelles (même sender+subject mais espacées de plusieurs mois).
+    """
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
@@ -87,14 +95,33 @@ def find_duplicates(db_path: Path) -> list[tuple[int, int, str, str]]:
     for (sender_n, subject_n), mails in groups.items():
         if len(mails) < 2:
             continue
-        # Tri par received_at ASC puis id ASC (le plus ancien = original)
-        mails_sorted = sorted(
-            mails,
-            key=lambda m: (_parse_dt(m["received_at"]) or datetime.min, m["id"]),
-        )
-        original = mails_sorted[0]
-        for m in mails_sorted[1:]:
-            dups.append((original["id"], m["id"], sender_n, subject_n))
+        # Parse received_at pour tous (une fois)
+        with_dt = []
+        for m in mails:
+            dt = _parse_dt(m["received_at"])
+            if dt is None:
+                # Date non parsable → skip (pas de base pour la fenêtre)
+                continue
+            with_dt.append((dt, m))
+        with_dt.sort(key=lambda x: x[0])
+
+        # Algorithme : on parcourt chronologiquement, on cherche l'original
+        # dans la fenêtre [dt - window_h, dt] pour chaque mail.
+        # Le 1er mail = toujours original (rien avant lui dans la fenêtre).
+        if not with_dt:
+            continue
+        original_dt, original = with_dt[0]
+        for dt, m in with_dt[1:]:
+            # Si le mail est dans la fenêtre [original_dt, original_dt + window_h]
+            # de l'original COURANT, c'est un doublon.
+            # Sinon : nouveau "original" (l'ancien n'est plus dans la fenêtre).
+            delta = (dt - original_dt).total_seconds() / 3600
+            if delta <= window_hours:
+                dups.append((original["id"], m["id"], sender_n, subject_n))
+            else:
+                # L'ancien original est sorti de la fenêtre → ce mail devient
+                # le nouvel original pour la prochaine comparaison
+                original_dt, original = dt, m
     return dups
 
 
