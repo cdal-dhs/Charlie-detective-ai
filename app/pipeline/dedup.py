@@ -67,6 +67,13 @@ def is_logical_duplicate(
     subject: str,
     received_at_iso: str,
     window_hours: int = 48,
+    # v1.29.0 — kwargs threading (signature étendue rétrocompat 100%).
+    # Pas encore utilisés dans la requête SQL (la dédup reste sur
+    # sender+subject sur fenêtre 48h), mais le poller les passe pour
+    # préparer une future v1.30 (cascade cross-fil par Message-ID).
+    thread_id: str | None = None,
+    message_id: str | None = None,
+    in_reply_to: str | None = None,
 ) -> tuple[bool, int | None]:
     """Détecte si un mail est un doublon logique d'un mail déjà persisté.
 

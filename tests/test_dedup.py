@@ -326,3 +326,48 @@ def test_dedup_falls_back_on_invalid_received_at(db_with_mail: Path) -> None:
     # Le parent est à -1h → encore dans la fenêtre de 48h
     assert is_dup is True
     assert orig == 1
+
+
+def test_is_logical_duplicate_accepts_v1_29_threading_kwargs(db_with_mail: Path) -> None:
+    """v1.29.0 — non-régression P0 : le poller passe 7 args positionnels
+    (4 anciens + 3 threading : thread_id, message_id, in_reply_to).
+
+    Bug 2026-07-01 08:31 : le poller plantait avec
+    `TypeError: is_logical_duplicate() takes from 4 to 5 positional arguments
+    but 7 were given` → 5 erreurs consécutives → alerte Resend envoyée à CDAL.
+
+    Cause racine : la signature v1.28.3 n'avait pas les kwargs threading.
+    Le plan v1.29.0 C.5 annonçait "rétrocompat 100%" mais l'extension
+    de signature n'a pas été faite dans `app/pipeline/dedup.py`. Le test
+    a été ajouté en TDD rouge mais sans vérifier le code prod (le poller
+    a été testé avec un mock MagicMock — pas avec un appel réel).
+    """
+    # Doit accepter les 7 args sans crasher, kwargs threading inutilisés
+    # (la dédup reste sur sender+subject sur fenêtre 48h — les kwargs
+    # threading sont juste là pour la future v1.30 cascade cross-fil).
+    is_dup, orig = is_logical_duplicate(
+        db_with_mail,
+        "test@example.com",       # sender (pas un doublon du parent "dpdhu")
+        "Test subject no-dup",
+        "2026-07-01T10:00:00",
+        48,                # window_hours
+        "thread::abc",     # thread_id (v1.29.0)
+        "<msg-id@host>",   # message_id (v1.29.0)
+        "<parent@host>",   # in_reply_to (v1.29.0)
+    )
+    assert is_dup is False
+    assert orig is None
+
+    # Variante : kwargs threading en mode keyword
+    is_dup2, orig2 = is_logical_duplicate(
+        db_with_mail,
+        "test@example.com",
+        "Test subject no-dup",
+        "2026-07-01T10:00:00",
+        window_hours=48,
+        thread_id="thread::abc",
+        message_id="<msg-id@host>",
+        in_reply_to="<parent@host>",
+    )
+    assert is_dup2 is False
+    assert orig2 is None
