@@ -165,6 +165,12 @@ async def _fetch_mails(
         "attachment_count",
         "ai_draft",
         "suggested_subject",
+        # v1.29.0.4 — `thread_id` AJOUTÉ à la projection.
+        # AVANT : absent du SELECT → `dict(zip(cols, row))` décalait tout
+        # d'1 cran → tous les mails finissaient en `orphans` (1 ligne = 1 fil).
+        # Le threading était inopérant visuellement alors que la DB était OK.
+        # MAINTENANT : 16 colonnes dans SELECT = 16 colonnes attendues par cols.
+        "thread_id",
     ]
 
     def _mask_sender(row_dict: dict) -> dict:
@@ -188,7 +194,7 @@ async def _fetch_mails(
         "SELECT m.id, m.mailbox_name, m.subject, m.sender, m.received_at, m.category, "
         "m.status, m.priority, m.processed_at, m.body_preview, "
         "(SELECT COUNT(*) FROM email_attachment WHERE mail_processed_id = m.id) AS attachment_count, "
-        "ai_draft, m.suggested_subject "
+        "ai_draft, m.suggested_subject, m.thread_id "
         "FROM mail_processed m WHERE " + " AND ".join(hot_where) + " "
         f"ORDER BY {col} {order} LIMIT ?"
     )
@@ -206,7 +212,7 @@ async def _fetch_mails(
         "SELECT m.id, m.mailbox_name, m.subject, m.sender, m.received_at, m.category, "
         "m.status, m.priority, m.processed_at, m.body_preview, "
         "(SELECT COUNT(*) FROM email_attachment WHERE mail_processed_id = m.id) AS attachment_count, "
-        "ai_draft, m.suggested_subject "
+        "ai_draft, m.suggested_subject, m.thread_id "
         "FROM mail_processed m WHERE " + " AND ".join(other_where) + " "
         f"ORDER BY (m.status = 'pending') DESC, (m.priority = 'high') DESC, {col} {order} LIMIT ?"
     )
