@@ -386,3 +386,103 @@ def test_is_logical_duplicate_accepts_v1_29_threading_kwargs(db_with_mail: Path)
     )
     assert is_dup3 is False
     assert orig3 is None
+
+
+# ── v1.29.0.6 — FIX BUG P0 : la dédup doit gérer le format RFC 2822 ────────
+# Le format IMAP standard est "Tue, 30 Jun 2026 09:44:20 +0200".
+# AVANT le fix, `datetime(received_at)` SQL retournait NULL sur ce format
+# (611/671 mails en prod), donc la dédup était inopérante.
+# APRÈS : parsing Python via `email.utils.parsedate_to_datetime()`.
+
+
+def test_dedup_detects_rfc2822_within_window(tmp_path: Path) -> None:
+    """Doublon RFC 2822 dans la fenêtre 48h = détecté (bug P0 v1.29.0.6)."""
+    db = tmp_path / "agent_state.db"
+    conn = sqlite3.connect(db)
+    conn.execute(
+        """CREATE TABLE mail_processed (
+            id INTEGER PRIMARY KEY,
+            sender TEXT, subject TEXT, received_at TEXT,
+            status TEXT, category TEXT
+        )"""
+    )
+    # Parent au format RFC 2822 (typique d'un poller IMAP)
+    parent_dt = datetime.utcnow() - timedelta(hours=1)
+    parent_rfc = parent_dt.strftime("%a, %d %b %Y %H:%M:%S +0000")
+    conn.execute(
+        "INSERT INTO mail_processed (id, sender, subject, received_at, status) "
+        "VALUES (1, 'etsvanhoutte@gmail.com', 'Ets Van Houtte', ?, 'pending')",
+        (parent_rfc,),
+    )
+    conn.commit()
+    conn.close()
+
+    # Doublon 1 seconde après (forwarder WP qui renvoie 2x)
+    new_dt = parent_dt + timedelta(seconds=1)
+    new_rfc = new_dt.strftime("%a, %d %b %Y %H:%M:%S +0000")
+    is_dup, orig = is_logical_duplicate(
+        db, "etsvanhoutte@gmail.com", "Ets Van Houtte", new_rfc
+    )
+    assert is_dup is True
+    assert orig == 1
+
+
+def test_dedup_passes_rfc2822_outside_window(tmp_path: Path) -> None:
+    """Doublon RFC 2822 HORS fenêtre 48h = pas détecté."""
+    db = tmp_path / "agent_state.db"
+    conn = sqlite3.connect(db)
+    conn.execute(
+        """CREATE TABLE mail_processed (
+            id INTEGER PRIMARY KEY,
+            sender TEXT, subject TEXT, received_at TEXT,
+            status TEXT, category TEXT
+        )"""
+    )
+    # Parent à 50h
+    old_dt = datetime.utcnow() - timedelta(hours=50)
+    old_rfc = old_dt.strftime("%a, %d %b %Y %H:%M:%S +0000")
+    conn.execute(
+        "INSERT INTO mail_processed (id, sender, subject, received_at, status) "
+        "VALUES (1, 'etsvanhoutte@gmail.com', 'Ets Van Houtte', ?, 'pending')",
+        (old_rfc,),
+    )
+    conn.commit()
+    conn.close()
+
+    new_dt = datetime.utcnow()
+    new_rfc = new_dt.strftime("%a, %d %b %Y %H:%M:%S +0000")
+    is_dup, orig = is_logical_duplicate(
+        db, "etsvanhoutte@gmail.com", "Ets Van Houtte", new_rfc
+    )
+    assert is_dup is False
+    assert orig is None
+
+
+def test_dedup_mixed_iso_and_rfc2822(tmp_path: Path) -> None:
+    """Mix ISO + RFC 2822 dans la même DB : dédup interopérable."""
+    db = tmp_path / "agent_state.db"
+    conn = sqlite3.connect(db)
+    conn.execute(
+        """CREATE TABLE mail_processed (
+            id INTEGER PRIMARY KEY,
+            sender TEXT, subject TEXT, received_at TEXT,
+            status TEXT, category TEXT
+        )"""
+    )
+    # Parent en ISO
+    iso_dt = (datetime.utcnow() - timedelta(hours=1)).isoformat()
+    conn.execute(
+        "INSERT INTO mail_processed (id, sender, subject, received_at, status) "
+        "VALUES (1, 'test@example.com', 'Mixed format', ?, 'pending')",
+        (iso_dt,),
+    )
+    conn.commit()
+    conn.close()
+
+    # Nouveau en RFC 2822
+    rfc_dt = (datetime.utcnow()).strftime("%a, %d %b %Y %H:%M:%S +0000")
+    is_dup, orig = is_logical_duplicate(
+        db, "test@example.com", "Mixed format", rfc_dt
+    )
+    assert is_dup is True
+    assert orig == 1

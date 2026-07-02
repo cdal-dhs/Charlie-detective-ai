@@ -13,6 +13,16 @@ nouveau mail et un reply d'un fil existant.
 
 Coût cible : < 5ms/mail, requête SQL unique avec index sur (sender, received_at).
 Pas de LLM — déterministe, testable, sûr.
+
+v1.29.0.6 — FIX BUG P0 : la requête SQL utilisait `datetime(received_at)`
+qui retourne `None` sur le format RFC 2822 (611/671 mails = 91%).
+Conséquence : `datetime(received_at) >= datetime(?)` → comparaison
+toujours NULL → la requête ne matche JAMAIS → 0 doublon détecté.
+
+Fix : on fetch TOUS les candidats (sender+subject match) en SQL, puis
+on parse received_at en PYTHON via `email.utils.parsedate_to_datetime()`
+qui gère RFC 2822 ET ISO 8601. Le filtre fenêtre glissante devient
+Python (`dt_received >= dt - window_hours`).
 """
 
 from __future__ import annotations
@@ -20,6 +30,7 @@ from __future__ import annotations
 import re
 import sqlite3
 from datetime import UTC, datetime, timedelta
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 # Strip préfixes Re:/Fwd:/AW: (insensible casse, multi-niveaux) + whitespace
@@ -104,37 +115,57 @@ def is_logical_duplicate(
     if not sender_n or not subject_n:
         return False, None
 
-    # Fenêtre glissante : received_at - window_hours à received_at
-    try:
-        if received_at_iso:
-            # RFC 2822 → ISO 8601 : on tente isoformat d'abord (déjà ISO),
-            # sinon fromisoformat avec gestion du Z suffix.
-            iso = received_at_iso.replace("Z", "+00:00")
-            dt = datetime.fromisoformat(iso)
-        else:
-            dt = datetime.now(UTC)
-    except (ValueError, AttributeError, TypeError):
-        # Fallback : pas de fenêtre exploitable → check sur les window_h passées
-        dt = datetime.now(UTC)
+    # v1.29.0.6 — parse received_at côté PYTHON (supporte RFC 2822 ET ISO 8601).
+    # AVANT : `datetime(received_at) >= datetime(?)` retournait NULL sur RFC 2822
+    # (611/671 mails en prod), donc la dédup était inopérante.
+    def _parse_dt(s: str) -> datetime | None:
+        if not s:
+            return None
+        # Essaie d'abord ISO 8601 (chemin rapide)
+        try:
+            iso = s.replace("Z", "+00:00")
+            return datetime.fromisoformat(iso)
+        except (ValueError, AttributeError, TypeError):
+            pass
+        # Fallback RFC 2822 (Tue, 30 Jun 2026 09:44:20 +0200)
+        try:
+            dt = parsedate_to_datetime(s)
+            # Normalise en UTC naive (les tests utilisent utcnow().isoformat() = naive)
+            if dt.tzinfo is not None:
+                dt = dt.astimezone(UTC).replace(tzinfo=None)
+            return dt
+        except (ValueError, TypeError, AttributeError):
+            return None
+
+    # dt = timestamp du mail entrant (point de référence pour la fenêtre)
+    dt = _parse_dt(received_at_iso) or datetime.now(UTC).replace(tzinfo=None)
     cutoff = dt - timedelta(hours=window_hours)
-    cutoff_iso = cutoff.isoformat()
 
     conn = sqlite3.connect(db_path)
     try:
-        # Index implicite via PK sur id. Pour 48h et sender connu : ≤ 100 lignes
-        # → full scan sender + filtre subject + filtre received_at, < 5ms en pratique.
-        row = conn.execute(
+        # v1.29.0.6 — on fetch TOUS les candidats (sender+subject match),
+        # SANS filtre date SQL. Le filtre fenêtre est fait en Python.
+        # Index implicite via PK sur id. Pour un sender connu : ≤ ~50 lignes
+        # typiquement (forwarders WP) → full scan acceptable.
+        rows = conn.execute(
             """
-            SELECT id FROM mail_processed
+            SELECT id, received_at FROM mail_processed
             WHERE LOWER(IFNULL(sender, '')) = ?
               AND LOWER(IFNULL(subject, '')) = ?
-              AND datetime(received_at) >= datetime(?)
               AND IFNULL(status, '') != 'duplicate'
             ORDER BY id ASC
-            LIMIT 1
             """,
-            (sender_n, subject_n, cutoff_iso),
-        ).fetchone()
-        return (row is not None, row[0] if row else None)
+            (sender_n, subject_n),
+        ).fetchall()
+
+        for cand_id, cand_received_at in rows:
+            cand_dt = _parse_dt(cand_received_at)
+            if cand_dt is None:
+                # Date non parsable → on accepte comme candidat (compat arrière)
+                return True, cand_id
+            # Fenêtre glissante : received_at ∈ [cutoff, dt] (= [now-window, now])
+            if cutoff <= cand_dt <= dt:
+                return True, cand_id
+        return False, None
     finally:
         conn.close()
