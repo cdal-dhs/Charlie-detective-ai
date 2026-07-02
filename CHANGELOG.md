@@ -1,5 +1,21 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.30.0] — 2026-07-02 (badge version sidebar — défense contre troncature visuelle)
+
+### Contexte
+- CDAL a signalé sur le cockpit que le badge version en sidebar gauche affichait `29.1` au lieu de `v1.29.1`. Après investigation : le HTML rendu et le `_version.py` étaient corrects (`v1.29.1` partout), mais le rendu visuel sur son viewport montrait la version tronquée. Hypothèse : troncature CSS / wrap / zoom navigateur.
+
+### Changé
+- **`app/web/templates/base.html` (l. 46-58)** : badge version sidebar renforcé
+  - `whitespace-nowrap` ajouté → empêche tout wrap du texte qui pourrait le faire disparaître dans certaines conditions (zoom fort, sidebar étroite, viewport mobile).
+  - Le préfixe `v` (gris foncé `text-gray-600`) et les chiffres (`text-gray-400 font-mono`) sont maintenant visuellement distincts → même si le `v` est peu contrasté, les chiffres `1.30.0` en `font-mono` restent lisibles.
+  - `text-gray-500` retiré du parent pour éviter le coupling avec le `v`.
+
+### Bump
+- `app/_version.py` : `1.29.1.6` → `1.30.0` (cosmétique seule, mais on marque la rupture par bump majeur).
+
+---
+
 ## [1.29.1] — 2026-07-02 (hourly check brouillon manquant + fix visuel replies cockpit)
 
 ### Contexte

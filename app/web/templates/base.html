@@ -45,10 +45,12 @@
             </nav>
             {# v1.29.0.4 — badge version INTÉGRÉ dans la sidebar gauche.
                Avant : fixed bottom-2 left-2 → caché SOUS la sidebar (256px de large).
-               Maintenant : DANS la sidebar, en bas, toujours visible. #}
+               Maintenant : DANS la sidebar, en bas, toujours visible.
+               v1.29.1.6 — whitespace-nowrap + couleur `v` distincte pour éviter
+               toute troncature visuelle (rapporté : affichait "29.1" sans le "v1."). #}
             <div class="px-4 py-2 border-t border-gray-800 select-none">
-                <div class="text-xs text-gray-500 text-center">
-                    v{{ app_version or version or '?.?.?' }}
+                <div class="text-xs text-center whitespace-nowrap">
+                    <span class="text-gray-600">v</span><span class="text-gray-400 font-mono">{{ (app_version or version or '?.?.?') }}</span>
                 </div>
             </div>
         </aside>

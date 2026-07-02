@@ -1,7 +1,7 @@
 # HANDOVER — Detective.be Agent IA (Charlie)
 
 > Document de transfert pour tout agent (Claude Sonnet/Opus 4.X, GPT, etc.).
-> **Dernière mise à jour**: 2026-07-02 · **Version courante**: v1.29.1 · **Déployé sur** : `detective.digitalhs.biz`
+> **Dernière mise à jour**: 2026-07-02 · **Version courante**: v1.30.0 · **Déployé sur** : `detective.digitalhs.biz`
 
 ---
 
@@ -783,7 +783,8 @@ fi
 
 ## Note pour le prochain agent
 
-État au **2026-07-02** : **v1.29.1** livrée (en attente de GO CDAL pour deploy prod) (**433 tests verts**). **Dernières versions** (sprint en cours) :
+État au **2026-07-02** : **v1.30.0** livrée (en attente de GO CDAL pour deploy prod) (**433 tests verts**). **Dernières versions** (sprint en cours) :
+- **v1.30.0 (2026-07-02)** — Badge version sidebar défense contre troncature visuelle. `app/web/templates/base.html` (l. 46-58) : `whitespace-nowrap` ajouté sur le badge pour empêcher tout wrap, `v` (gris foncé `text-gray-600`) et chiffres (`text-gray-400 font-mono`) visuellement distincts. Cosmétique pure, bump majeur par convention rupture.
 - **v1.29.1 (2026-07-02)** — Hourly check brouillon manquant + fix visuel replies cockpit. `app/workers/hourly_draft_check.py` (nouveau worker asyncio, tourne toutes les 60 min, 10 min après le boot) : query `category='demande_client' AND status='pending' AND IFNULL(ai_draft, '')='' AND draft_generated=0 AND processed_at >= now()-7j` (LIMIT 100), re-check idempotence pre-APPEND, `generate_draft()` max 3 retries (backoff 1s/2s/4s, timeout 60s/tentative), `append_draft()` header `X-Detective-Mail-Id` v1.25.22, UPDATE DB. 1 connexion IMAP par mailbox par cycle. Wiring dans `app/main.py` (task `hourly-draft-check`). `tests/test_hourly_draft_check.py` : 12 tests TDD. Fix visuel replies cockpit (`inbox_rows.html` l. 103-107) : flèche `↳` passe de `text-gray-500 text-[10px]` (invisible) à `text-purple-300 text-base font-bold` ; `border-l-4 border-l-purple-500/60` → `border-l-4 border-l-purple-400 bg-purple-500/10` (le "I" et le "_" parasites signalés par CDAL sur la 2ème ligne du tableau sont maintenant bien visibles). 5 régressions tests post-v1.29.0.7 corrigées (ajout colonnes threading v1.29.0 + `duplicate_of` v1.29.0.6 dans 2 fixtures de test web, mot-clé SQL `references` entouré de guillemets).
 - **v1.29.0 (2026-07-01)** — Fil de discussion cockpit inbox (groupement parent + replies). `app/pipeline/threading.py` (extract_dossier_name regex "Dossier Dupont" + accents + composé, derive_dossier_id_threading hiérarchie name > ref > hash, compute_thread_id `f"{dossier_id}::{sender}"`, pick_thread_subject = sujet du plus ancien). DB : 6 nouvelles colonnes (message_id, in_reply_to, references, dossier_id, thread_id, thread_subject) + index `idx_mail_processed_thread`. Poller enrichi : capture headers IMAP, dérive thread_id AVANT dédup, `_refresh_thread_subject()` propage le sujet canonique. Cockpit : `_group_into_threads()` + macro `thread_row()` (parent + replies indentées, border-l-4 sur 1er `<td>`, badge `↳`, line-through sur doublons) + tabs `?view=threads|flat|duplicates`. **420 tests verts** (19 nouveaux threading + 0 régression). Fix inbox 740/748/746 (3 mails `Dossier Dupont` = 1 fil).
 - **v1.28.3 (2026-07-01)** — Déduplication logique runtime (fix #719-#722 inbox polluée). `app/pipeline/dedup.py` (is_logical_duplicate, fenêtre 48h, normalize sujet + sender), poller enrichi avec 2 helpers (_persist_duplicate + injection avant quick_classify), backfill script dry-run/apply pour les 11 Apple doublons historiques.
