@@ -269,10 +269,12 @@ async def _fetch_mails(
     ]
     for pat in hot_exclude_reply_prefix_patterns:
         hot_exclude_clauses.append(f"LOWER(IFNULL(m.subject, '')) NOT LIKE ?")
+    # v1.31.0 — STRICT : demande_client + pending + high seulement.
+    # PAS de 'urgent', PAS de status NULL, PAS de Re:, PAS d'internes.
     hot_where = where + [
-        "(category = 'demande_client' OR category = 'urgent')",
-        "(status = 'pending' OR status IS NULL)",
-        "priority = 'high'",  # v1.31.0 — HOT = STRICTEMENT high priority
+        "category = 'demande_client'",
+        "status = 'pending'",
+        "priority = 'high'",
     ] + hot_exclude_clauses
     hot_sql = (
         "SELECT m.id, m.mailbox_name, m.subject, m.sender, m.received_at, m.category, "
