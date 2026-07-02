@@ -11,12 +11,12 @@
    Il faut appliquer la bordure latérale sur le PREMIER <td> de la ligne.
    Fond hot-row : bg-green-900/40 (ne pas descendre en dessous, sinon invisible sur fond sombre).
    Voir commit V1.8.1 et docs/RUNBOOK.md#hot-row-visuel.
-   Badge brouillon (v1.21.6) : pilule émeraude + ✉️ sur la colonne Boîte quand Charlie a généré un brouillon. #}
+   Badge brouillon (v1.21.6) : pilule émeraude sur la colonne Boîte quand Charlie a généré un brouillon. #}
 <tr class="border-b border-gray-800 hover:bg-gray-800/50 {% if is_hot %}bg-green-900/40{% elif is_danger %}bg-red-900/40{% endif %}">
   <td class="px-2 py-3 whitespace-nowrap w-12 text-center text-xs font-medium {% if has_draft %}border-l-4 border-l-emerald-400{% elif is_hot %}border-l-4 border-l-green-500{% elif is_danger %}border-l-4 border-l-red-500{% endif %}">
     {% if has_draft %}
-      <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-semibold ring-1 ring-emerald-500/40" title="Proposition de réponse générée par Charlie">
-        {{ box_short.get(m.mailbox_name, m.mailbox_name or '-') }}<span aria-hidden="true">✓</span>
+      <span class="inline-flex items-center px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-semibold ring-1 ring-emerald-500/40" title="Proposition de réponse générée par Charlie">
+        {{ box_short.get(m.mailbox_name, m.mailbox_name or '-') }}
       </span>
     {% else %}
       <span class="text-gray-400">{{ box_short.get(m.mailbox_name, m.mailbox_name or '-') }}</span>
@@ -95,7 +95,7 @@
    Si reply_count == 0 → équivalent à mail_row(parent). #}
 {% set parent = t.parent %}
 {% if t.reply_count > 0 %}
-  {# Parent custom avec badge "↓ N replies" à droite du sujet #}
+  {# Parent custom avec badge "N replies" à droite du sujet #}
   {% set effective_status = parent.status or 'pending' %}
   {% set is_hot = (parent.category == 'demande_client' and parent.priority == 'high' and effective_status == 'pending') %}
   {% set is_danger = (parent.category == 'phishing') %}
@@ -103,8 +103,8 @@
   <tr class="border-b border-gray-800 hover:bg-gray-800/50 {% if is_hot %}bg-green-900/40{% elif is_danger %}bg-red-900/40{% endif %}">
     <td class="px-2 py-3 whitespace-nowrap w-12 text-center text-xs font-medium border-l-4 {% if has_draft %}border-l-emerald-400{% elif is_hot %}border-l-green-500{% elif is_danger %}border-l-red-500{% endif %}">
       {% if has_draft %}
-        <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-semibold ring-1 ring-emerald-500/40" title="Proposition de réponse générée par Charlie">
-          {{ box_short.get(parent.mailbox_name, parent.mailbox_name or '-') }}<span aria-hidden="true">✉️</span>
+        <span class="inline-flex items-center px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-semibold ring-1 ring-emerald-500/40" title="Proposition de réponse générée par Charlie">
+          {{ box_short.get(parent.mailbox_name, parent.mailbox_name or '-') }}
         </span>
       {% else %}
         <span class="text-gray-400">{{ box_short.get(parent.mailbox_name, parent.mailbox_name or '-') }}</span>
@@ -116,9 +116,8 @@
         {# v1.29.1 — marqueur de fil à droite du sujet parent : "N replies" en pilule violette.
            C'est le marqueur visuel clé du fil : on voit d'un coup d'œil que c'est un thread
            avec N réponses en dessous, sans avoir à déplier. Style Gmail/Outlook. #}
-        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 font-semibold ring-1 ring-purple-500/40 text-xs whitespace-nowrap" title="{{ t.reply_count }} réponse(s) dans ce fil">
-          <span>{{ t.reply_count }}</span>
-          <span aria-hidden="true">›</span>
+        <span class="inline-flex items-center px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 font-semibold ring-1 ring-purple-500/40 text-xs whitespace-nowrap" title="{{ t.reply_count }} réponse(s) dans ce fil">
+          {{ t.reply_count }}
         </span>
       </div>
     </td>
@@ -189,7 +188,6 @@
   {% set is_dup = (reply.status == 'duplicate') %}
   <tr class="border-b border-gray-800/50 bg-gray-900/30 {% if is_dup %}opacity-60{% endif %}">
     <td class="px-2 py-2 whitespace-nowrap w-12 text-center text-xs font-medium border-l-4 border-l-purple-400 bg-purple-500/10">
-      <span class="text-purple-300 text-base font-bold" title="Reply du fil {{ t.thread_id[:12] }}…">›</span>
       <span class="text-gray-400 ml-1">{{ box_short.get(reply.mailbox_name, reply.mailbox_name or '-') }}</span>
     </td>
     <td class="px-3 py-2 max-w-md">
