@@ -653,8 +653,30 @@ def _group_into_threads(
                 final_keep.append(t)
 
     # Tri global par date du mail le plus récent DESC (chaque liste séparément)
-    final_keep.sort(key=lambda t: t["last_received"], reverse=True)
-    final_move.sort(key=lambda t: t["last_received"], reverse=True)
+    # v1.31.0 — FIX BUG : on utilisait `received_at` (RFC 2822 string) qui se
+    # triait lexicographiquement. Conséquence : "10 Jun 2026" passait AVANT
+    # "1 Jul 2026" car "10" > "1" en string. Le 540 (10 juin) apparaissait en
+    # haut de la hot band alors qu'il est le plus ancien.
+    # Fix : on normalise en ISO court YYYY-MM-DD HH:MM:SS via processed_at
+    # (qui est déjà stocké dans ce format) et on fallback sur received_at
+    # parsé en ISO. processed_at a priorité car il a un format constant.
+    from datetime import datetime
+    import email.utils
+    def _normalize_dt(mail: dict) -> str:
+        proc = mail.get("processed_at") or ""
+        if proc and len(proc) >= 19 and proc[0:4].isdigit():
+            return proc[:19].replace("T", " ")
+        recv = mail.get("received_at") or ""
+        if recv:
+            try:
+                parsed = email.utils.parsedate_to_datetime(recv)
+                if parsed:
+                    return parsed.strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                pass
+        return "0000-00-00 00:00:00"
+    final_keep.sort(key=lambda t: _normalize_dt(t["parent"]), reverse=True)
+    final_move.sort(key=lambda t: _normalize_dt(t["parent"]), reverse=True)
     return final_keep, final_move
 
 
