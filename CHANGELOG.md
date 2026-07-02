@@ -1,5 +1,48 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.30.0.4] — 2026-07-02 (garde-fou anti-bruit hot band — exclure newsletters et comptables)
+
+### Contexte
+- CDAL a signalé que la 1ère bande verte de l'inbox (hot = demande_client + urgent, toutes priorités, pending) contenait des lignes manifestement **non-demande_client** :
+  - Newsletter Pluxee Card (classifiée demande_client par erreur)
+  - Newsletter Reçu Apple (classifiée demande_client par erreur)
+  - Mails administratifs du comptable externe `cvfconsult.be` (bilan, versement anticipé, NCAE — classés demande_client par erreur)
+  - Mails internes `cdal@digitalhs.biz` (forward interne resté demande_client — le backfill v1.28.2 n'a pas reclassifié les anciens)
+- Le tri SQL était correct (catégorie=demande_client + status=pending). Le bug venait de la classification en amont trop large. Plutôt que d'attendre un backfill de reclassement (touche la DB, risque de régression), on ajoute un **filtre déterministe** dans la hot_where qui exclut ces expéditeurs/sujets manifestement pas client. **Réversible, sans toucher la classification upstream, sans effet de bord sur le préfiltre.**
+
+### Ajouté
+- **`app/web/app_routes.py:_fetch_mails()` et `app/web/api.py:_fetch_mails_partial()`** : filtre anti-bruit dans `hot_where` :
+  - `LOWER(IFNULL(m.sender, '')) NOT LIKE '%@digitalhs.biz'` (CDAL + staff cabinet)
+  - `LOWER(IFNULL(m.sender, '')) NOT LIKE '%@cvfconsult.be'` (comptable externe)
+  - `LOWER(IFNULL(m.subject, '')) NOT LIKE '%pluxee%'` (newsletter Pluxee Card)
+  - `LOWER(IFNULL(m.subject, '')) NOT LIKE '%reçu apple%'` (newsletter Apple Store)
+  - `LOWER(IFNULL(m.subject, '')) NOT LIKE '%recu apple%'` (variante sans accent)
+  - `LOWER(IFNULL(m.subject, '')) NOT LIKE '%e-box%'` (e-Box sécurité sociale)
+- Le filtre est **conservateur** : on n'exclut que les expéditeurs/sujets INCONTESTABLEMENT non-client. Une vraie demande client mal orthographiée passe toujours.
+- Cohérence stricte entre `app_routes._fetch_mails` (vue `/app/`) et `api._fetch_mails_partial` (vue `/api/inbox`) — sans ça, l'update HTMX réinjecte le bruit dans la hot.
+- L'`other_where` est construit comme `NOT(hot_where)` pour garantir l'inclusion des mails filtrés hors de la hot dans la 2ème bande (ils restent visibles, juste pas dans le flux "à traiter").
+
+### Tests
+- **`tests/test_web_inbox_render.py`** : 4 nouveaux tests TDD qui vérifient qu'un mail Pluxee, Reçu Apple, mail interne CDAL, et mail du comptable cvfconsult sont **exclus** de la hot band, même s'ils sont classifiés `demande_client+high+pending` en DB. Vérifie aussi qu'une vraie demande client (id=100) reste dans la hot.
+- 4 tests passent (RED → GREEN). Le 5e test pré-existant `test_inbox_rows_show_draft_badge` était déjà cassé avant ce fix (régression du v1.29.0.7 sur `has_draft` vs `ai_draft` — non liée à ce changement, à fixer séparément).
+
+## [1.30.0.2] — 2026-07-02 (tri prioritaire demande_client pending — TOUJOURS en premier)
+
+### Contexte
+- CDAL a signalé que les demande_client pending étaient dispersés dans l'inbox (surtout en vue Brute = flat). Daniel doit voir son backlog de travail en un coup d'œil, peu importe le filtre ou la vue.
+
+### Changé
+- **`app/web/app_routes.py:_fetch_mails()` et `app/web/api.py:_fetch_mails_partial()`** : ORDER BY commence par une CASE qui force la priorité :
+  - 0. `demande_client + high + pending` — **TOUJOURS en premier**
+  - 1. `demande_client + pending` (autre priorité)
+  - 2. `urgent + pending`
+  - 3. tout autre `pending`
+  - 4. non-pending (sent/approved/rejected)
+- Le tri utilisateur (date/sujet/etc.) s'applique en 2e niveau.
+- S'applique aux 2 vues (Fils et Brute) et aux 4 boîtes.
+
+---
+
 ## [1.30.0] — 2026-07-02 (badge version sidebar — défense contre troncature visuelle)
 
 ### Contexte

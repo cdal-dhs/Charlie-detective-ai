@@ -230,10 +230,28 @@ async def _fetch_mails_partial(
 
     # ── Requête 1 : HOT (demande_client OU urgent, toutes priorités, pending) ──
     # v1.30.0.3 — élargi : inclut TOUS les demande_client pending + urgent pending.
+    # v1.30.0.4 — garde-fou anti-bruit (mêmes règles que app_routes._fetch_mails).
+    # Cohérence stricte entre les 2 fonctions : si /app/ exclut un Pluxee de la hot,
+    # /api/inbox doit faire pareil. Sans ça, l'update HTMX réinjecte le bruit.
+    hot_exclude_sender_patterns = [
+        "%@digitalhs.biz",
+        "%@cvfconsult.be",
+    ]
+    hot_exclude_subject_patterns = [
+        "%pluxee%",
+        "%reçu apple%",
+        "%recu apple%",
+        "%e-box%",
+    ]
+    hot_exclude_clauses = []
+    for _ in hot_exclude_sender_patterns:
+        hot_exclude_clauses.append("LOWER(IFNULL(m.sender, '')) NOT LIKE ?")
+    for _ in hot_exclude_subject_patterns:
+        hot_exclude_clauses.append("LOWER(IFNULL(m.subject, '')) NOT LIKE ?")
     hot_where = where + [
         "(category = 'demande_client' OR category = 'urgent')",
         "(status = 'pending' OR status IS NULL)",
-    ]
+    ] + hot_exclude_clauses
     hot_sql = (
         "SELECT m.id, m.mailbox_name, m.subject, m.sender, m.received_at, m.category, "
         "m.status, m.priority, m.processed_at, m.body_preview, m.body, "
@@ -243,15 +261,18 @@ async def _fetch_mails_partial(
         f"ORDER BY {priority_order}, {col} {order} LIMIT ?"
     )
     hot_params = params.copy()
+    # v1.30.0.4 — params des filtres anti-bruit (cf. app_routes._fetch_mails).
+    for pat in hot_exclude_sender_patterns + hot_exclude_subject_patterns:
+        hot_params.append(pat.lower())
     hot_params.append(limit)
     async with db.execute(hot_sql, hot_params) as cursor:
         hot_rows = await cursor.fetchall()
     hot_mails = [_mask_sender(dict(zip(cols, row, strict=True))) for row in hot_rows]
 
     # ── Requête 2 : OTHER (tout sauf hot) ──
-    other_where = where + [
-        "NOT ((category = 'demande_client' OR category = 'urgent') AND (status = 'pending' OR status IS NULL))"
-    ]
+    # v1.30.0.4 — `other` = NOT(hot_where). hot_where inclut déjà cutoff+filtres user.
+    hot_where_expr = "(" + " AND ".join(hot_where) + ")"
+    other_where = [f"NOT {hot_where_expr}"]
     other_sql = (
         "SELECT m.id, m.mailbox_name, m.subject, m.sender, m.received_at, m.category, "
         "m.status, m.priority, m.processed_at, m.body_preview, m.body, "
@@ -261,6 +282,9 @@ async def _fetch_mails_partial(
         f"ORDER BY {priority_order}, {col} {order} LIMIT ?"
     )
     other_params = params.copy()
+    # v1.30.0.4 — autres params pour miroir de la hot.
+    for pat in hot_exclude_sender_patterns + hot_exclude_subject_patterns:
+        other_params.append(pat.lower())
     other_params.append(limit)
     async with db.execute(other_sql, other_params) as cursor:
         other_rows = await cursor.fetchall()

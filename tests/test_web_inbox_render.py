@@ -233,3 +233,257 @@ def test_inbox_rows_no_int_len_crash(client) -> None:
     # Si l'erreur se reproduisait, FastAPI retournerait du JSON detail 500, pas du HTML.
     assert "Internal Server Error" not in resp.text
     assert "TypeError" not in resp.text
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# v1.30.0.4 — Garde-fou anti-bruit dans la hot band.
+#
+# Avant : la hot band (1ère bande verte) affichait des mails mal classés
+# (Pluxee Card, Reçu Apple, bilans du comptable cvfconsult, mails internes
+# CDAL). Daniel voyait ces lignes dans son flux "à traiter" alors qu'elles
+# ne sont PAS des demandes client. Le tri SQL était correct ; c'est la
+# classification en amont qui était trop large. Plutôt que d'attendre un
+# backfill de reclassement, on ajoute un filtre déterministe dans la hot_where
+# qui exclut les expéditeurs/mots-clés manifestement pas client.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def inbox_with_noise(db_path_holder_with_noise):
+    """DB avec 1 vrai demande_client + 3 intrus manifestes dans la hot."""
+    raise NotImplementedError  # placeholder, le vrai setup est inline plus bas
+
+
+def _make_db_with_hot_noise(tmp_path: Path) -> Path:
+    """DB avec 1 vraie demande_client (hot) + 3 intrus à exclure de la hot."""
+    db = tmp_path / "agent_state.db"
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        """
+        CREATE TABLE mail_processed (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            imap_uid TEXT NOT NULL,
+            mailbox_name TEXT NOT NULL,
+            subject TEXT,
+            sender TEXT,
+            received_at TEXT,
+            category TEXT,
+            draft_generated INTEGER DEFAULT 0,
+            draft_sent_at TEXT,
+            processed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            status TEXT,
+            priority TEXT,
+            ai_draft TEXT,
+            human_draft TEXT,
+            reviewed_by INTEGER,
+            reviewed_at DATETIME,
+            sent_at DATETIME,
+            sent_by INTEGER,
+            body_preview TEXT,
+            body TEXT,
+            delivered_at TEXT,
+            suggested_subject TEXT,
+            message_id TEXT,
+            in_reply_to TEXT,
+            "references" TEXT,
+            dossier_id TEXT,
+            thread_id TEXT,
+            thread_subject TEXT,
+            duplicate_of INTEGER,
+            UNIQUE(imap_uid, mailbox_name)
+        );
+        CREATE TABLE audit_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            action TEXT,
+            resource_type TEXT,
+            resource_id TEXT,
+            details TEXT,
+            ip_address TEXT,
+            user_agent TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE email_attachment (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            mail_processed_id INTEGER NOT NULL,
+            filename TEXT,
+            storage_path TEXT,
+            size_bytes INTEGER,
+            extracted_text_preview TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        """
+    )
+    # 1) VRAIE demande client (doit rester dans la hot)
+    conn.execute(
+        "INSERT INTO mail_processed "
+        "(id, imap_uid, mailbox_name, subject, sender, received_at, category, "
+        " status, priority, body_preview, body, ai_draft, draft_generated, processed_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            100, "uid100", "detective_belgique",
+            "Demande de filature",
+            "client@example.com",
+            "2026-06-23 10:00:00",
+            "demande_client", "pending", "high",
+            "Bonjour, je voudrais une filature...",
+            "Bonjour, je voudrais une filature...",
+            "Cher client, voici...", 1,
+            "2026-06-23 10:01:00",
+        ),
+    )
+    # 2) Pluxee Card (newsletter mal classé demande_client)
+    conn.execute(
+        "INSERT INTO mail_processed "
+        "(id, imap_uid, mailbox_name, subject, sender, received_at, category, "
+        " status, priority, body_preview, body, ai_draft, draft_generated, processed_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            101, "uid101", "detective_belgique",
+            "Pluxee Card: Vos Pluxee Lunch sur votre compte Pluxee",
+            "noreply@pluxee.be",
+            "2026-06-23 09:00:00",
+            "demande_client", "pending", "high",
+            "#outlook html pluxee...",
+            "#outlook html pluxee...",
+            None, 0,
+            "2026-06-23 09:01:00",
+        ),
+    )
+    # 3) Reçu Apple (newsletter mal classé demande_client)
+    conn.execute(
+        "INSERT INTO mail_processed "
+        "(id, imap_uid, mailbox_name, subject, sender, received_at, category, "
+        " status, priority, body_preview, body, ai_draft, draft_generated, processed_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            102, "uid102", "detective_belgique",
+            "Re: Votre reçu Apple",
+            "noreply@email.apple.com",
+            "2026-06-23 08:00:00",
+            "demande_client", "pending", "high",
+            "Votre reçu Apple Store...",
+            "Votre reçu Apple Store...",
+            None, 0,
+            "2026-06-23 08:01:00",
+        ),
+    )
+    # 4) Mail interne CDAL (forward interne mal classé)
+    conn.execute(
+        "INSERT INTO mail_processed "
+        "(id, imap_uid, mailbox_name, subject, sender, received_at, category, "
+        " status, priority, body_preview, body, ai_draft, draft_generated, processed_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            103, "uid103", "detective_belgique",
+            "260613 - modif reponse 100 : Réponse que j'attendrai",
+            "cdal@digitalhs.biz",
+            "2026-06-23 07:00:00",
+            "demande_client", "pending", "high",
+            "ok daniel voici la modif...",
+            "ok daniel voici la modif...",
+            None, 0,
+            "2026-06-23 07:01:00",
+        ),
+    )
+    # 5) Mail du comptable cvfconsult (note administrative mal classée)
+    conn.execute(
+        "INSERT INTO mail_processed "
+        "(id, imap_uid, mailbox_name, subject, sender, received_at, category, "
+        " status, priority, body_preview, body, ai_draft, draft_generated, processed_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            104, "uid104", "detective_belgique",
+            "DETECTIVEBELGIQUE.BE - BILAN 31/12/2025",
+            "valerie@cvfconsult.be",
+            "2026-06-23 06:00:00",
+            "demande_client", "pending", "high",
+            "Bonjour Daniel, tu trouveras ci-joint le bilan...",
+            "Bonjour Daniel, tu trouveras ci-joint le bilan...",
+            None, 0,
+            "2026-06-23 06:01:00",
+        ),
+    )
+    conn.commit()
+    conn.close()
+    return db
+
+
+@pytest.fixture
+def client_with_hot_noise(tmp_path: Path, operator_user):
+    """Client TestClient avec DB contenant 1 vraie demande + 4 intrus dans la hot."""
+    db_path = _make_db_with_hot_noise(tmp_path)
+    app = make_app()
+    app.dependency_overrides[get_db] = _db_path_holder(db_path)
+    app.dependency_overrides[require_operator] = lambda: operator_user
+    return TestClient(app)
+
+
+def test_hot_band_excludes_pluxee_card(client_with_hot_noise) -> None:
+    """v1.30.0.4 — Un mail Pluxee (newsletter) ne doit PAS apparaître dans la hot band,
+    même s'il est classifié demande_client+high+pending en DB.
+    """
+    resp = client_with_hot_noise.get("/api/inbox")
+    assert resp.status_code == 200
+    # Le mail Pluxee doit être filtré hors de la hot (donc visible dans other ou absent).
+    # Le test accepte les deux tant qu'il n'est PAS dans la 1ère bande.
+    # On vérifie qu'on NE le voit PAS avant le séparateur vert 4px.
+    body = resp.text
+    sep_idx = body.find("border-b-4 border-green-600")
+    assert sep_idx > 0, "Séparateur vert introuvable"
+    hot_section = body[:sep_idx]
+    # La vraie demande (id=100) doit être dans la hot
+    assert "Demande de filature" in hot_section
+    # Le Pluxee ne doit PAS être dans la hot
+    assert "Pluxee Card" not in hot_section
+
+
+def test_hot_band_excludes_apple_receipt(client_with_hot_noise) -> None:
+    """v1.30.0.4 — Un mail Reçu Apple (newsletter) ne doit PAS être dans la hot."""
+    resp = client_with_hot_noise.get("/api/inbox")
+    assert resp.status_code == 200
+    body = resp.text
+    sep_idx = body.find("border-b-4 border-green-600")
+    assert sep_idx > 0
+    hot_section = body[:sep_idx]
+    assert "Demande de filature" in hot_section
+    assert "Re: Votre reçu Apple" not in hot_section
+
+
+def test_hot_band_excludes_internal_sender(client_with_hot_noise) -> None:
+    """v1.30.0.4 — Un mail interne (cdal@digitalhs.biz) ne doit PAS être dans la hot."""
+    resp = client_with_hot_noise.get("/api/inbox")
+    assert resp.status_code == 200
+    body = resp.text
+    sep_idx = body.find("border-b-4 border-green-600")
+    assert sep_idx > 0
+    hot_section = body[:sep_idx]
+    assert "Demande de filature" in hot_section
+    # Le mail id=103 (CDAL) ne doit pas être dans la hot
+    assert "260613 - modif reponse" not in hot_section
+
+
+def test_hot_band_excludes_comptable_sender(client_with_hot_noise) -> None:
+    """v1.30.0.4 — Un mail du comptable (cvfconsult.be) ne doit PAS être dans la hot."""
+    resp = client_with_hot_noise.get("/api/inbox")
+    assert resp.status_code == 200
+    body = resp.text
+    sep_idx = body.find("border-b-4 border-green-600")
+    assert sep_idx > 0
+    hot_section = body[:sep_idx]
+    assert "Demande de filature" in hot_section
+    # Le mail id=104 (BILAN du comptable) ne doit pas être dans la hot
+    assert "BILAN 31/12/2025" not in hot_section
+
+
+def test_hot_band_keeps_real_demande_client(client_with_hot_noise) -> None:
+    """v1.30.0.4 — Une vraie demande client (id=100) doit RESTER dans la hot."""
+    resp = client_with_hot_noise.get("/api/inbox")
+    assert resp.status_code == 200
+    body = resp.text
+    sep_idx = body.find("border-b-4 border-green-600")
+    assert sep_idx > 0
+    hot_section = body[:sep_idx]
+    # La vraie demande (id=100) doit être dans la hot
+    assert "Demande de filature" in hot_section
+    assert "client@example.com" in hot_section

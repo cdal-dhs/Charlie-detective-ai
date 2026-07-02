@@ -211,10 +211,38 @@ async def _fetch_mails(
     # ── Requête 1 : HOT (demande_client OU urgent, toutes priorités, pending) ──
     # v1.30.0.3 — élargi : inclut TOUS les demande_client pending (pas seulement high)
     # + tous les urgent pending. C'est le backlog de travail de Daniel.
+    # v1.30.0.4 — garde-fou anti-bruit dans la hot band.
+    # Le tri SQL est correct (catégorie=demande_client + status=pending) MAIS la
+    # classification en amont est trop large et met dans la hot :
+    #  - des newsletters (Pluxee Card, Reçu Apple) classées demande_client à tort ;
+    #  - des mails administratifs du comptable (cvfconsult.be) : bilans, versements ;
+    #  - des mails internes du cabinet (cdal@digitalhs.biz) qui passent par préfiltre
+    #    mais dont le backfill v1.28.2 n'a pas reclassifié les anciens.
+    # On applique un filtre déterministe "manifestement pas un client" pour exclure
+    # ces lignes de la hot band, SANS toucher à la classification en DB
+    # (réversible et sans effet de bord sur le préfiltre upstream).
+    # Le filtre est conservateur : on n'exclut que les expéditeurs/sujets INCONTESTABLEMENT
+    # non-client. Une vraie demande client mal orthographiée passe toujours.
+    hot_exclude_sender_patterns = [
+        "%@digitalhs.biz",  # CDAL + staff cabinet (is_internal_sender via prefilter,
+        #                    mais backfill incomplet sur les anciens mails)
+        "%@cvfconsult.be",  # Comptable externe (bilan, versement, NCAE…)
+    ]
+    hot_exclude_subject_patterns = [
+        "%pluxee%",         # Newsletter Pluxee Card
+        "%reçu apple%",     # Newsletter Apple Store
+        "%recu apple%",     # Variante sans accent
+        "%e-box%",          # e-Box sécurité sociale
+    ]
+    hot_exclude_clauses = []
+    for pat in hot_exclude_sender_patterns:
+        hot_exclude_clauses.append(f"LOWER(IFNULL(m.sender, '')) NOT LIKE ?")
+    for pat in hot_exclude_subject_patterns:
+        hot_exclude_clauses.append(f"LOWER(IFNULL(m.subject, '')) NOT LIKE ?")
     hot_where = where + [
         "(category = 'demande_client' OR category = 'urgent')",
         "(status = 'pending' OR status IS NULL)",
-    ]
+    ] + hot_exclude_clauses
     hot_sql = (
         "SELECT m.id, m.mailbox_name, m.subject, m.sender, m.received_at, m.category, "
         "m.status, m.priority, m.processed_at, m.body_preview, "
@@ -225,15 +253,24 @@ async def _fetch_mails(
         f"ORDER BY {priority_order}, {col} {order} LIMIT ?"
     )
     hot_params = params.copy()
+    # v1.30.0.4 — params des filtres anti-bruit de la hot (mêmes valeurs
+    # en lowercase pour matcher les `LOWER(...) NOT LIKE ?` du WHERE).
+    for pat in hot_exclude_sender_patterns + hot_exclude_subject_patterns:
+        hot_params.append(pat.lower())
     hot_params.append(limit)
     async with db.execute(hot_sql, hot_params) as cursor:
         hot_rows = await cursor.fetchall()
     hot_mails = [_mask_sender(dict(zip(cols, row, strict=True))) for row in hot_rows]
 
     # ── Requête 2 : OTHER (tout sauf hot) ──
-    other_where = where + [
-        "NOT ((category = 'demande_client' OR category = 'urgent') AND (status = 'pending' OR status IS NULL))"
-    ]
+    # v1.30.0.4 — la définition de "hot" inclut maintenant les filtres anti-bruit
+    # (sender @digitalhs.biz, @cvfconsult.be, sujets Pluxee/Apple/e-Box). L'other
+    # doit être l'inverse exact de la hot : `NOT (hot_where)` avec les mêmes params.
+    # On reconstruit l'expression NOT autour de toute la conjonction de hot_where.
+    # NOTE : `where` (cutoff + filtres user) est déjà DANS hot_where, donc on
+    # ne le remet pas dans other_where (sinon doublon du placeholder cutoff).
+    hot_where_expr = "(" + " AND ".join(hot_where) + ")"
+    other_where = [f"NOT {hot_where_expr}"]
     other_sql = (
         "SELECT m.id, m.mailbox_name, m.subject, m.sender, m.received_at, m.category, "
         "m.status, m.priority, m.processed_at, m.body_preview, "
@@ -244,6 +281,10 @@ async def _fetch_mails(
         f"ORDER BY {priority_order}, {col} {order} LIMIT ?"
     )
     other_params = params.copy()
+    # v1.30.0.4 — other_params doit avoir les MÊMES params que hot_params puisque
+    # other_where = NOT(hot_where) et hot_where inclut déjà le cutoff+filtres user.
+    for pat in hot_exclude_sender_patterns + hot_exclude_subject_patterns:
+        other_params.append(pat.lower())
     other_params.append(limit)
     async with db.execute(other_sql, other_params) as cursor:
         other_rows = await cursor.fetchall()
