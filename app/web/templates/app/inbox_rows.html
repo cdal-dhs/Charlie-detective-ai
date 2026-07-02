@@ -192,7 +192,7 @@
      On garde uniquement le marqueur visuel "›" en SVG, légèrement décalé à
      droite via pl-4. Plus clean, plus aligné avec Gmail/Outlook. #}
   <tr class="border-b border-gray-800/30 {% if is_dup %}opacity-60{% endif %}">
-    <td class="px-2 py-2 whitespace-nowrap w-12 text-xs font-medium pl-4 {% if has_draft %}text-emerald-300{% else %}text-purple-300{% endif %}">
+    <td class="px-2 py-2 whitespace-nowrap w-12 text-xs font-medium pl-10 {% if has_draft %}text-emerald-300{% else %}text-purple-300{% endif %}">
       <span class="inline-block text-base font-bold leading-none" title="Reply du fil">›</span>
       <span class="text-gray-400 ml-1">{{ box_short.get(reply.mailbox_name, reply.mailbox_name or '-') }}</span>
     </td>
