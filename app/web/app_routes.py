@@ -352,7 +352,17 @@ def _is_orphan_reply(mail: dict, known_message_ids: set[str], same_thread_messag
     Le mail de Daniel n'est pas dans `mail_processed` (seuls les mails entrants
     y sont). Le reply entrant a un `in_reply_to` pointant vers le Message-ID
     de Daniel, qu'on ne trouve nulle part en DB → c'est un orphan reply.
+
+    v1.30.0.12 — un mail avec un subject "Re:/AW:/TR:/Fwd: ..." est TOUJOURS
+    considéré comme un reply (même si in_reply_to est NULL après ingestion
+    IMAP). C'est un signal sémantique fort : le formatteur du mail a marqué
+    ce mail comme une réponse, donc on le traite comme un reply orphelin
+    par défaut. Conséquence : un fil où TOUS les mails ont un subject
+    préfixé "Re:" → tous orphelins → parent promu sans icône ›.
     """
+    # v1.30.0.12 — préfixe de réponse = signal sémantique fort
+    if _looks_like_reply_subject(mail.get("subject")):
+        return True
     in_reply_to = (mail.get("in_reply_to") or "").strip()
     if not in_reply_to:
         return False
@@ -519,6 +529,16 @@ def _group_into_threads(
         else:
             # TOUS les mails du fil sont des replies orphelins
             # → le parent = le plus ancien (premier mail connu), pas d'icône ›
+            # v1.30.0.12 — on trie les replies du + récent au + ancien (sinon
+            # elles apparaissent dans l'ordre d'insertion initial, qui n'est
+            # pas forcément chronologique).
+            sorted_replies = sorted(
+                [m for m in all_mails_in_thread if m["id"] != t["parent"]["id"]],
+                key=lambda m: m.get("received_at") or "",
+                reverse=True,
+            )
+            t["replies"] = sorted_replies
+            t["reply_count"] = len(sorted_replies)
             t["parent_is_orphan"] = True
             t["all_orphans"] = True
         # Nettoie la clé interne
@@ -537,6 +557,10 @@ def _group_into_threads(
     # doivent DÉMÉNAGER dans l'autre band (pas dans la hot si la hot est la band d'origine).
     # Un reply dont le parent est déjà traité n'a pas de sens en hot band : Daniel ne peut
     # PLUS rien faire dessus (le parent est clos). Il doit vivre dans OTHER pour archivage.
+    # v1.30.0.12 — on ne déplace plus les 1-mail "Re:" orphelins (sujet commence par Re:
+    # mais pas de thread_id) : ils restent visibles dans la liste d'origine (Daniel
+    # veut voir TOUS ses mails, cf. v1.30.0.11). Le move-to-other n'est appliqué que
+    # pour les VRAIS cas de cross-band (parent dans other → reply pending dans hot).
     final_keep: list[dict] = []
     final_move: list[dict] = []
     for t in list(threads_dict.values()) + orphans:
@@ -570,36 +594,27 @@ def _group_into_threads(
             final_move.append(t)
         else:
             # Parent pending (ou thread à 1 seul mail pending) : on le garde
-            # MAIS on vérifie aussi qu'il ne s'agit pas d'un reply orphelin.
+            # MAIS on vérifie aussi qu'il ne s'agit pas d'un reply orphelin
+            # CROSS-BAND (parent dans l'autre liste = déjà traité).
             # Cas 1 : thread_id présent + siblings dans `all_thread_siblings`
             # (other_mails) → le parent est dans other (déjà traité), ce mail
             # est un reply → MOVE.
-            # Cas 2 : thread à 1 seul mail (replies vides) + sujet commence
-            # par Re:/AW:/TR:/Fwd: → le parent n'est pas dans le set
-            # groupable (déjà traité ailleurs ou hors-scope) → MOVE.
-            # Cas 3 : pas de thread_id + sujet Re:/AW:/TR:/Fwd: → même cas.
+            # v1.30.0.12 — on NE déplace plus les 1-mail "Re:" orphelins
+            # (sujet Re: sans thread_id, sans siblings). Daniel veut les voir
+            # dans la liste d'origine, pas dans other. C'est le rollback
+            # v1.30.0.11 confirmé.
             is_reply_in_other = (
                 t["reply_count"] == 0
                 and t["parent"].get("thread_id")
                 and t["parent"].get("status", "pending") in (None, "", "pending")
                 and siblings_by_tid.get(t["parent"].get("thread_id"))
             )
-            is_orphan_reply_subject = (
-                t["reply_count"] == 0
-                and t["parent"].get("status", "pending") in (None, "", "pending")
-                and _looks_like_reply_subject(t["parent"].get("subject"))
-            )
-            if is_reply_in_other or is_orphan_reply_subject:
-                # Reply orphelin (parent ailleurs, déjà traité) → move
+            if is_reply_in_other:
+                # Reply orphelin cross-band (parent ailleurs, déjà traité) → move
                 final_move.append(t)
             else:
                 final_keep.append(t)
 
-    # v1.30.0.11 — rollback v1.30.0.9 : on NE déplace plus les 1-mail threads
-    # avec in_reply_to orphelin (ou sujet "Re:") dans other. Tout reste dans
-    # la liste principale (hot ou other selon la catégorisation SQL). Daniel
-    # veut voir TOUS ses mails, y compris les replies orphelines, dans la
-    # bande grise. C'est le comportement d'avant v1.30.0.7.
     # Tri global par date du mail le plus récent DESC (chaque liste séparément)
     final_keep.sort(key=lambda t: t["last_received"], reverse=True)
     final_move.sort(key=lambda t: t["last_received"], reverse=True)
@@ -714,24 +729,17 @@ async def app_index(
     # other_mails a déjà la bonne catégorisation (hot exclude clauses), on
     # les passe tels quels pour éviter que des "Re:" 1-mail threads soient
     # déplacés dans hot_move par le grouping. Tout doit rester visible.
+    # v1.30.0.12 — on RE-GROUPE other_mails en fils. Justification : 3 mails
+    # "Re: Votre reçu Apple" (même thread_id) étaient affichés comme 3 lignes
+    # plates individuelles (1-mail thread par mail) → CDAL : "un enfant d'un
+    # fil parent ne peut pas démarrer seul". En groupant, ils deviennent 1
+    # fil avec le plus ancien comme parent (sans › car tous Re: → parent
+    # orphelin) et les 2 autres enfilés en replies avec ›.
     hot_keep, hot_move = _group_into_threads(hot_mails, all_thread_siblings=other_mails)
     hot_threads = hot_keep
-    # Convertit chaque mail other en fil 1-mail pour le rendu (le template
-    # attend des threads, pas des mails). Cf. `_group_into_threads` qui
-    # produit déjà ce format pour les orphans.
-    other_threads = [
-        {
-            "thread_id": f"orphan::{m['id']}",
-            "parent": m,
-            "replies": [],
-            "reply_count": 0,
-            "last_received": m.get("received_at") or m.get("processed_at") or "",
-            "all_duplicate": m.get("status") == "duplicate",
-            "parent_is_orphan": False,
-            "all_orphans": False,
-        }
-        for m in other_mails
-    ] + hot_move
+    # Regroupe other_mails aussi (les "Re: ..." d'un même thread deviennent 1 fil)
+    other_keep, other_move = _group_into_threads(other_mails)
+    other_threads = other_keep + hot_move + other_move
 
     # v1.30.0.11 — on n'écrase plus other_threads. Tout est visible : la hot
     # band verte (demande_client+urgent pending) en haut, puis la other band

@@ -749,18 +749,20 @@ def test_hot_band_excludes_orphan_reply_with_re_prefix(client_with_reply_threads
     DÉMÉNAGER dans other car son parent (non groupable) est forcément ailleurs.
 
     v1.30.0.7 — Filtre explicite ?category=demande_client pour sortir du worklist.
+    v1.30.0.12 — Rollback : les 1-mail "Re:" orphelins RESTENT dans la hot
+    band (visible) même avec sujet "Re:" et pas de thread_id. Daniel veut
+    voir TOUS ses mails. Cf. commentaire rollback v1.30.0.11 dans
+    `_group_into_threads`.
     """
-    resp = client_with_reply_threads.get("/api/inbox?category=demande_client")
+    resp = client_with_reply_threads.get("/api/inbox")
     assert resp.status_code == 200
     body = resp.text
     sep_idx = body.find("border-b-4 border-green-600")
     assert sep_idx > 0
     hot_section = body[:sep_idx]
-    other_section = body[sep_idx:]
-    # id=220 (Re: Demande de devis, orphelin) ne doit PAS être dans la hot
-    assert "/app/conversation/220" not in hot_section
-    # ...mais DOIT être dans la section other
-    assert "/app/conversation/220" in other_section
+    # id=220 (Re: Demande de devis, orphelin) DOIT être dans la hot
+    # (rollback v1.30.0.11 + v1.30.0.12 — Daniel veut voir tous ses mails)
+    assert "/app/conversation/220" in hot_section
 
 
 def test_hot_band_keeps_non_reply_orphan(client_with_reply_threads) -> None:
@@ -835,7 +837,9 @@ def test_thread_grouping_returns_keep_and_move() -> None:
             "priority": "high", "category": "demande_client",
             "thread_id": "thread-B", "has_draft": 0,
         },
-        # Orphelin Re: sans thread_id → move
+        # Orphelin Re: sans thread_id → v1.30.0.12 : reste en keep
+        # (rollback v1.30.0.11 — Daniel veut voir tous ses mails, même les
+        # 1-mail "Re:" orphelins, dans la liste d'origine).
         {
             "id": 5, "mailbox_name": "detective_belgique",
             "subject": "Re: Sujet quelconque", "sender": "c@c.com",
@@ -853,19 +857,17 @@ def test_thread_grouping_returns_keep_and_move() -> None:
         },
     ]
     keep, move = _group_into_threads(mails)
-    # keep = thread A (parent + reply) + orphelin non-Re
+    # v1.30.0.12 — keep = thread A (parent + reply) + orphelin Re: (id=5)
+    # + orphelin non-Re (id=6). Avant : orphelin Re: était move.
     keep_ids = sorted(
         [t["parent"]["id"] for t in keep]
         + [r["id"] for t in keep for r in t.get("replies", [])]
     )
-    assert keep_ids == [1, 2, 6], f"keep devrait contenir 1, 2, 6 mais a {keep_ids}"
-    # v1.30.0.11 — move = thread B éclaté (parent approved + son reply)
-    # + orphelin Re: (id=5). Avant, le parent approved (id=3) était droppé
-    # silencieusement (commentaire "n'est pas dans la liste d'origine" FAUX
-    # pour les parents qui SONT dans la liste avec un statut non-pending).
-    # Maintenant, on déplace aussi le parent approved → on l'ajoute en move.
+    assert keep_ids == [1, 2, 5, 6], f"keep devrait contenir 1, 2, 5, 6 mais a {keep_ids}"
+    # v1.30.0.11 — move = thread B éclaté (parent approved + son reply).
+    # L'orphelin Re: (id=5) reste en keep depuis v1.30.0.12.
     move_ids = sorted([t["parent"]["id"] for t in move])
-    assert move_ids == [3, 4, 5], f"move devrait contenir 3, 4, 5 mais a {move_ids}"
+    assert move_ids == [3, 4], f"move devrait contenir 3, 4 mais a {move_ids}"
 
 
 def test_thread_grouping_cross_band_move() -> None:
@@ -1798,4 +1800,253 @@ def test_known_in_reply_to_keeps_in_keep() -> None:
     assert keep_ids == [1, 2]
     # Aucun move
     assert move == []
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# v1.30.0.12 — Fix "Re: jamais 1ère ligne de fil"
+#
+# Avant : si un fil ne contenait que des mails avec subject "Re: ...", le plus
+# ancien était promu parent (parce qu'il était le mail le plus ancien du fil
+# et que `in_reply_to` était souvent NULL après ingestion IMAP). Daniel voyait
+# donc un "Re: ..." en 1ère ligne de la hot band — ce qui est sémantiquement
+# FAUX : un reply n'a pas de parent connu dans le système, donc il ne peut
+# pas démarrer un fil.
+#
+# Cas concret en prod (30/06/2026) : thread_id
+# `de31d22a7d2c55b7::dpdhuinvestigations@gmail.com` contient 11 mails
+# `Re: Votre reçu Apple` (3 pending + high + demande_client → hot band,
+# 8 duplicate/other → other band). Le plus ancien (#713) était promu parent
+# en hot band → Daniel voyait un "Re: ..." comme 1ère ligne de son fil.
+#
+# Le fix : un "Re:" ne peut être parent QUE si TOUS les mails du fil sont
+# des "Re:" (cas B/C de l'algo CDAL). Si le fil contient AU MOINS UN mail
+# avec un subject "vrai" (sans préfixe Re:/AW:/TR:/Fwd:), ce mail-là est
+# forcément le parent, jamais un "Re:".
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_replies_with_subject_Re_never_first_in_thread() -> None:
+    """v1.30.0.12 — Fil mixte : 1 vrai parent + 3 "Re: ..." → le parent en
+    1ère ligne, les 3 "Re:" enfilés. Le plus ancien "Re:" NE DOIT JAMAIS
+    être promu parent (CDAL : "un enfant d'un fil parent ne peut pas
+    démarrer seul").
+    """
+    from app.web.app_routes import _group_into_threads
+
+    mails = [
+        # Vrai parent : subject SANS Re:/
+        {
+            "id": 100, "mailbox_name": "detective_belgique",
+            "subject": "Demande de devis initial",
+            "sender": "client@example.com",
+            "received_at": "2026-06-25 10:00:00", "status": "pending",
+            "priority": "high", "category": "demande_client",
+            "thread_id": "thread-MIX", "has_draft": 0,
+            "in_reply_to": None, "message_id": "<msg100@x.com>",
+        },
+        # Re: 1
+        {
+            "id": 101, "mailbox_name": "detective_belgique",
+            "subject": "Re: Demande de devis initial",
+            "sender": "client@example.com",
+            "received_at": "2026-06-28 11:00:00", "status": "pending",
+            "priority": "high", "category": "demande_client",
+            "thread_id": "thread-MIX", "has_draft": 0,
+            "in_reply_to": "<msg100@x.com>", "message_id": "<msg101@x.com>",
+        },
+        # Re: 2 (plus ancien que Re: 1 — piège : ne doit pas être promu)
+        {
+            "id": 102, "mailbox_name": "detective_belgique",
+            "subject": "Re: Demande de devis initial",
+            "sender": "client@example.com",
+            "received_at": "2026-06-26 09:00:00", "status": "pending",
+            "priority": "high", "category": "demande_client",
+            "thread_id": "thread-MIX", "has_draft": 0,
+            "in_reply_to": "<external@daniel.biz>", "message_id": "<msg102@x.com>",
+        },
+        # Re: 3
+        {
+            "id": 103, "mailbox_name": "detective_belgique",
+            "subject": "Re: Demande de devis initial",
+            "sender": "client@example.com",
+            "received_at": "2026-06-30 12:00:00", "status": "pending",
+            "priority": "high", "category": "demande_client",
+            "thread_id": "thread-MIX", "has_draft": 0,
+            "in_reply_to": "<msg101@x.com>", "message_id": "<msg103@x.com>",
+        },
+    ]
+    keep, move = _group_into_threads(mails)
+    assert len(keep) == 1
+    t = keep[0]
+    # Le parent = id=100 (le SEUL vrai parent, sans Re:)
+    assert t["parent"]["id"] == 100, (
+        f"Le parent doit être id=100 (vrai 1er mail, sans Re:), "
+        f"pas un Re: (got {t['parent']['id']}, replies={[r['id'] for r in t['replies']]})"
+    )
+    # Les 3 Re: sont en replies, triés du + récent au + ancien (103, 101, 102)
+    assert [r["id"] for r in t["replies"]] == [103, 101, 102]
+    # Le parent n'est PAS un orphelin (c'est un vrai 1er mail)
+    assert t["parent_is_orphan"] is False
+    assert move == []
+
+
+def test_only_replies_thread_promotes_oldest_as_parent_without_reply_icon() -> None:
+    """v1.30.0.12 — Fil où TOUS les mails ont un subject "Re: ..." : le plus
+    ancien est promu parent SANS icône › (cas B de l'algo CDAL — "premier
+    mail connu" du fil, pas un vrai parent de conversation). Les autres
+    sont enfilés en replies avec ›.
+    """
+    from app.web.app_routes import _group_into_threads
+
+    mails = [
+        {
+            "id": 200, "mailbox_name": "detective_belgique",
+            "subject": "Re: Votre reçu Apple",
+            "sender": "apple@apple.com",
+            "received_at": "2026-06-25 15:50:00", "status": "pending",
+            "priority": "high", "category": "demande_client",
+            "thread_id": "thread-APPLE", "has_draft": 0,
+            "in_reply_to": None, "message_id": "<msg200@apple.com>",
+        },
+        {
+            "id": 201, "mailbox_name": "detective_belgique",
+            "subject": "Re: Votre reçu Apple",
+            "sender": "apple@apple.com",
+            "received_at": "2026-06-30 15:57:00", "status": "pending",
+            "priority": "high", "category": "demande_client",
+            "thread_id": "thread-APPLE", "has_draft": 0,
+            "in_reply_to": None, "message_id": "<msg201@apple.com>",
+        },
+        {
+            "id": 202, "mailbox_name": "detective_belgique",
+            "subject": "Re: Votre reçu Apple",
+            "sender": "apple@apple.com",
+            "received_at": "2026-06-30 16:00:00", "status": "pending",
+            "priority": "high", "category": "demande_client",
+            "thread_id": "thread-APPLE", "has_draft": 0,
+            "in_reply_to": None, "message_id": "<msg202@apple.com>",
+        },
+    ]
+    keep, move = _group_into_threads(mails)
+    assert len(keep) == 1
+    t = keep[0]
+    # Le parent = id=200 (le plus ancien, premier mail connu)
+    assert t["parent"]["id"] == 200, (
+        f"Parent doit être id=200 (plus ancien du fil), got {t['parent']['id']}"
+    )
+    # Les 2 autres en replies, triés du + récent au + ancien
+    assert [r["id"] for r in t["replies"]] == [202, 201]
+    # parent_is_orphan=True → rendu SANS icône › (parent visuel mais pas de
+    # vrai parent de conversation)
+    assert t["parent_is_orphan"] is True
+    assert t["all_orphans"] is True
+    assert move == []
+
+
+def test_inbox_toutes_no_Re_subject_first_in_other_band() -> None:
+    """v1.30.0.12 — Sur /app/ en worklist "Toutes", la other band (grise,
+    sous la séparation verte) ne doit pas afficher plusieurs lignes
+    individuelles avec un même subject "Re: ..." partageant un thread_id.
+    Cas concret prod : les 3 "Re: Votre reçu Apple" pending #713/#715/#716
+    doivent être groupés en 1 fil (parent #713, replies enfilés), pas
+    apparaître comme 3 lignes plates individuelles.
+    """
+    from app.web.app_routes import _group_into_threads
+
+    # Simule other_mails : 3 mails "Re: Votre reçu Apple" même thread_id
+    other = [
+        {
+            "id": 713, "mailbox_name": "detective_belgique",
+            "subject": "Re: Votre reçu Apple",
+            "sender": "dpdh@x.com",
+            "received_at": "2026-06-30 15:50:00", "status": "pending",
+            "priority": "high", "category": "demande_client",
+            "thread_id": "thread-APPLE-REAL", "has_draft": 0,
+            "in_reply_to": None, "message_id": "<713@x.com>",
+        },
+        {
+            "id": 714, "mailbox_name": "detective_belgique",
+            "subject": "Re: Votre reçu Apple",
+            "sender": "dpdh@x.com",
+            "received_at": "2026-06-30 15:57:00", "status": "duplicate",
+            "priority": "low", "category": "autre",
+            "thread_id": "thread-APPLE-REAL", "has_draft": 0,
+            "in_reply_to": None, "message_id": "<714@x.com>",
+        },
+        {
+            "id": 715, "mailbox_name": "detective_belgique",
+            "subject": "Re: Votre reçu Apple",
+            "sender": "dpdh@x.com",
+            "received_at": "2026-06-30 15:58:00", "status": "pending",
+            "priority": "high", "category": "demande_client",
+            "thread_id": "thread-APPLE-REAL", "has_draft": 0,
+            "in_reply_to": None, "message_id": "<715@x.com>",
+        },
+    ]
+    keep, move = _group_into_threads(other)
+    # Les 3 mails du même thread sont groupés en 1 SEUL fil
+    assert len(keep) == 1, (
+        f"Les 3 'Re: Votre reçu Apple' (même thread_id) doivent être groupés "
+        f"en 1 fil, pas {len(keep)} fils séparés"
+    )
+    t = keep[0]
+    # Parent = id=713 (le plus ancien)
+    assert t["parent"]["id"] == 713
+    # 2 replies : 715 (le + récent) puis 714
+    assert [r["id"] for r in t["replies"]] == [715, 714]
+
+
+def test_inbox_toutes_hot_band_no_Re_subject_first() -> None:
+    """v1.30.0.12 — Sur /app/ en worklist "Toutes", la hot band verte ne doit
+    contenir aucun mail dont le subject commence par "Re:" ou "Re :" en
+    PREMIÈRE ligne de son fil. Un fil "tout-Re:" (parent promu sans ›) est
+    toléré, mais on ne doit JAMAIS voir un "Re:" comme parent visuel dans
+    un fil qui contient un vrai parent ailleurs dans le même fil.
+    """
+    from app.web.app_routes import _group_into_threads
+
+    # Cas prod-like : 1 vrai parent (sujet OK) + 2 Re: (mélange dans le même fil)
+    # → le parent ne doit PAS être un "Re:"
+    hot = [
+        {
+            "id": 700, "mailbox_name": "detective_belgique",
+            "subject": "Demande de devis",  # ← VRAI parent
+            "sender": "client@a.com",
+            "received_at": "2026-06-25 10:00:00", "status": "pending",
+            "priority": "high", "category": "demande_client",
+            "thread_id": "thread-MIX2", "has_draft": 0,
+            "in_reply_to": None, "message_id": "<700@a.com>",
+        },
+        {
+            "id": 701, "mailbox_name": "detective_belgique",
+            "subject": "Re: Demande de devis",
+            "sender": "client@a.com",
+            "received_at": "2026-06-28 11:00:00", "status": "pending",
+            "priority": "high", "category": "demande_client",
+            "thread_id": "thread-MIX2", "has_draft": 0,
+            "in_reply_to": "<700@a.com>", "message_id": "<701@a.com>",
+        },
+        {
+            "id": 702, "mailbox_name": "detective_belgique",
+            "subject": "Re: Demande de devis",
+            "sender": "client@a.com",
+            "received_at": "2026-06-30 12:00:00", "status": "pending",
+            "priority": "high", "category": "demande_client",
+            "thread_id": "thread-MIX2", "has_draft": 0,
+            "in_reply_to": "<701@a.com>", "message_id": "<702@a.com>",
+        },
+    ]
+    keep, move = _group_into_threads(hot)
+    assert len(keep) == 1
+    t = keep[0]
+    # Le parent doit être id=700 (le SEUL sans Re:)
+    assert t["parent"]["id"] == 700
+    parent_subject = t["parent"].get("subject", "")
+    # Le subject du parent ne doit PAS commencer par Re:
+    from app.web.app_routes import _REPLY_SUBJECT_PREFIX
+    assert not _REPLY_SUBJECT_PREFIX.match(parent_subject), (
+        f"Le parent du fil NE DOIT PAS être un 'Re: ...' (got: {parent_subject!r})"
+    )
+    # Les 2 Re: en replies
+    assert sorted([r["id"] for r in t["replies"]]) == [701, 702]
 

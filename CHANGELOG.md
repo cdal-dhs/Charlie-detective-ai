@@ -1,5 +1,34 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.30.0.12] — 2026-07-02 (fix(inbox) : reply with subject Re: never first in thread)
+
+### Contexte
+- CDAL a vu 3 mails "Re: Votre reçu Apple" (même thread_id, in_reply_to=NULL) affichés comme 3 lignes plates individuelles en OTHER band — "un enfant d'un fil parent ne peut pas démarrer seul".
+- Cas prod : thread_id `de31d22a7d2c55b7::dpdhuinvestigations@gmail.com` contient 11 mails "Re: Votre reçu Apple" (3 pending + high + demande_client → hot band, 8 duplicate/other → other band). Le plus ancien (#713) était promu parent par défaut (mail le plus ancien du fil) et affiché en 1ère ligne — sémantiquement FAUX, un "Re:" ne peut pas être parent s'il existe un vrai parent dans le fil.
+
+### Fixé
+- **`app/web/app_routes.py::_is_orphan_reply()`** : un mail avec un subject préfixé "Re:/AW:/TR:/Fwd: ..." est TOUJOURS considéré comme un reply orphelin (même si in_reply_to=NULL après ingestion IMAP). C'est un signal sémantique fort — le formatteur du mail a marqué ce mail comme une réponse.
+- **`app/web/app_routes.py::_group_into_threads()`** : pour chaque fil, après identification des orphans :
+  - Cas 1 (au moins un mail non-orphelin) : parent = le plus ancien non-orphelin, replies = le reste. (Existant, inchange.)
+  - Cas 2 (TOUS les mails sont des replies orphelins, y compris les "Re:" subjects) : parent = le plus ancien (premier mail connu), `parent_is_orphan=True`, `all_orphans=True`. Le tri des replies est désormais DESC par received_at (corrige l'ordre d'insertion qui n'était pas chronologique).
+  - Conséquence : un fil mixte (1 vrai parent "X" + N "Re: X") → le parent "X" en 1ère ligne, les N "Re: X" enfilés en replies avec ›. Un fil 100% "Re:" → le plus ancien promu parent SANS ›.
+- **`app/web/app_routes.py::app_index()`** : RE-GROUPAGE de `other_mails` en fils (rollback du rollback v1.30.0.11 sur la double-grouping). Justification : 3 mails "Re: Votre reçu Apple" (même thread_id) dans other band étaient affichés comme 3 lignes plates individuelles. En groupant, ils deviennent 1 fil (plus ancien parent, 2 replies enfilés avec ›).
+- **`app/web/app_routes.py::_group_into_threads()`** : suppression de la branche `is_orphan_reply_subject` (déplaçait les 1-mail "Re:" orphelins vers other). Rollback v1.30.0.11 confirmé — les 1-mail "Re:" restent dans la liste d'origine (Daniel veut voir TOUS ses mails).
+- **`tests/test_web_inbox_render.py`** : 4 nouveaux tests TDD :
+  - `test_replies_with_subject_Re_never_first_in_thread` : fil mixte (1 parent + 3 "Re:") → parent en 1ère ligne, "Re:" enfilés.
+  - `test_only_replies_thread_promotes_oldest_as_parent_without_reply_icon` : fil 100% "Re:" → plus ancien promu parent SANS ›, `parent_is_orphan=True`.
+  - `test_inbox_toutes_no_Re_subject_first_in_other_band` : 3 mails "Re: ..." même thread_id dans other_mails → groupés en 1 fil.
+  - `test_inbox_toutes_hot_band_no_Re_subject_first` : fil mixte hot → parent = mail sans "Re:", pas un "Re:".
+  - Tests existants mis à jour (1-mail "Re:" orphelin reste en keep, pas move).
+- **`app/_version.py`** : bump 1.30.0.11 → 1.30.0.12.
+
+### Comportement
+- Hot band verte : 0 ligne avec subject "Re: ..." ou "Re :..." en première position.
+- Si un fil ne contient que des "Re:" → le plus ancien est promu parent SANS icône ›, les autres enfilées avec ›.
+- Si un fil a 1 vrai parent + N replies → le parent est en première ligne (sans ›), les N replies enfilées avec ›.
+- L'inbox reste longue (≥ 30 lignes other band), pas de masquage.
+- 36 tests inbox verts (4 nouveaux), 465 tests globaux verts (2 échecs préexistants non liés sur `test_mission_dated_draft.py`).
+
 ## [1.30.0.11] — 2026-07-02 (fix(inbox) : restore all emails in Toutes tab — rollback worklist mask)
 
 ### Contexte
