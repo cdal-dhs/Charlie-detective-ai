@@ -456,8 +456,10 @@ def _group_into_threads(
             # Cas 1 : thread_id présent + siblings dans `all_thread_siblings`
             # (other_mails) → le parent est dans other (déjà traité), ce mail
             # est un reply → MOVE.
-            # Cas 2 : pas de thread_id + sujet Re:/AW:/Fwd: → reply orphelin
-            # (le parent est forcément ailleurs, déjà traité) → MOVE.
+            # Cas 2 : thread à 1 seul mail (replies vides) + sujet commence
+            # par Re:/AW:/TR:/Fwd: → le parent n'est pas dans le set
+            # groupable (déjà traité ailleurs ou hors-scope) → MOVE.
+            # Cas 3 : pas de thread_id + sujet Re:/AW:/TR:/Fwd: → même cas.
             is_reply_in_other = (
                 t["reply_count"] == 0
                 and t["parent"].get("thread_id")
@@ -467,7 +469,6 @@ def _group_into_threads(
             is_orphan_reply_subject = (
                 t["reply_count"] == 0
                 and t["parent"].get("status", "pending") in (None, "", "pending")
-                and not t["parent"].get("thread_id")  # vrai orphelin (pas de thread_id)
                 and _looks_like_reply_subject(t["parent"].get("subject"))
             )
             if is_reply_in_other or is_orphan_reply_subject:
