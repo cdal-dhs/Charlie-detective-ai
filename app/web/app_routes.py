@@ -298,29 +298,36 @@ def _group_into_threads(mails: list[dict]) -> list[dict]:
         if mail.get("status") != "duplicate":
             threads_dict[tid]["all_duplicate"] = False
 
-    # Calcul reply_count
-    for t in threads_dict.values():
-        t["reply_count"] = len(t["replies"])
-        # Tri replies du + récent au + ancien
-        t["replies"].sort(
-            key=lambda m: m.get("received_at") or "", reverse=True
-        )
-        # v1.29.0.7 — détecte les threads PARTIELS (parent au-delà de LIMIT 1000).
-        # Si le parent du fil a le MÊME received_at que la 1ère reply (forwarder
-        # WP qui injecte 2 mails avec le même timestamp) ou si received_at du
-        # parent > 2 jours après la 1ère reply, c'est suspect. En réalité, on
-        # ne peut pas le détecter sans re-query SQL. À la place, on flagge
-        # tous les threads dont le parent est lui-même clairement une reply
-        # (heuristique : `Re:` en début de sujet).
-        parent = t["parent"]
-        subj = (parent.get("subject") or "").lower()
-        if subj.startswith("re:") or subj.startswith("re :"):
-            # Parent est une reply, mais sans parent visible → marque "thread partiel"
-            t["partial_thread"] = True
+    # v1.29.1.5 — si le parent d'un fil a un status non-pending (approved/rejected/sent/reviewed),
+    # c'est qu'il a déjà été traité par Daniel. Le grouper avec une reply pending n'apporte
+    # aucune valeur visuelle (Daniel ne peut plus rien faire sur le parent). On ÉCLATE le fil
+    # en orphelins pour que chaque mail pending s'affiche comme un mail simple (sans `›`,
+    # sans bordure purple) — c'est cohérent avec la sémantique "1 mail pending = 1 ligne".
+    # Cas concret : le bucket `adhoc::unknown::50d8b4a9` regroupe 207 mails sans rapport
+    # (Infomaniak, Coolblue, formations, etc.) sous un parent "Un message du fondateur
+    # d'Infomaniak" déjà approved. Éclater le fil règle le bug "reply sans parent visible".
+    final_threads: list[dict] = []
+    for t in list(threads_dict.values()) + orphans:
+        parent_status = (t["parent"].get("status") or "").lower()
+        if parent_status and parent_status != "pending":
+            # Parent déjà traité → on convertit toutes les replies en orphelins
+            for r in t["replies"]:
+                final_threads.append(
+                    {
+                        "thread_id": f"orphan::{r['id']}",
+                        "parent": r,
+                        "replies": [],
+                        "reply_count": 0,
+                        "last_received": r.get("received_at") or r.get("processed_at") or "",
+                        "all_duplicate": r.get("status") == "duplicate",
+                    }
+                )
+            # Le parent lui-même : s'il est dans le scope pending il reste orphelin,
+            # sinon il n'est pas dans la liste d'origine (déjà filtré par _fetch_mails).
         else:
-            t["partial_thread"] = False
+            final_threads.append(t)
+    threads = final_threads
 
-    threads = list(threads_dict.values()) + orphans
     # Tri global par date du mail le plus récent DESC
     threads.sort(key=lambda t: t["last_received"], reverse=True)
     return threads
