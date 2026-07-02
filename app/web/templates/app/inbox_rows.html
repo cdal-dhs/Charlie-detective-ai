@@ -2,7 +2,11 @@
 {% set effective_status = m.status or 'pending' %}
 {% set is_hot = (m.category == 'demande_client' and m.priority == 'high' and effective_status == 'pending') %}
 {% set is_danger = (m.category == 'phishing') %}
-{% set has_draft = m.ai_draft is not none and m.ai_draft|length > 0 %}
+{# v1.29.0.7 — `has_draft` (bool 0/1) au lieu de `ai_draft` (texte complet).
+   Gain perf : on ne tire plus les 2-5 KB de brouillon par mail dans la projection SQL
+   (économise ~3 MB sur 618 mails). Le brouillon complet reste chargé uniquement
+   dans la page /app/conversation/{id} (cf. _fetch_mail). #}
+{% set has_draft = m.has_draft %}
 {# NOTE CSS critique : border-l-4 sur <tr> ne s'affiche PAS dans les tables HTML (le navigateur l'ignore).
    Il faut appliquer la bordure latérale sur le PREMIER <td> de la ligne.
    Fond hot-row : bg-green-900/40 (ne pas descendre en dessous, sinon invisible sur fond sombre).

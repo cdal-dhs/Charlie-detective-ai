@@ -163,7 +163,14 @@ async def _fetch_mails(
         # Gain perf : -90% payload SQL, -90% temps render Jinja2.
         # Le body_preview (~200 chars) reste pour la recherche full-text.
         "attachment_count",
-        "ai_draft",
+        # v1.29.0.7 — `ai_draft` REMPLACÉ par `has_draft` (bool 0/1).
+        # AVANT : on tirait le texte complet du brouillon (souvent 2-5 KB par mail)
+        # pour 618 mails = ~3 MB de payload inutile. Seul l'inbox_rows.html s'en
+        # sert via `m.ai_draft|length > 0` (juste pour savoir s'il EXISTE).
+        # APRÈS : booléen calculé en SQL (IFNULL(LENGTH(ai_draft) > 0, 0)) —
+        # le template fait `m.has_draft` (1/0 → true/false en Jinja).
+        # Le brouillon complet reste chargé uniquement dans /app/conversation/{id}.
+        "has_draft",
         "suggested_subject",
         # v1.29.0.4 — `thread_id` AJOUTÉ à la projection.
         # AVANT : absent du SELECT → `dict(zip(cols, row))` décalait tout
@@ -194,7 +201,8 @@ async def _fetch_mails(
         "SELECT m.id, m.mailbox_name, m.subject, m.sender, m.received_at, m.category, "
         "m.status, m.priority, m.processed_at, m.body_preview, "
         "(SELECT COUNT(*) FROM email_attachment WHERE mail_processed_id = m.id) AS attachment_count, "
-        "ai_draft, m.suggested_subject, m.thread_id "
+        "CASE WHEN IFNULL(LENGTH(m.ai_draft), 0) > 0 THEN 1 ELSE 0 END AS has_draft, "
+        "m.suggested_subject, m.thread_id "
         "FROM mail_processed m WHERE " + " AND ".join(hot_where) + " "
         f"ORDER BY {col} {order} LIMIT ?"
     )
@@ -212,7 +220,8 @@ async def _fetch_mails(
         "SELECT m.id, m.mailbox_name, m.subject, m.sender, m.received_at, m.category, "
         "m.status, m.priority, m.processed_at, m.body_preview, "
         "(SELECT COUNT(*) FROM email_attachment WHERE mail_processed_id = m.id) AS attachment_count, "
-        "ai_draft, m.suggested_subject, m.thread_id "
+        "CASE WHEN IFNULL(LENGTH(m.ai_draft), 0) > 0 THEN 1 ELSE 0 END AS has_draft, "
+        "m.suggested_subject, m.thread_id "
         "FROM mail_processed m WHERE " + " AND ".join(other_where) + " "
         f"ORDER BY (m.status = 'pending') DESC, (m.priority = 'high') DESC, {col} {order} LIMIT ?"
     )
@@ -296,6 +305,20 @@ def _group_into_threads(mails: list[dict]) -> list[dict]:
         t["replies"].sort(
             key=lambda m: m.get("received_at") or "", reverse=True
         )
+        # v1.29.0.7 — détecte les threads PARTIELS (parent au-delà de LIMIT 1000).
+        # Si le parent du fil a le MÊME received_at que la 1ère reply (forwarder
+        # WP qui injecte 2 mails avec le même timestamp) ou si received_at du
+        # parent > 2 jours après la 1ère reply, c'est suspect. En réalité, on
+        # ne peut pas le détecter sans re-query SQL. À la place, on flagge
+        # tous les threads dont le parent est lui-même clairement une reply
+        # (heuristique : `Re:` en début de sujet).
+        parent = t["parent"]
+        subj = (parent.get("subject") or "").lower()
+        if subj.startswith("re:") or subj.startswith("re :"):
+            # Parent est une reply, mais sans parent visible → marque "thread partiel"
+            t["partial_thread"] = True
+        else:
+            t["partial_thread"] = False
 
     threads = list(threads_dict.values()) + orphans
     # Tri global par date du mail le plus récent DESC

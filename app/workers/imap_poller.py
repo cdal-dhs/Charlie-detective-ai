@@ -1425,7 +1425,11 @@ async def _process_single_mail(
         )
 
         dossier_id = derive_dossier_id_threading(subject, body, sender)
-        thread_id = compute_thread_id(dossier_id, sender)
+        # v1.29.0.7 — passe `subject` à compute_thread_id pour que les mails
+        # `adhoc::unknown::*` (sender vide / pas de dossier) ne soient plus
+        # tous dans le même thread fourre-tout (cf. bug 207 mails dans
+        # 'adhoc::unknown::50d8b4a9' avant le fix).
+        thread_id = compute_thread_id(dossier_id, sender, subject)
 
         is_dup, original_id = await asyncio.to_thread(
             is_logical_duplicate,

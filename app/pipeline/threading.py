@@ -124,22 +124,38 @@ def derive_dossier_id_threading(subject: str, body: str, sender: str) -> str:
     return hashlib.sha1(key).hexdigest()[:16]
 
 
-def compute_thread_id(dossier_id: str, sender: str) -> str:
+def compute_thread_id(dossier_id: str, sender: str, subject: str = "") -> str:
     """Calcule un identifiant de fil de discussion stable.
 
     - Si dossier_id non-vide : 'dossier_id::sender_normalized'
-    - Sinon : 'adhoc::sender_normalized::hash8' (jamais None, jamais vide)
+    - Sinon : 'adhoc::sender_normalized::hash12' (jamais None, jamais vide)
 
-    Stabilité garantie : même (dossier_id, sender) → même thread_id.
+    Stabilité garantie : même (dossier_id, sender[, subject]) → même thread_id.
+
+    v1.29.0.7 — FIX BUG P0 : le hash adhoc inclut MAINTENANT le subject
+    normalisé (pas seulement le sender). AVANT : un client qui envoie 10
+    mails SANS dossier explicite (sender "unknown" / dossier_id vide)
+    se retrouvait avec thread_id='adhoc::unknown::50d8b4a9' pour TOUS,
+    regroupant 207 mails dans un même fil fourre-tout → le cockpit
+    affichait le 1er mail (id=63) comme parent + les 206 autres comme
+    "replies" invisibles, mais avec LIMIT 1000 on ne voyait que les
+    1000 derniers → reply fantôme sans parent visible.
+
+    APRÈS : hash12 = sha1(sender_n|subject_n)[:12] → 2 mails même sender
+    même subject normalisé (Re: truc et Re: truc) = même fil (légitime).
+    2 mails même sender sujet DIFFÉRENT = fils DIFFÉRENTS (cas normal).
     """
     sender_n = normalize_sender(sender or "")
     if not sender_n:
         sender_n = "unknown"
     if dossier_id:
         return f"{dossier_id}::{sender_n}"
-    # Adhoc : un client qui envoie 2 mails SANS dossier explicite doit quand
-    # même pouvoir être groupé si le sujet normalisé matche.
-    adhoc_hash = hashlib.sha1(sender_n.encode("utf-8")).hexdigest()[:8]
+    # Adhoc : un client qui envoie 2 mails SANS dossier mais MÊME sujet
+    # normalisé doit être groupé (Re: truc et Re: truc = même fil).
+    # Mais 2 mails MÊME sender SUJET DIFFÉRENT = 2 fils séparés.
+    subject_n = normalize_subject(subject or "")
+    adhoc_key = f"{sender_n}|{subject_n}".encode("utf-8")
+    adhoc_hash = hashlib.sha1(adhoc_key).hexdigest()[:12]
     return f"adhoc::{sender_n}::{adhoc_hash}"
 
 
