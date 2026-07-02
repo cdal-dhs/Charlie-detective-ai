@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
+from app import __version__
 from app.cerveau_client import feed_document, get_backup_status
 from app.config import MailboxConfig, get_settings
 from app.delivery.slack_notifier import send_slack_message
@@ -25,6 +26,8 @@ from app.web.utils import FernetManager, audit_log
 log = structlog.get_logger()
 router = APIRouter(prefix="/admin", tags=["admin"])
 templates = Jinja2Templates(directory="app/web/templates")
+# v1.29.0.3 — expose la version courante à TOUS les templates automatiquement
+templates.env.globals["app_version"] = __version__
 
 _SETTINGS_KEYS = [
     "llm_provider",

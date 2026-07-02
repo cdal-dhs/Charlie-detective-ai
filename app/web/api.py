@@ -26,6 +26,8 @@ from app.web.utils import audit_log
 log = structlog.get_logger()
 router = APIRouter(prefix="/api", tags=["api"])
 templates = Jinja2Templates(directory="app/web/templates")
+# v1.29.0.3 — expose la version courante à TOUS les templates automatiquement
+templates.env.globals["app_version"] = __version__
 
 # Masquer les mails traités avant le 15/05/2026 (pré-prod)
 _CUTOFF_DATE = "2026-05-20"

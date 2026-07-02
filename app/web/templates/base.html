@@ -54,8 +54,14 @@
         </div>
     </div>
     <div id="toast-container" class="fixed bottom-4 right-4 space-y-2 z-50"></div>
-    {% if version %}
-    <div class="fixed bottom-2 left-2 text-xs text-gray-400 bg-gray-900/80 px-2 py-1 rounded z-50 select-none border border-gray-700">v{{ version }}</div>
-    {% endif %}
+    {# v1.29.0.3 — badge version TOUJOURS visible (côté sidebar gauche, en bas).
+       Utilise `app_version` (Jinja2 global injecté par chaque instance
+       Jinja2Templates via templates.env.globals["app_version"] = __version__).
+       Fallback sur `version` au cas où (rétrocompat routes qui la passent). #}
+    <div class="fixed bottom-2 left-2 z-50 select-none">
+        <div class="text-xs text-gray-400 bg-gray-900/80 px-2 py-1 rounded border border-gray-700">
+            v{{ app_version or version or '?.?.?' }}
+        </div>
+    </div>
 </body>
 </html>

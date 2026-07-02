@@ -16,6 +16,8 @@ from app.web.deps import get_db, require_operator
 log = structlog.get_logger()
 router = APIRouter(prefix="/app", tags=["app"])
 templates = Jinja2Templates(directory="app/web/templates")
+# v1.29.0.3 — expose la version courante à TOUS les templates automatiquement
+templates.env.globals["app_version"] = __version__
 
 # Masquer les mails traités avant le 20/05/2026 (démarrage propre du poller)
 _CUTOFF_DATE = "2026-05-20"

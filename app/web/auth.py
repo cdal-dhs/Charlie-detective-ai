@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
+from app import __version__
 from app.config import get_settings
 from app.web.deps import get_db, rate_limit
 from app.web.utils import audit_log
@@ -17,6 +18,9 @@ from app.web.utils import audit_log
 log = structlog.get_logger()
 router = APIRouter()
 templates = Jinja2Templates(directory="app/web/templates")
+# v1.29.0.3 — expose la version courante à TOUS les templates automatiquement
+# (évite d'avoir à la passer manuellement dans chaque TemplateResponse).
+templates.env.globals["app_version"] = __version__
 
 RESEND_ENDPOINT = "https://api.resend.com/emails"
 
@@ -217,7 +221,12 @@ async def verify(
         request.headers.get("user-agent"),
     )
 
-    redirect_url = "/admin" if user["role"] == "super_admin" else "/app"
+    # v1.29.0.3 — redirection post-login : TOUJOURS Inbox (/app) par défaut.
+    # Avant : super_admin → /admin, operator → /app. CDAL veut atterrir
+    # sur l'Inbox systématiquement (le Dashboard reste accessible via
+    # le lien sidebar "Dashboard"). L'UX attendue = "j'ouvre, je vois
+    # mes mails" sans détour.
+    redirect_url = "/app"
     return RedirectResponse(url=redirect_url, status_code=302)
 
 
