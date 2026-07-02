@@ -145,6 +145,21 @@ async def _fetch_mails(
 
     col = _SORTABLE_COLS.get(sort_col, "processed_at")
     order = "DESC" if sort_order.lower() == "desc" else "ASC"
+    # v1.30.0.2 — TRI PRIORITAIRE INCONDITIONNEL pour Daniel.
+    # Quel que soit le filtre (boîte, catégorie, statut, vue Fils/Brute/Doublons)
+    # ou le tri choisi par l'utilisateur (date/sujet/etc.) : les demande_client
+    # pending sont TOUJOURS en premier. C'est le flux de travail de Daniel — il
+    # doit voir ce qu'il a à traiter avant tout le reste, jamais dispersés dans
+    # la liste. Le tri utilisateur (col + order) s'applique en 2e niveau.
+    priority_order = (
+        "(CASE "
+        "WHEN category = 'demande_client' AND priority = 'high' AND (status = 'pending' OR status IS NULL) THEN 0 "
+        "WHEN category = 'demande_client' AND (status = 'pending' OR status IS NULL) THEN 1 "
+        "WHEN category = 'urgent' AND (status = 'pending' OR status IS NULL) THEN 2 "
+        "WHEN (status = 'pending' OR status IS NULL) THEN 3 "
+        "ELSE 4 "
+        "END)"
+    )
     cols = [
         "id",
         "mailbox_name",
@@ -204,7 +219,7 @@ async def _fetch_mails(
         "CASE WHEN IFNULL(LENGTH(m.ai_draft), 0) > 0 THEN 1 ELSE 0 END AS has_draft, "
         "m.suggested_subject, m.thread_id "
         "FROM mail_processed m WHERE " + " AND ".join(hot_where) + " "
-        f"ORDER BY {col} {order} LIMIT ?"
+        f"ORDER BY {priority_order}, {col} {order} LIMIT ?"
     )
     hot_params = params.copy()
     hot_params.append(limit)
@@ -223,7 +238,7 @@ async def _fetch_mails(
         "CASE WHEN IFNULL(LENGTH(m.ai_draft), 0) > 0 THEN 1 ELSE 0 END AS has_draft, "
         "m.suggested_subject, m.thread_id "
         "FROM mail_processed m WHERE " + " AND ".join(other_where) + " "
-        f"ORDER BY (m.status = 'pending') DESC, (m.priority = 'high') DESC, {col} {order} LIMIT ?"
+        f"ORDER BY {priority_order}, {col} {order} LIMIT ?"
     )
     other_params = params.copy()
     other_params.append(limit)

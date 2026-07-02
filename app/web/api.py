@@ -193,6 +193,18 @@ async def _fetch_mails_partial(
 
     col = _SORTABLE_COLS.get(sort_col, "processed_at")
     order = "DESC" if sort_order.lower() == "desc" else "ASC"
+    # v1.30.0.2 — TRI PRIORITAIRE INCONDITIONNEL pour Daniel.
+    # Les demande_client pending sont TOUJOURS en premier, peu importe les
+    # filtres / vue / tri utilisateur. Cohérence avec _fetch_mails de app_routes.py.
+    priority_order = (
+        "(CASE "
+        "WHEN category = 'demande_client' AND priority = 'high' AND (status = 'pending' OR status IS NULL) THEN 0 "
+        "WHEN category = 'demande_client' AND (status = 'pending' OR status IS NULL) THEN 1 "
+        "WHEN category = 'urgent' AND (status = 'pending' OR status IS NULL) THEN 2 "
+        "WHEN (status = 'pending' OR status IS NULL) THEN 3 "
+        "ELSE 4 "
+        "END)"
+    )
     cols = [
         "id",
         "mailbox_name",
@@ -228,7 +240,7 @@ async def _fetch_mails_partial(
         "(SELECT COUNT(*) FROM email_attachment WHERE mail_processed_id = m.id) AS attachment_count, "
         "m.ai_draft "
         "FROM mail_processed m WHERE " + " AND ".join(hot_where) + " "
-        f"ORDER BY {col} {order} LIMIT ?"
+        f"ORDER BY {priority_order}, {col} {order} LIMIT ?"
     )
     hot_params = params.copy()
     hot_params.append(limit)
@@ -246,7 +258,7 @@ async def _fetch_mails_partial(
         "(SELECT COUNT(*) FROM email_attachment WHERE mail_processed_id = m.id) AS attachment_count, "
         "m.ai_draft "
         "FROM mail_processed m WHERE " + " AND ".join(other_where) + " "
-        f"ORDER BY (m.status = 'pending') DESC, (m.priority = 'high') DESC, {col} {order} LIMIT ?"
+        f"ORDER BY {priority_order}, {col} {order} LIMIT ?"
     )
     other_params = params.copy()
     other_params.append(limit)
