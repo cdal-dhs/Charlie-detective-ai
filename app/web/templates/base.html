@@ -43,6 +43,14 @@
                 <a href="/auth/login" class="block px-3 py-2 rounded hover:bg-gray-800">Connexion</a>
                 {% endif %}
             </nav>
+            {# v1.29.0.4 — badge version INTÉGRÉ dans la sidebar gauche.
+               Avant : fixed bottom-2 left-2 → caché SOUS la sidebar (256px de large).
+               Maintenant : DANS la sidebar, en bas, toujours visible. #}
+            <div class="px-4 py-2 border-t border-gray-800 select-none">
+                <div class="text-xs text-gray-500 text-center">
+                    v{{ app_version or version or '?.?.?' }}
+                </div>
+            </div>
         </aside>
         <div class="flex-1 flex flex-col">
             <header class="bg-gray-900 border-b border-gray-800 px-4 py-3 flex items-center justify-between md:hidden">
@@ -54,14 +62,8 @@
         </div>
     </div>
     <div id="toast-container" class="fixed bottom-4 right-4 space-y-2 z-50"></div>
-    {# v1.29.0.3 — badge version TOUJOURS visible (côté sidebar gauche, en bas).
-       Utilise `app_version` (Jinja2 global injecté par chaque instance
-       Jinja2Templates via templates.env.globals["app_version"] = __version__).
-       Fallback sur `version` au cas où (rétrocompat routes qui la passent). #}
-    <div class="fixed bottom-2 left-2 z-50 select-none">
-        <div class="text-xs text-gray-400 bg-gray-900/80 px-2 py-1 rounded border border-gray-700">
-            v{{ app_version or version or '?.?.?' }}
-        </div>
-    </div>
+    {# v1.29.0.4 — badge version désormais DANS la sidebar (voir bloc ci-dessus
+       dans <aside>). Plus de fixed-position overlay : il était caché par les
+       256px de la sidebar. #}
 </body>
 </html>
