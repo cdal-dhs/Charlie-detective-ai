@@ -1,5 +1,42 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.29.1] — 2026-07-02 (hourly check brouillon manquant + fix visuel replies cockpit)
+
+### Contexte
+- Certains mails `demande_client` arrivent en prod SANS brouillon (crash LLM transitoire, deadlock poller, etc.). Daniel doit pouvoir compter sur un rattrapage automatique sous l'heure.
+- Bug visuel signalé par CDAL sur le cockpit : la flèche `↳` et le bandeau `border-l-4` des lignes replies étaient quasi-invisibles (opacity 60% + gray-500 + 10px). Sur la 2ème ligne du tableau (1ère reply d'un fil), on ne distinguait ni le marqueur de fil ni la ligne verticale à gauche.
+
+### Ajouté
+- **`app/workers/hourly_draft_check.py`** : nouveau worker qui tourne toutes les heures (10 min après le boot). Cycle :
+  1. Query `category='demande_client' AND status='pending' AND IFNULL(ai_draft, '')='' AND draft_generated=0 AND processed_at >= now()-7j` (LIMIT 100, perf + scope).
+  2. Pour chaque candidat : re-check d'idempotence (au cas où le poller a généré entre temps) → `generate_draft()` (max 3 retries internes avec backoff 1s/2s/4s, timeout 60s par tentative) → `append_draft()` (header `X-Detective-Mail-Id` v1.25.22) → UPDATE DB (`ai_draft` + `draft_generated=1`).
+  3. 1 seule connexion IMAP par mailbox par cycle (perf + évite rejet Infomaniak "connexions simultanées").
+- **Wiring dans `app/main.py`** : nouvelle task asyncio `hourly-draft-check` lancée en parallèle du poller, réconcilieur, soul evolver, etc. Mêmes patterns d'arrêt propre.
+- **`tests/test_hourly_draft_check.py`** : 12 tests TDD couvrant tous les cas de figure (scope 7j, exclusion non-demande_client, exclusion draft_generated=1, max 3 retries, idempotence pre-APPEND, mise à jour DB succès, no-op si 0 candidat, end-to-end mock LLM+IMAP).
+
+### Changé
+- **`app/web/templates/app/inbox_rows.html`** (lignes 103-107) : la 1ère cellule des lignes replies passe de
+  - `border-l-4 border-l-purple-500/60` (opacity 60%, invisible)
+  - flèche `↳` en `text-gray-500 text-[10px]`
+  à
+  - `border-l-4 border-l-purple-400 bg-purple-500/10` (opacité 100% + fond léger)
+  - flèche `↳` en `text-purple-300 text-base font-bold` (visible, lisible, ratio I/ligne clair).
+- **Tests de schéma** dans `tests/test_web_inbox_render.py` et `tests/test_web_inbox_suggested_subject.py` : ajout des colonnes threading v1.29.0 (`message_id`, `in_reply_to`, `references` (entre guillemets car mot-clé SQL), `dossier_id`, `thread_id`, `thread_subject`) + `duplicate_of` v1.29.0.6 — les fixtures de test utilisaient encore le schéma d'avant v1.29.0 et bloquaient l'exécution des routes inbox.
+
+### Fixé
+- **Bug visuel `↳`/`border-l-4` invisibles** sur la 1ère reply d'un fil (cf. contexte, screenshot CDAL 2026-07-01).
+- **Régressions tests** post-v1.29.0.7 (5 tests) : schéma threading manquant dans 2 fixtures de test web.
+
+### Non-régression
+- 433 tests verts, 3 fail préexistants non liés au chantier :
+  - 2× `test_mission_dated_draft` : flaky test sur la date — la date cible 02/07 (CDAL = aujourd'hui WITA) est dépassée côté Mac (timezone locale différente).
+  - 1× `test_inbox_rows_show_draft_badge` : test pointe sur `/api/inbox` (route supprimée avant v1.29.0), reliquat obsolète.
+
+### Différence vs drafts_reconciler (15 min)
+- **Réconcilieur (15 min)** : mails `draft_generated=1` MAIS `delivered_at IS NULL` (brouillon généré mais pas APPENDé physiquement).
+- **Hourly check (60 min)** : mails `draft_generated=0` ET `ai_draft=''` (pas de brouillon du tout, rattrapage en amont).
+- Les 2 sont complémentaires : le réconcilieur gère les crashs IMAP, l'hourly check gère les crashs LLM/poller avant la génération.
+
 ## [1.29.0] — 2026-07-01 (fil de discussion cockpit inbox — groupement parent + replies)
 
 ### Contexte

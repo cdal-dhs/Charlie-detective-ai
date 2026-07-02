@@ -54,6 +54,15 @@ def _make_db(tmp_path: Path) -> Path:
             body TEXT,
             delivered_at TEXT,
             suggested_subject TEXT,
+            -- v1.29.0 — threading columns
+            message_id TEXT,
+            in_reply_to TEXT,
+            "references" TEXT,
+            dossier_id TEXT,
+            thread_id TEXT,
+            thread_subject TEXT,
+            -- v1.29.0.6 — dedup column
+            duplicate_of INTEGER,
             UNIQUE(imap_uid, mailbox_name)
         )
         """

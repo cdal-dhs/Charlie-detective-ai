@@ -15,6 +15,7 @@ from app.web.app import run_web_server
 from app.web.db_migrate import migrate
 from app.workers.disk_watcher import watch_disk
 from app.workers.drafts_reconciler import watch_drafts
+from app.workers.hourly_draft_check import run_hourly_check_loop
 from app.workers.imap_poller import cleanup_old_attachments, poll_mailbox
 
 SOUL_EVOLVE_INTERVAL_HOURS = 72  # 3 jours
@@ -65,6 +66,9 @@ async def main() -> None:
     disk_task = asyncio.create_task(watch_disk(stop_event), name="disk-watcher")
     att_task = asyncio.create_task(run_attachment_cleanup(stop_event), name="attachment-cleanup")
     reconcile_task = asyncio.create_task(watch_drafts(stop_event), name="drafts-reconciler")
+    # v1.29.1 — hourly check : regénère un brouillon pour les demande_client pending
+    # qui n'ont pas de proposition (rattrapage auto en cas de crash LLM/deadlock poller).
+    hourly_task = asyncio.create_task(run_hourly_check_loop(stop_event), name="hourly-draft-check")
 
     await stop_event.wait()
     log.info("agent.stop_requested")
@@ -75,10 +79,10 @@ async def main() -> None:
     except Exception as e:
         log.warning("agent.shutdown_notify_failed", error=str(e))
 
-    for task in [*poller_tasks, web_task, soul_task, disk_task, att_task, reconcile_task]:
+    for task in [*poller_tasks, web_task, soul_task, disk_task, att_task, reconcile_task, hourly_task]:
         task.cancel()
     await asyncio.gather(
-        *poller_tasks, web_task, soul_task, disk_task, att_task, reconcile_task,
+        *poller_tasks, web_task, soul_task, disk_task, att_task, reconcile_task, hourly_task,
         return_exceptions=True,
     )
     log.info("agent.stopped")

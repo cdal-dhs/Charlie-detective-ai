@@ -26,7 +26,12 @@ def _make_db(tmp_path: Path) -> Path:
             human_draft TEXT, reviewed_by INTEGER, reviewed_at DATETIME,
             sent_at DATETIME, sent_by INTEGER,
             body_preview TEXT, body TEXT, reply_to TEXT, suggested_subject TEXT,
-            delivered_at TEXT
+            delivered_at TEXT,
+            -- v1.29.0 — threading columns
+            message_id TEXT, in_reply_to TEXT, "references" TEXT,
+            dossier_id TEXT, thread_id TEXT, thread_subject TEXT,
+            -- v1.29.0.6 — dedup column
+            duplicate_of INTEGER
         )
         """
     )

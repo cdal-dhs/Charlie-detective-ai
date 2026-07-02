@@ -101,8 +101,8 @@
   {% set effective_status = reply.status or 'pending' %}
   {% set is_dup = (reply.status == 'duplicate') %}
   <tr class="border-b border-gray-800/50 bg-gray-900/30 {% if is_dup %}opacity-60{% endif %}">
-    <td class="px-2 py-2 whitespace-nowrap w-12 text-center text-xs font-medium border-l-4 border-l-purple-500/60">
-      <span class="text-gray-500 text-[10px]" title="Reply du fil {{ t.thread_id[:12] }}…">↳</span>
+    <td class="px-2 py-2 whitespace-nowrap w-12 text-center text-xs font-medium border-l-4 border-l-purple-400 bg-purple-500/10">
+      <span class="text-purple-300 text-base font-bold" title="Reply du fil {{ t.thread_id[:12] }}…">↳</span>
       <span class="text-gray-400 ml-1">{{ box_short.get(reply.mailbox_name, reply.mailbox_name or '-') }}</span>
     </td>
     <td class="px-3 py-2 max-w-md">
