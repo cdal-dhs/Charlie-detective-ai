@@ -43,6 +43,19 @@ def make_app() -> FastAPI:
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        # v1.30.0.1 — anti-cache navigateur forcé sur TOUTES les réponses HTML.
+        # Symptôme signalé par CDAL : badge version sidebar gardait l'ancienne valeur
+        # (v1.29.1) même après hard refresh et `git pull` + restart conteneur.
+        # Le HTML est rendu dynamiquement par Jinja2 à chaque requête, aucun mécanisme
+        # de cache serveur — c'est forcément un cache navigateur agressif.
+        # On force `no-store, must-revalidate` sur tout ce qui n'est pas API JSON
+        # ni statique. Le cockpit est authentifié, c'est toujours dynamique.
+        content_type = response.headers.get("content-type", "")
+        path = request.url.path
+        if "text/html" in content_type or (not content_type and not path.startswith(("/health", "/api/", "/static/"))):
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
         return response
 
     @app.get("/health")
