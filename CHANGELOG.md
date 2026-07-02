@@ -1,5 +1,26 @@
 # Changelog Charlie AI — Detective.be
 
+## [1.30.0.10] — 2026-07-02 (CSS inbox : colonnes 8 tiennent dans 1280px viewport)
+
+### Contexte
+- CDAL a observé que sur 1280px viewport (sidebar 256px + table = 1024px utiles), la table inbox 8 colonnes débordait horizontalement (overflow-x scroll) — les 2 dernières colonnes (Priorité + Date) étaient coupées/cachées.
+- Calcul budget 8 colonnes : 48 (Boîte) + 240 (Sujet) + 32 (PJ) + 120 (Expéditeur) + 112 (Catégorie) + 96 (Statut) + 80 (Priorité) + 80 (Date) + padding ≈ 904px. Avant le fix : 48 + 448 (max-w-md Sujet) + 32 + 140 + 128 + 112 + 96 + 96 + padding ≈ 1216px → overflow 192px.
+
+### Fixé
+- **`app/web/templates/app/inbox_rows.html`** :
+  - Colonne Sujet (parent + reply parent thread) : `max-w-md` (448px) → `max-w-[240px]`. Padding `px-3` → `px-2` (gain 4px x 2 cellules).
+  - Colonne Expéditeur (mail + parent + reply) : `max-w-[140px]` → `max-w-[120px]`.
+  - Colonne Catégorie (mail + parent) : `w-32` (128px) → `w-28` (112px).
+  - Colonne Priorité (mail + parent) : `w-24` (96px) → `w-20` (80px).
+  - Colonne Date (mail + parent) : `w-24` (96px) → `w-20` (80px).
+  - Replies (enfilées) : Sujet `max-w-md` → `max-w-[240px]`, Expéditeur `max-w-[140px]` → `max-w-[120px]`, padding `px-3` → `px-2` sur le Sujet reply.
+- **`app/web/templates/app/inbox.html`** (header `<th>` matching) : Sujet `px-3` → `px-2 max-w-[240px]`, Expéditeur `max-w-[140px]` → `max-w-[120px]`, Catégorie `w-32` → `w-28`, Statut `w-28` → `w-24`, Priorité `w-24` → `w-20`, Date `w-24` → `w-20`.
+
+### Comportement
+- 8 colonnes visibles intégralement sur 1280px viewport (1024px table area après sidebar 256px).
+- Total budget colonnes (240 Sujet + 120 Expéditeur + 112 Catégorie + 96 Statut + 80 Priorité + 80 Date + 48 Boîte + 32 PJ = 808px + padding ≈ 904px) → 120px de marge sous le budget.
+- Aucune régression fonctionnelle : seuls les `max-w-*` ont été réduits (texte tronqué via `truncate`), les `<select>` et l'icône PJ conservent leur rendu.
+
 ## [1.30.0.9] — 2026-07-02 (worklist "Toutes" masque la bande OTHER)
 
 ### Contexte

@@ -22,7 +22,7 @@
       <span class="text-gray-400">{{ box_short.get(m.mailbox_name, m.mailbox_name or '-') }}</span>
     {% endif %}
   </td>
-  <td class="px-3 py-3 max-w-md">
+  <td class="px-2 py-3 max-w-[240px]">
     <a href="/app/conversation/{{ m.id }}" class="text-blue-400 hover:underline truncate block">{{ m.subject or '(sans sujet)' }}</a>
   </td>
   <td class="px-1 py-3 w-8 text-center">
@@ -30,8 +30,8 @@
     <span class="text-gray-400" title="{{ m.attachment_count }} pièce(s) jointe(s)">📎</span>
     {% endif %}
   </td>
-  <td class="px-2 py-3 max-w-[140px] truncate text-gray-400">{{ m.sender or '-' }}</td>
-  <td class="px-2 py-3 w-32">
+  <td class="px-2 py-3 max-w-[120px] truncate text-gray-400">{{ m.sender or '-' }}</td>
+  <td class="px-2 py-3 w-28">
     <form
       class="inline"
       hx-post="/api/mails/{{ m.id }}/category"
@@ -51,7 +51,7 @@
       </select>
     </form>
   </td>
-  <td class="px-2 py-3 w-28">
+  <td class="px-2 py-3 w-20">
     <form
       class="inline"
       hx-post="/api/mails/{{ m.id }}/status"
@@ -68,7 +68,7 @@
       </select>
     </form>
   </td>
-  <td class="px-2 py-3 w-24">
+  <td class="px-2 py-3 w-20">
     <form
       class="flex items-center gap-1"
       hx-post="/api/mails/{{ m.id }}/priority"
@@ -84,7 +84,7 @@
       </select>
     </form>
   </td>
-  <td class="px-2 py-3 whitespace-nowrap text-xs text-gray-400 w-24">{{ m.processed_at or '-' }}</td>
+  <td class="px-2 py-3 whitespace-nowrap text-xs text-gray-400 w-20">{{ m.processed_at or '-' }}</td>
 </tr>
 {% endmacro %}
 
@@ -110,7 +110,7 @@
         <span class="text-gray-400">{{ box_short.get(parent.mailbox_name, parent.mailbox_name or '-') }}</span>
       {% endif %}
     </td>
-    <td class="px-3 py-3 max-w-md">
+    <td class="px-2 py-3 max-w-[240px]">
       <div class="flex items-center gap-2">
         <a href="/app/conversation/{{ parent.id }}" class="text-blue-400 hover:underline truncate flex-1">{{ parent.subject or '(sans sujet)' }}</a>
         {# v1.29.1 — marqueur de fil à droite du sujet parent : "N replies" en pilule violette.
@@ -126,8 +126,8 @@
       <span class="text-gray-400" title="{{ parent.attachment_count }} pièce(s) jointe(s)">📎</span>
       {% endif %}
     </td>
-    <td class="px-2 py-3 max-w-[140px] truncate text-gray-400">{{ parent.sender or '-' }}</td>
-    <td class="px-2 py-3 w-32">
+    <td class="px-2 py-3 max-w-[120px] truncate text-gray-400">{{ parent.sender or '-' }}</td>
+    <td class="px-2 py-3 w-28">
       <form
         class="inline"
         hx-post="/api/mails/{{ parent.id }}/category"
@@ -164,7 +164,7 @@
         </select>
       </form>
     </td>
-    <td class="px-2 py-3 w-24">
+    <td class="px-2 py-3 w-20">
       <form
         class="flex items-center gap-1"
         hx-post="/api/mails/{{ parent.id }}/priority"
@@ -180,7 +180,7 @@
         </select>
       </form>
     </td>
-    <td class="px-2 py-3 whitespace-nowrap text-xs text-gray-400 w-24">{{ parent.processed_at or '-' }}</td>
+    <td class="px-2 py-3 whitespace-nowrap text-xs text-gray-400 w-20">{{ parent.processed_at or '-' }}</td>
   </tr>
   {# Replies enfilées, indentées, badge compteur #}
   {% for reply in t.replies %}
@@ -195,7 +195,7 @@
       {% endif %}
       <span class="text-gray-400 ml-1">{{ box_short.get(reply.mailbox_name, reply.mailbox_name or '-') }}</span>
     </td>
-    <td class="px-3 py-2 max-w-md">
+    <td class="px-2 py-2 max-w-[240px]">
       <a href="/app/conversation/{{ reply.id }}" class="text-blue-400/80 hover:underline truncate block text-sm {% if is_dup %}line-through{% endif %}">
         {{ reply.subject or '(sans sujet)' }}
         {% if is_dup %}<span class="ml-1 text-[10px] text-gray-500">(doublon)</span>{% endif %}
@@ -204,7 +204,7 @@
     <td class="px-1 py-2 w-8 text-center">
       {% if reply.attachment_count %}<span class="text-gray-400" title="{{ reply.attachment_count }} PJ">📎</span>{% endif %}
     </td>
-    <td class="px-2 py-2 max-w-[140px] truncate text-gray-500 text-xs">{{ reply.sender or '-' }}</td>
+    <td class="px-2 py-2 max-w-[120px] truncate text-gray-500 text-xs">{{ reply.sender or '-' }}</td>
     <td class="px-2 py-2 w-32 text-xs text-gray-500">{{ reply.category or '-' }}</td>
     <td class="px-2 py-2 w-28 text-xs text-gray-500">{{ effective_status }}</td>
     <td class="px-2 py-2 w-24 text-xs text-gray-500">{{ reply.priority or '-' }}</td>
