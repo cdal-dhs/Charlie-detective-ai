@@ -1433,10 +1433,11 @@ async def _process_single_mail(
             sender,
             subject,
             received_at or datetime.utcnow().isoformat(),
-            # v1.29.0 — kwargs threading (rétrocompat : None par défaut)
-            thread_id,
-            message_id,
-            in_reply_to,
+            # v1.29.0 — kwargs threading en mode KEYWORD explicite
+            # (window_hours=48 par défaut dans dedup.py)
+            thread_id=thread_id,
+            message_id=message_id,
+            in_reply_to=in_reply_to,
         )
         if is_dup:
             log.info(

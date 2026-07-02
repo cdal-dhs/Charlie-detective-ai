@@ -371,3 +371,18 @@ def test_is_logical_duplicate_accepts_v1_29_threading_kwargs(db_with_mail: Path)
     )
     assert is_dup2 is False
     assert orig2 is None
+
+    # Variante POLLER : kwargs threading en mode keyword SANS window_hours
+    # (window_hours doit rester à 48 par défaut, pas être confondu avec
+    # thread_id positionnel — bug P0 du 2026-07-02 01:08 sur la prod).
+    is_dup3, orig3 = is_logical_duplicate(
+        db_with_mail,
+        "test@example.com",
+        "Test subject no-dup",
+        "2026-07-01T10:00:00",
+        thread_id="thread::abc",
+        message_id="<msg-id@host>",
+        in_reply_to="<parent@host>",
+    )
+    assert is_dup3 is False
+    assert orig3 is None

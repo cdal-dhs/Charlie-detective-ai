@@ -66,6 +66,12 @@ def is_logical_duplicate(
     sender: str,
     subject: str,
     received_at_iso: str,
+    # v1.29.0 — window_hours devient KWARG-ONLY (après les 4 positionnels
+    # historiques) pour éviter toute collision de positionnel avec les
+    # 3 kwargs threading ajoutés en queue de signature. Tout call site
+    # qui passait `window_hours=48` ou `window_hours=24` en keyword continue
+    # de marcher ; tout call site qui passait `48` en positionnel doit
+    # être migré (le poller v1.29.0 utilise des kwargs explicites).
     window_hours: int = 48,
     # v1.29.0 — kwargs threading (signature étendue rétrocompat 100%).
     # Pas encore utilisés dans la requête SQL (la dédup reste sur
