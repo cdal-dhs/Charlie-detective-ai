@@ -152,11 +152,9 @@ async def _fetch_mails(
     # apparaissait en hot band verte). Le user veut STRICTEMENT les high en vert.
     # Les priority='normal' pending vont en other band (où ils sont toujours
     # triés en tête par priority_order SQL, juste pas en cadre vert).
-    hot_where = where + [
-        "(category = 'demande_client' OR category = 'urgent')",
-        "(status = 'pending' OR status IS NULL)",
+    base_where = base_where + [
         "priority = 'high'",
-    ] + hot_exclude_clauses
+    ]
     # Quel que soit le filtre (boîte, catégorie, statut, vue Fils/Brute/Doublons)
     # ou le tri choisi par l'utilisateur (date/sujet/etc.) : les demande_client
     # pending sont TOUJOURS en premier. C'est le flux de travail de Daniel — il
