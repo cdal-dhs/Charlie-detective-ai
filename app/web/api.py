@@ -228,10 +228,10 @@ async def _fetch_mails_partial(
         )
         return row_dict
 
-    # ── Requête 1 : HOT (demande_client + high + pending) ──
+    # ── Requête 1 : HOT (demande_client OU urgent, toutes priorités, pending) ──
+    # v1.30.0.3 — élargi : inclut TOUS les demande_client pending + urgent pending.
     hot_where = where + [
-        "category = 'demande_client'",
-        "priority = 'high'",
+        "(category = 'demande_client' OR category = 'urgent')",
         "(status = 'pending' OR status IS NULL)",
     ]
     hot_sql = (
@@ -250,7 +250,7 @@ async def _fetch_mails_partial(
 
     # ── Requête 2 : OTHER (tout sauf hot) ──
     other_where = where + [
-        "NOT (category = 'demande_client' AND priority = 'high' AND (status = 'pending' OR status IS NULL))"
+        "NOT ((category = 'demande_client' OR category = 'urgent') AND (status = 'pending' OR status IS NULL))"
     ]
     other_sql = (
         "SELECT m.id, m.mailbox_name, m.subject, m.sender, m.received_at, m.category, "

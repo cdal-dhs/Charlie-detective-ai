@@ -151,6 +151,8 @@ async def _fetch_mails(
     # pending sont TOUJOURS en premier. C'est le flux de travail de Daniel — il
     # doit voir ce qu'il a à traiter avant tout le reste, jamais dispersés dans
     # la liste. Le tri utilisateur (col + order) s'applique en 2e niveau.
+    # v1.30.0.3 — élargi : inclut urgent pending (catégorie intermédiaire entre
+    # demande_client et le reste du backlog).
     priority_order = (
         "(CASE "
         "WHEN category = 'demande_client' AND priority = 'high' AND (status = 'pending' OR status IS NULL) THEN 0 "
@@ -206,10 +208,11 @@ async def _fetch_mails(
             row_dict["subject"] = row_dict["suggested_subject"]
         return row_dict
 
-    # ── Requête 1 : HOT (demande_client + high + pending) ──
+    # ── Requête 1 : HOT (demande_client OU urgent, toutes priorités, pending) ──
+    # v1.30.0.3 — élargi : inclut TOUS les demande_client pending (pas seulement high)
+    # + tous les urgent pending. C'est le backlog de travail de Daniel.
     hot_where = where + [
-        "category = 'demande_client'",
-        "priority = 'high'",
+        "(category = 'demande_client' OR category = 'urgent')",
         "(status = 'pending' OR status IS NULL)",
     ]
     hot_sql = (
@@ -229,7 +232,7 @@ async def _fetch_mails(
 
     # ── Requête 2 : OTHER (tout sauf hot) ──
     other_where = where + [
-        "NOT (category = 'demande_client' AND priority = 'high' AND (status = 'pending' OR status IS NULL))"
+        "NOT ((category = 'demande_client' OR category = 'urgent') AND (status = 'pending' OR status IS NULL))"
     ]
     other_sql = (
         "SELECT m.id, m.mailbox_name, m.subject, m.sender, m.received_at, m.category, "
